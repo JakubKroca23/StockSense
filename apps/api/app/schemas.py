@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.models import (
     AssetClass,
+    ChatSessionStatus,
     DataQuality,
     FeedbackResult,
     RiskProfile,
@@ -158,6 +159,7 @@ class UserSettingsUpdate(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     symbol: str | None = None
+    session_id: int | None = None
 
 
 class ChatMessageOut(ORMModel):
@@ -165,6 +167,35 @@ class ChatMessageOut(ORMModel):
     role: str
     content: str
     created_at: datetime
+    session_id: int | None = None
+
+
+class ChatSessionOut(ORMModel):
+    id: int
+    title: str
+    symbol: str | None = None
+    status: ChatSessionStatus
+    preview: str | None = None
+    message_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ChatSessionCreate(BaseModel):
+    title: str | None = None
+    symbol: str | None = None
+
+
+class ChatSessionUpdate(BaseModel):
+    title: str | None = None
+    symbol: str | None = None
+    status: ChatSessionStatus | None = None
+
+
+class ChatTurnOut(BaseModel):
+    session: ChatSessionOut
+    user_message: ChatMessageOut
+    assistant_message: ChatMessageOut
 
 
 class ReportOut(ORMModel):

@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +10,8 @@ from app.core.database import get_db
 from app.models import (
     Alert,
     ChatMessage,
+    ChatSession,
+    ChatSessionStatus,
     PortfolioPosition,
     PriceBar,
     Report,
@@ -22,6 +26,10 @@ from app.schemas import (
     AlertOut,
     ChatMessageOut,
     ChatRequest,
+    ChatSessionCreate,
+    ChatSessionOut,
+    ChatSessionUpdate,
+    ChatTurnOut,
     HomeOut,
     InstrumentOut,
     MacroPointOut,
@@ -380,6 +388,22 @@ async def tip_feedback(
     return TipFeedbackOut.model_validate(fb)
 
 
+@router.get("/instruments/search")
+async def instruments_search(
+    q: str = "",
+    limit: int = 10,
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.instruments import ensure_discovery_universe, search_instruments
+
+    if len(q.strip()) < 1:
+        return []
+    # Ensure seed universe exists for first-time autocomplete
+    await ensure_discovery_universe(db)
+    return await search_instruments(db, q, limit=min(max(limit, 1), 20))
+
+
 @router.get("/instruments/{symbol}")
 async def instrument_detail(
     symbol: str,
@@ -465,12 +489,16 @@ async def macro(
     return out
 
 
-@router.post("/chat", response_model=ChatMessageOut)
+@router.post("/chat", response_model=ChatTurnOut)
 async def chat(
     payload: ChatRequest,
     user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    session = await _resolve_chat_session(db, user.id, payload.session_id, payload.symbol)
+    if payload.symbol:
+        session.symbol = payload.symbol.upper()
+
     context_parts: list[str] = []
     if payload.symbol:
         from app.models import Instrument
@@ -512,35 +540,211 @@ async def chat(
             + "; ".join(f"{t.instrument.symbol}:{t.action.value}:{t.score}" for t in tips)
         )
 
-    user_msg = ChatMessage(user_id=user.id, role="user", content=payload.message)
+    user_msg = ChatMessage(
+        user_id=user.id, session_id=session.id, role="user", content=payload.message
+    )
     db.add(user_msg)
     await db.flush()
 
+    if session.title in {"Nový chat", "Starší konverzace"} or session.message_count == 0:
+        session.title = _title_from_message(payload.message, session.symbol)
+
     answer = await llm_complete(
-        payload.message,
+        (
+            f"{payload.message}\n\n"
+            "Odpověz ve strukturovaném markdownu se sekcemi ## Shrnutí, ## Analýza, "
+            "## Pre-závěr a ## Rizika. Buď stručný a přehledný."
+        ),
         task=LLMTask.heavy if payload.symbol or "tip" in payload.message.lower() else LLMTask.light,
         context="\n".join(context_parts),
     )
-    assistant = ChatMessage(user_id=user.id, role="assistant", content=answer)
+    assistant = ChatMessage(
+        user_id=user.id, session_id=session.id, role="assistant", content=answer
+    )
     db.add(assistant)
+
+    session.message_count = int(session.message_count or 0) + 2
+    session.preview = (answer or payload.message)[:280]
+    if session.status == ChatSessionStatus.closed:
+        session.status = ChatSessionStatus.open
+    session.updated_at = datetime.now(timezone.utc)
+
     await db.commit()
+    await db.refresh(user_msg)
     await db.refresh(assistant)
-    return ChatMessageOut.model_validate(assistant)
+    await db.refresh(session)
+    return ChatTurnOut(
+        session=ChatSessionOut.model_validate(session),
+        user_message=ChatMessageOut.model_validate(user_msg),
+        assistant_message=ChatMessageOut.model_validate(assistant),
+    )
+
+
+@router.get("/chat/sessions", response_model=list[ChatSessionOut])
+async def list_chat_sessions(
+    include_closed: bool = False,
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _migrate_orphan_messages(db, user.id)
+    q = select(ChatSession).where(ChatSession.user_id == user.id)
+    if not include_closed:
+        q = q.where(ChatSession.status != ChatSessionStatus.closed)
+    rows = (await db.execute(q.order_by(ChatSession.updated_at.desc()).limit(100))).scalars().all()
+    return [ChatSessionOut.model_validate(r) for r in rows]
+
+
+@router.post("/chat/sessions", response_model=ChatSessionOut)
+async def create_chat_session(
+    payload: ChatSessionCreate,
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    session = ChatSession(
+        user_id=user.id,
+        title=(payload.title or "Nový chat").strip()[:255] or "Nový chat",
+        symbol=payload.symbol.upper() if payload.symbol else None,
+        status=ChatSessionStatus.open,
+    )
+    db.add(session)
+    await db.commit()
+    await db.refresh(session)
+    return ChatSessionOut.model_validate(session)
+
+
+@router.get("/chat/sessions/{session_id}", response_model=ChatSessionOut)
+async def get_chat_session(
+    session_id: int,
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    session = await _get_owned_session(db, user.id, session_id)
+    return ChatSessionOut.model_validate(session)
+
+
+@router.patch("/chat/sessions/{session_id}", response_model=ChatSessionOut)
+async def update_chat_session(
+    session_id: int,
+    payload: ChatSessionUpdate,
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    session = await _get_owned_session(db, user.id, session_id)
+    if payload.title is not None:
+        title = payload.title.strip()[:255]
+        if title:
+            session.title = title
+    if payload.symbol is not None:
+        session.symbol = payload.symbol.upper() if payload.symbol.strip() else None
+    if payload.status is not None:
+        session.status = payload.status
+    session.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(session)
+    return ChatSessionOut.model_validate(session)
+
+
+@router.delete("/chat/sessions/{session_id}", status_code=204)
+async def delete_chat_session(
+    session_id: int,
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    session = await _get_owned_session(db, user.id, session_id)
+    await db.delete(session)
+    await db.commit()
 
 
 @router.get("/chat/history", response_model=list[ChatMessageOut])
 async def chat_history(
-    user: AuthUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+    session_id: int | None = None,
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    rows = (
+    await _migrate_orphan_messages(db, user.id)
+    q = select(ChatMessage).where(ChatMessage.user_id == user.id)
+    if session_id is not None:
+        await _get_owned_session(db, user.id, session_id)
+        q = q.where(ChatMessage.session_id == session_id)
+    else:
+        # Bez session_id vrať aktivní (open) session, jinak prázdno — UI si vybere
+        active = (
+            await db.execute(
+                select(ChatSession)
+                .where(ChatSession.user_id == user.id, ChatSession.status == ChatSessionStatus.open)
+                .order_by(ChatSession.updated_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if not active:
+            return []
+        q = q.where(ChatMessage.session_id == active.id)
+    rows = (await db.execute(q.order_by(ChatMessage.created_at.asc()).limit(200))).scalars().all()
+    return [ChatMessageOut.model_validate(r) for r in rows]
+
+
+def _title_from_message(message: str, symbol: str | None = None) -> str:
+    cleaned = " ".join(message.split())
+    if len(cleaned) > 64:
+        cleaned = cleaned[:61].rstrip() + "…"
+    if symbol and symbol.upper() not in cleaned.upper():
+        return f"{symbol.upper()}: {cleaned}"[:255]
+    return cleaned[:255] or "Nový chat"
+
+
+async def _get_owned_session(db: AsyncSession, user_id: str, session_id: int) -> ChatSession:
+    session = (
+        await db.execute(
+            select(ChatSession).where(ChatSession.id == session_id, ChatSession.user_id == user_id)
+        )
+    ).scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    return session
+
+
+async def _resolve_chat_session(
+    db: AsyncSession,
+    user_id: str,
+    session_id: int | None,
+    symbol: str | None,
+) -> ChatSession:
+    if session_id is not None:
+        return await _get_owned_session(db, user_id, session_id)
+    session = ChatSession(
+        user_id=user_id,
+        title="Nový chat",
+        symbol=symbol.upper() if symbol else None,
+        status=ChatSessionStatus.open,
+    )
+    db.add(session)
+    await db.flush()
+    return session
+
+
+async def _migrate_orphan_messages(db: AsyncSession, user_id: str) -> None:
+    orphans = (
         await db.execute(
             select(ChatMessage)
-            .where(ChatMessage.user_id == user.id)
-            .order_by(ChatMessage.created_at.desc())
-            .limit(50)
+            .where(ChatMessage.user_id == user_id, ChatMessage.session_id.is_(None))
+            .order_by(ChatMessage.created_at.asc())
         )
     ).scalars().all()
-    return [ChatMessageOut.model_validate(r) for r in reversed(rows)]
+    if not orphans:
+        return
+    first = orphans[0].content if orphans else "Starší konverzace"
+    session = ChatSession(
+        user_id=user_id,
+        title=_title_from_message(first) if first else "Starší konverzace",
+        status=ChatSessionStatus.saved,
+        preview=(orphans[-1].content[:280] if orphans else None),
+        message_count=len(orphans),
+    )
+    db.add(session)
+    await db.flush()
+    for msg in orphans:
+        msg.session_id = session.id
+    await db.commit()
 
 
 @router.get("/reports", response_model=list[ReportOut])

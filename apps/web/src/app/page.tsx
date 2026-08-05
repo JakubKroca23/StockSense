@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { SymbolAutocomplete } from "@/components/SymbolAutocomplete";
 import {
   HomeData,
   PortfolioPosition,
@@ -164,7 +165,7 @@ export default function HomePage() {
             ))}
           </div>
           <form onSubmit={addPosition} className="mt-4 grid grid-cols-3 gap-2">
-            <input className="input" placeholder="Symbol" value={symbol} onChange={(e) => setSymbol(e.target.value)} required />
+            <SymbolAutocomplete value={symbol} onChange={setSymbol} required placeholder="Symbol" />
             <input className="input" placeholder="Qty" value={qty} onChange={(e) => setQty(e.target.value)} required />
             <input className="input" placeholder="Avg cost" value={cost} onChange={(e) => setCost(e.target.value)} required />
             <button className="btn col-span-3" disabled={busy}>Přidat pozici</button>

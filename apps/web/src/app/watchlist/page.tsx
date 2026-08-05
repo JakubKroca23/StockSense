@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { SymbolAutocomplete } from "@/components/SymbolAutocomplete";
 import { AssetClass, Watchlist } from "@/lib/types";
 
 export default function WatchlistPage() {
@@ -49,7 +50,16 @@ export default function WatchlistPage() {
       </div>
       {error && <div className="card p-4 text-[var(--danger)]">{error}</div>}
       <form onSubmit={addItem} className="card p-4 grid gap-2 sm:grid-cols-[1fr_160px_auto]">
-        <input className="input" placeholder="Symbol (AAPL, BTC-USD…)" value={symbol} onChange={(e) => setSymbol(e.target.value)} required />
+        <SymbolAutocomplete
+          value={symbol}
+          onChange={(sym, suggestion) => {
+            setSymbol(sym);
+            if (suggestion?.asset_class) {
+              setAssetClass(suggestion.asset_class as AssetClass);
+            }
+          }}
+          required
+        />
         <select className="input" value={assetClass} onChange={(e) => setAssetClass(e.target.value as AssetClass)}>
           <option value="stock">Akcie</option>
           <option value="etf">ETF</option>

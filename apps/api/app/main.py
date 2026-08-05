@@ -18,9 +18,56 @@ settings = get_settings()
 scheduler = AsyncIOScheduler()
 
 
+async def _ensure_chat_schema(conn) -> None:
+    """create_all does not ALTER existing tables — patch chat sessions safely."""
+    await conn.execute(
+        text(
+            """
+            DO $$ BEGIN
+                CREATE TYPE chatsessionstatus AS ENUM ('open', 'minimized', 'saved', 'closed');
+            EXCEPTION
+                WHEN duplicate_object THEN NULL;
+            END $$;
+            """
+        )
+    )
+    await conn.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS chat_sessions (
+                id SERIAL PRIMARY KEY,
+                user_id VARCHAR(64) NOT NULL,
+                title VARCHAR(255) NOT NULL DEFAULT 'Nový chat',
+                symbol VARCHAR(32),
+                status chatsessionstatus NOT NULL DEFAULT 'open',
+                preview VARCHAR(280),
+                message_count INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ DEFAULT now(),
+                updated_at TIMESTAMPTZ DEFAULT now()
+            );
+            """
+        )
+    )
+    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_chat_sessions_user_id ON chat_sessions (user_id);"))
+    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_chat_sessions_status ON chat_sessions (status);"))
+    await conn.execute(
+        text(
+            """
+            ALTER TABLE chat_messages
+            ADD COLUMN IF NOT EXISTS session_id INTEGER
+            REFERENCES chat_sessions(id) ON DELETE CASCADE;
+            """
+        )
+    )
+    await conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_chat_messages_session_id ON chat_messages (session_id);")
+    )
+
+
 async def _init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await _ensure_chat_schema(conn)
     async with AsyncSessionLocal() as db:
         await ensure_discovery_universe(db)
 

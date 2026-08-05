@@ -100,6 +100,26 @@ export interface ChatMessage {
   role: string;
   content: string;
   created_at: string;
+  session_id?: number | null;
+}
+
+export type ChatSessionStatus = "open" | "minimized" | "saved" | "closed";
+
+export interface ChatSession {
+  id: number;
+  title: string;
+  symbol?: string | null;
+  status: ChatSessionStatus;
+  preview?: string | null;
+  message_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatTurn {
+  session: ChatSession;
+  user_message: ChatMessage;
+  assistant_message: ChatMessage;
 }
 
 export const actionLabel: Record<TipAction, string> = {

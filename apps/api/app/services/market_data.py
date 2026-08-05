@@ -78,13 +78,28 @@ class YFinanceProvider:
         import yfinance as yf
 
         ticker = yf.Ticker(symbol)
-        info = {}
+        info: dict = {}
         try:
             info = ticker.info or {}
         except Exception:
             info = {}
+
         price = info.get("regularMarketPrice") or info.get("currentPrice") or info.get("previousClose")
         change = info.get("regularMarketChangePercent")
+
+        # Yahoo often rate-limits `.info`; fall back to recent history for price.
+        if price is None:
+            try:
+                hist = ticker.history(period="5d", interval="1d", auto_adjust=True)
+                if hist is not None and not hist.empty:
+                    closes = hist["Close"].dropna()
+                    if len(closes) >= 1:
+                        price = float(closes.iloc[-1])
+                    if len(closes) >= 2 and closes.iloc[-2]:
+                        change = float((closes.iloc[-1] - closes.iloc[-2]) / closes.iloc[-2] * 100)
+            except Exception:
+                pass
+
         fundamentals = {
             "pe": info.get("trailingPE"),
             "forward_pe": info.get("forwardPE"),
@@ -100,12 +115,15 @@ class YFinanceProvider:
             "industry": info.get("industry"),
             "dividend_yield": info.get("dividendYield"),
         }
+        dq = DataQuality.medium if price is not None else DataQuality.unavailable
+        if price is not None and not info:
+            dq = DataQuality.low
         return QuoteSnapshot(
             symbol=symbol,
             price=float(price) if price is not None else None,
             change_pct=float(change) if change is not None else None,
             source="yfinance",
-            data_quality=DataQuality.medium,
+            data_quality=dq,
             as_of=datetime.now(timezone.utc),
             fundamentals={k: v for k, v in fundamentals.items() if v is not None},
         )
@@ -117,17 +135,23 @@ class StooqProvider:
     async def fetch_ohlcv(
         self, symbol: str, asset_class: AssetClass, interval: str = "1d", lookback: str = "6mo"
     ) -> list[OhlcvBar]:
-        stooq_symbol = symbol.lower()
-        if not stooq_symbol.endswith(".us") and asset_class in (AssetClass.stock, AssetClass.etf):
-            stooq_symbol = f"{stooq_symbol}.us"
-        url = f"https://stooq.com/q/d/l/?s={stooq_symbol}&i=d"
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(url)
-            if resp.status_code != 200 or "Date" not in resp.text:
-                return []
+        raw = symbol.lower().replace("-usd", "").replace("/", "")
+        candidates = [raw]
+        if asset_class in (AssetClass.stock, AssetClass.etf) and not raw.endswith(".us"):
+            candidates.append(f"{raw}.us")
+        text = ""
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            for stooq_symbol in candidates:
+                url = f"https://stooq.com/q/d/l/?s={stooq_symbol}&i=d"
+                resp = await client.get(url)
+                if resp.status_code == 200 and "Date" in resp.text and "No data" not in resp.text:
+                    text = resp.text
+                    break
+        if not text:
+            return []
         from io import StringIO
 
-        df = pd.read_csv(StringIO(resp.text))
+        df = pd.read_csv(StringIO(text))
         if df.empty:
             return []
         df = df.tail(180)
@@ -238,9 +262,83 @@ class CcxtProvider:
         )
 
 
+class YahooChartProvider:
+    """Direct Yahoo chart API — more resilient than yfinance `.info` under rate limits."""
+
+    async def fetch_ohlcv(
+        self, symbol: str, asset_class: AssetClass, interval: str = "1d", lookback: str = "6mo"
+    ) -> list[OhlcvBar]:
+        range_map = {"1mo": "1mo", "3mo": "3mo", "6mo": "6mo", "1y": "1y", "5d": "5d"}
+        rng = range_map.get(lookback, "6mo")
+        iv = "1d" if interval in ("1d", "1day") else "1h"
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+        params = {"range": rng, "interval": iv}
+        headers = {"User-Agent": "Mozilla/5.0 StockSense/1.0"}
+        async with httpx.AsyncClient(timeout=30.0, headers=headers) as client:
+            resp = await client.get(url, params=params)
+            if resp.status_code != 200:
+                return []
+            payload = resp.json()
+        result = (payload.get("chart") or {}).get("result") or []
+        if not result:
+            return []
+        node = result[0]
+        ts_list = node.get("timestamp") or []
+        quote = ((node.get("indicators") or {}).get("quote") or [{}])[0]
+        opens = quote.get("open") or []
+        highs = quote.get("high") or []
+        lows = quote.get("low") or []
+        closes = quote.get("close") or []
+        vols = quote.get("volume") or []
+        bars: list[OhlcvBar] = []
+        for i, ts in enumerate(ts_list):
+            c = closes[i] if i < len(closes) else None
+            if c is None:
+                continue
+            bars.append(
+                OhlcvBar(
+                    ts=datetime.fromtimestamp(ts, tz=timezone.utc),
+                    open=float(opens[i] if i < len(opens) and opens[i] is not None else c),
+                    high=float(highs[i] if i < len(highs) and highs[i] is not None else c),
+                    low=float(lows[i] if i < len(lows) and lows[i] is not None else c),
+                    close=float(c),
+                    volume=float(vols[i] if i < len(vols) and vols[i] is not None else 0),
+                    source="yahoo_chart",
+                    data_quality=DataQuality.medium,
+                )
+            )
+        return bars
+
+    async def fetch_quote(self, symbol: str, asset_class: AssetClass) -> QuoteSnapshot:
+        bars = await self.fetch_ohlcv(symbol, asset_class, lookback="5d")
+        if not bars:
+            return QuoteSnapshot(
+                symbol=symbol,
+                price=None,
+                change_pct=None,
+                source="yahoo_chart",
+                data_quality=DataQuality.unavailable,
+                as_of=datetime.now(timezone.utc),
+                fundamentals={},
+            )
+        last = bars[-1]
+        prev = bars[-2] if len(bars) > 1 else last
+        change = ((last.close - prev.close) / prev.close * 100) if prev.close else None
+        return QuoteSnapshot(
+            symbol=symbol,
+            price=last.close,
+            change_pct=change,
+            source="yahoo_chart",
+            data_quality=DataQuality.medium,
+            as_of=datetime.now(timezone.utc),
+            fundamentals={},
+        )
+
+
 class CompositeMarketData:
     def __init__(self) -> None:
         self.yf = YFinanceProvider()
+        self.yahoo_chart = YahooChartProvider()
         self.stooq = StooqProvider()
         self.ccxt = CcxtProvider()
 
@@ -251,6 +349,9 @@ class CompositeMarketData:
             bars = await self.ccxt.fetch_ohlcv(symbol, asset_class, interval, lookback)
             if bars:
                 return bars
+        bars = await self.yahoo_chart.fetch_ohlcv(symbol, asset_class, interval, lookback)
+        if bars:
+            return bars
         bars = await self.yf.fetch_ohlcv(symbol, asset_class, interval, lookback)
         if bars:
             return bars
@@ -261,6 +362,9 @@ class CompositeMarketData:
             q = await self.ccxt.fetch_quote(symbol, asset_class)
             if q.price is not None:
                 return q
+        q = await self.yahoo_chart.fetch_quote(symbol, asset_class)
+        if q.price is not None:
+            return q
         q = await self.yf.fetch_quote(symbol, asset_class)
         if q.price is not None:
             return q

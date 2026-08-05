@@ -14,9 +14,15 @@ class LLMTask(str, Enum):
 
 SYSTEM_CS = (
     "Jsi StockSense — analytický rádce pro investování a trading. "
-    "Odpovídej česky, věcně a strukturovaně. "
+    "Odpovídej česky, věcně a přehledně. "
     "Nikdy nevymýšlej čísla: používej jen data dodaná v kontextu. "
-    "Vždy uveď nejistotu, rizika a že finální rozhodnutí dělá uživatel."
+    "Formátuj odpověď v markdownu s jasnými sekcemi:\n"
+    "## Shrnutí\n"
+    "## Analýza\n"
+    "## Pre-závěr\n"
+    "## Rizika\n"
+    "Používej krátké odstavce, odrážky a **tučné** klíčové údaje. "
+    "Na konci vždy uveď, že finální rozhodnutí dělá uživatel."
 )
 
 
@@ -89,40 +95,55 @@ async def _gemini_chat(messages: list[dict]) -> str:
     settings = get_settings()
     if not settings.gemini_api_key:
         return ""
-    # Flatten to single prompt
     prompt = "\n\n".join(f"{m['role'].upper()}: {m['content']}" for m in messages)
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"gemini-2.0-flash:generateContent?key={settings.gemini_api_key}"
+    # Prefer models that currently have quota; fall through on 404/429.
+    models = (
+        "gemini-flash-latest",
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
+        "gemini-1.5-flash-latest",
     )
     async with httpx.AsyncClient(timeout=120.0) as client:
-        resp = await client.post(url, json={"contents": [{"parts": [{"text": prompt}]}]})
-        if resp.status_code != 200:
-            return ""
-        candidates = resp.json().get("candidates", [])
-        if not candidates:
-            return ""
-        parts = candidates[0].get("content", {}).get("parts", [])
-        return "".join(p.get("text", "") for p in parts)
+        for model in models:
+            url = (
+                "https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{model}:generateContent?key={settings.gemini_api_key}"
+            )
+            resp = await client.post(url, json={"contents": [{"parts": [{"text": prompt}]}]})
+            if resp.status_code != 200:
+                continue
+            candidates = resp.json().get("candidates", [])
+            if not candidates:
+                continue
+            parts = candidates[0].get("content", {}).get("parts", [])
+            text = "".join(p.get("text", "") for p in parts)
+            if text:
+                return text
+    return ""
 
 
 async def _cloud_chat(messages: list[dict]) -> str:
     settings = get_settings()
-    provider = settings.cloud_llm_provider
-    if provider == "anthropic":
-        text = await _anthropic_chat(messages)
-        if text:
-            return text
-    if provider == "openai":
-        text = await _openai_chat(messages)
-        if text:
-            return text
-    if provider == "gemini":
-        text = await _gemini_chat(messages)
-        if text:
-            return text
-    # fallback order
-    for fn in (_anthropic_chat, _openai_chat, _gemini_chat):
+    provider = (settings.cloud_llm_provider or "none").lower()
+
+    # Skip providers without keys instead of silently returning empty.
+    order: list = []
+    if provider == "anthropic" and settings.anthropic_api_key:
+        order.append(_anthropic_chat)
+    elif provider == "openai" and settings.openai_api_key:
+        order.append(_openai_chat)
+    elif provider == "gemini" and settings.gemini_api_key:
+        order.append(_gemini_chat)
+
+    for fn, key in (
+        (_gemini_chat, settings.gemini_api_key),
+        (_anthropic_chat, settings.anthropic_api_key),
+        (_openai_chat, settings.openai_api_key),
+    ):
+        if key and fn not in order:
+            order.append(fn)
+
+    for fn in order:
         text = await fn(messages)
         if text:
             return text
