@@ -297,3 +297,40 @@ class MacroSnapshot(Base):
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     source: Mapped[str] = mapped_column(String(64), default="FRED")
     as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PortfolioSnapshot(Base):
+    """Daily equity mark for portfolio curve."""
+
+    __tablename__ = "portfolio_snapshots"
+    __table_args__ = (UniqueConstraint("user_id", "as_of", name="uq_portfolio_snap_user_day"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    as_of: Mapped[date] = mapped_column(Date, index=True)
+    total_value: Mapped[float] = mapped_column(Float, default=0.0)
+    total_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    pnl: Mapped[float] = mapped_column(Float, default=0.0)
+    pnl_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    currency: Mapped[str] = mapped_column(String(16), default="USD")
+    breakdown: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PriceAlertRule(Base):
+    """User price watch levels (avg cost / stop / target / custom)."""
+
+    __tablename__ = "price_alert_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(32), default="custom")  # avg_cost|stop|target|custom
+    price: Mapped[float] = mapped_column(Float)
+    direction: Mapped[str] = mapped_column(String(16), default="cross")  # above|below|cross
+    note: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_triggered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    instrument: Mapped[Instrument] = relationship()

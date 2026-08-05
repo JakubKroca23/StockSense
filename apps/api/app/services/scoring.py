@@ -80,6 +80,7 @@ def score_instrument(
     risk: RiskProfile,
     max_position_pct: float,
     macro_bias: float = 0.0,
+    feedback_adj: float = 0.0,
 ) -> ScoreResult | None:
     df = _bars_to_df(bars)
     if df.empty or quote.price is None:
@@ -159,18 +160,11 @@ def score_instrument(
             fund -= 0.15
             fund_notes.append(f"Záporné ROE ({roe:.0%})")
     funding = f.get("funding_rate")
-    if isinstance(funding, (int, float)):
-        if funding < 0:
-            fund += 0.1
-            fund_notes.append(f"Záporný funding ({funding:.4f}) — short pressure")
-        elif funding > 0.0005:
-            fund -= 0.05
-            fund_notes.append(f"Vysoký funding ({funding:.4f})")
-
+    # Funding belongs in money-flow, not classic fundament
     if not fund_notes and asset_class != AssetClass.crypto:
         fund_notes.append("Fundamentální data omezená (free zdroje)")
 
-    # Money-flow proxy via volume + relative strength vs SMA
+    # Money-flow: volume + price vs SMA + crypto funding + ETF volume acceleration proxy
     flow = 0.0
     flow_notes: list[str] = []
     if sma20:
@@ -183,12 +177,38 @@ def score_instrument(
     else:
         flow_notes.append("Volume bez výrazného toku")
 
+    # ETF / stock: volume acceleration vs prior 20d avg of volume ratios (proxy for flows)
+    if asset_class in (AssetClass.etf, AssetClass.stock, AssetClass.index) and len(vol) >= 40 and vol_sma:
+        prev_vol_sma = float(vol.iloc[-40:-20].mean()) if len(vol) >= 40 else None
+        if prev_vol_sma and prev_vol_sma > 0:
+            accel = float(vol.iloc[-1]) / prev_vol_sma
+            if accel > 1.8:
+                flow += 0.12 if ta >= 0 else -0.08
+                flow_notes.append(f"ETF/stock volume accel {accel:.1f}× (proxy flow)")
+            elif accel < 0.6:
+                flow -= 0.05
+                flow_notes.append(f"Slábnoucí volume accel {accel:.1f}×")
+
+    if isinstance(funding, (int, float)):
+        if funding < 0:
+            flow += 0.18
+            flow_notes.append(f"Záporný funding ({funding:.4f}) — short pressure / squeeze bias")
+        elif funding > 0.0005:
+            flow -= 0.12
+            flow_notes.append(f"Vysoký funding ({funding:.4f}) — crowded longs")
+        else:
+            flow_notes.append(f"Funding neutrální ({funding:.4f})")
+
     # Macro bias external (-1..1)
     macro = max(-0.5, min(0.5, macro_bias))
     macro_notes = [f"Makro bias {macro:+.2f}"]
 
+    # Learning nudge from historical tip feedback (small)
+    learn = max(-0.15, min(0.15, feedback_adj))
+    learn_notes = [f"Feedback adj {learn:+.3f}"] if abs(learn) > 0.001 else ["Bez feedback korekce"]
+
     # Weighted score (plan priorities: fundament+macro, money flow, TA)
-    raw = 0.35 * fund + 0.25 * macro + 0.25 * flow + 0.15 * ta
+    raw = 0.32 * fund + 0.22 * macro + 0.28 * flow + 0.13 * ta + 0.05 * learn
     score = round(max(-100.0, min(100.0, raw * 100)), 1)
 
     # Action mapping
@@ -254,11 +274,13 @@ def score_instrument(
             "makro": macro_notes,
             "money_flow": flow_notes,
             "technicka": ta_notes,
+            "feedback": learn_notes,
             "components": {
                 "fundament": round(fund, 3),
                 "makro": round(macro, 3),
                 "money_flow": round(flow, 3),
                 "technicka": round(ta, 3),
+                "feedback": round(learn, 3),
             },
             "last_price": price,
         },

@@ -241,6 +241,10 @@ class HomeOut(BaseModel):
     tips: list[TipOut]
     alerts_unread: int
     risk_profile: RiskProfile
+    briefing_cs: str | None = None
+    briefing_title: str | None = None
+    tip_stats: dict[str, Any] | None = None
+    equity: list[dict[str, Any]] = []
 
 
 class MacroPointOut(BaseModel):
@@ -249,3 +253,31 @@ class MacroPointOut(BaseModel):
     value: float
     ts: datetime
     source: str
+
+
+class PriceAlertRuleCreate(BaseModel):
+    symbol: str
+    kind: str = "custom"  # avg_cost|stop|target|custom
+    price: float
+    direction: str = "cross"  # above|below|cross
+    note: str | None = None
+
+
+class PriceAlertRuleOut(ORMModel):
+    id: int
+    kind: str
+    price: float
+    direction: str
+    note: str | None
+    is_active: bool
+    last_triggered_at: datetime | None
+    created_at: datetime
+    instrument: InstrumentOut
+
+
+class EquityPointOut(BaseModel):
+    as_of: date
+    total_value: float
+    total_cost: float
+    pnl: float
+    pnl_pct: float | None = None

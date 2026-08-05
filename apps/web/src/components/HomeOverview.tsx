@@ -1,6 +1,7 @@
 "use client";
 
-import { PortfolioPosition, Tip } from "@/lib/types";
+import { PortfolioPosition, Tip, HomeData } from "@/lib/types";
+import Link from "next/link";
 
 const PALETTE = ["#5dde8a", "#6ea8ff", "#f0c14a", "#ff6b7a", "#9b8cff", "#4fd1c5", "#f6ad55"];
 
@@ -177,14 +178,63 @@ function TipActionsDonut({ tips }: { tips: Tip[] }) {
   );
 }
 
+function EquitySpark({
+  points,
+}: {
+  points: { as_of: string; total_value: number; pnl: number; pnl_pct?: number | null }[];
+}) {
+  if (points.length < 2) {
+    return <p className="muted text-sm">Equity křivka se naplní po denních snapshotech (cron 21:05).</p>;
+  }
+  const vals = points.map((p) => p.total_value);
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const span = Math.max(max - min, 1);
+  const w = 320;
+  const h = 90;
+  const path = points
+    .map((p, i) => {
+      const x = (i / (points.length - 1)) * w;
+      const y = h - ((p.total_value - min) / span) * (h - 8) - 4;
+      return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  const last = points[points.length - 1];
+  const up = (last.pnl ?? 0) >= 0;
+
+  return (
+    <div className="home-equity">
+      <svg viewBox={`0 0 ${w} ${h}`} className="home-equity__svg" preserveAspectRatio="none">
+        <path d={path} fill="none" stroke={up ? "var(--ok)" : "var(--danger)"} strokeWidth="2.2" />
+      </svg>
+      <div className="home-equity__meta">
+        <span>{points[0].as_of}</span>
+        <span className={up ? "text-[var(--ok)]" : "text-[var(--danger)]"}>
+          {last.total_value.toLocaleString("cs-CZ", { maximumFractionDigits: 0 })}
+          {last.pnl_pct != null ? ` (${last.pnl_pct >= 0 ? "+" : ""}${last.pnl_pct.toFixed(1)}%)` : ""}
+        </span>
+        <span>{last.as_of}</span>
+      </div>
+    </div>
+  );
+}
+
 export function HomeOverview({
   portfolio,
   tips,
   alertsUnread,
+  briefingCs,
+  briefingTitle,
+  tipStats,
+  equity,
 }: {
   portfolio: PortfolioPosition[];
   tips: Tip[];
   alertsUnread: number;
+  briefingCs?: string | null;
+  briefingTitle?: string | null;
+  tipStats?: HomeData["tip_stats"];
+  equity?: HomeData["equity"];
 }) {
   const values = portfolio.map((p) => ({
     p,
@@ -225,9 +275,24 @@ export function HomeOverview({
 
   const winners = values.filter((x) => x.pnl > 0).length;
   const losers = values.filter((x) => x.pnl < 0).length;
+  const hitPct =
+    tipStats?.hit_rate != null ? `${(tipStats.hit_rate * 100).toFixed(0)}%` : "—";
 
   return (
     <section className="home-overview rise space-y-4">
+      {(briefingCs || briefingTitle) && (
+        <div className="card p-4 sm:p-5 home-briefing">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <h3 className="home-chart-title">Sense briefing</h3>
+            <Link href="/reports" className="btn text-xs px-2 py-1">
+              Celý report
+            </Link>
+          </div>
+          {briefingTitle && <p className="muted text-xs mb-2">{briefingTitle}</p>}
+          <p className="home-briefing__text">{briefingCs}</p>
+        </div>
+      )}
+
       <div className="home-kpi-grid">
         <div className="home-kpi">
           <div className="home-kpi__label">Hodnota</div>
@@ -243,11 +308,11 @@ export function HomeOverview({
           </div>
         </div>
         <div className="home-kpi">
-          <div className="home-kpi__label">Pozice</div>
+          <div className="home-kpi__label">Hit-rate tipů</div>
           <div className="home-kpi__value">
-            {portfolio.length}
+            {hitPct}
             <span className="home-kpi__suffix">
-              {winners}↑ {losers}↓
+              {tipStats?.total ? `${tipStats.hits}/${tipStats.total}` : "dej feedback"}
             </span>
           </div>
         </div>
@@ -256,9 +321,16 @@ export function HomeOverview({
           <div className="home-kpi__value">
             {tips.length}
             <span className="home-kpi__suffix">
-              {alertsUnread > 0 ? `${alertsUnread} nových` : "bez alertů"}
+              {alertsUnread > 0 ? `${alertsUnread} nových` : `${winners}↑ ${losers}↓`}
             </span>
           </div>
+        </div>
+      </div>
+
+      <div className="card p-4 sm:p-5">
+        <h3 className="home-chart-title">Equity křivka</h3>
+        <div className="mt-3">
+          <EquitySpark points={equity || []} />
         </div>
       </div>
 

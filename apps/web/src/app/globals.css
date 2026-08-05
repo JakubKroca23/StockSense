@@ -1150,3 +1150,32 @@ textarea {
 .home-pnl-bars__fill.is-down {
   background: linear-gradient(90deg, color-mix(in srgb, var(--danger) 55%, transparent), var(--danger));
 }
+
+.home-briefing__text {
+  line-height: 1.55;
+  font-size: 0.95rem;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.home-equity__svg {
+  width: 100%;
+  height: 96px;
+  display: block;
+}
+
+.home-equity__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.45rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-alert-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}

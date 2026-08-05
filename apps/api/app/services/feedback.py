@@ -1,0 +1,59 @@
+from __future__ import annotations
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.models import FeedbackResult, Tip, TipFeedback
+
+
+async def feedback_stats(db: AsyncSession, user_id: str) -> dict:
+    """Aggregate tip feedback → hit-rate and small scoring adjustment."""
+    rows = (
+        await db.execute(
+            select(TipFeedback, Tip)
+            .join(Tip, Tip.id == TipFeedback.tip_id)
+            .where(TipFeedback.user_id == user_id)
+            .options(selectinload(Tip.instrument))
+            .order_by(TipFeedback.created_at.desc())
+            .limit(200)
+        )
+    ).all()
+
+    total = len(rows)
+    hits = misses = partials = 0
+    by_class: dict[str, dict[str, int]] = {}
+    for fb, tip in rows:
+        cls = tip.instrument.asset_class.value if tip.instrument else "other"
+        bucket = by_class.setdefault(cls, {"hit": 0, "miss": 0, "partial": 0, "total": 0})
+        bucket["total"] += 1
+        if fb.result == FeedbackResult.hit:
+            hits += 1
+            bucket["hit"] += 1
+        elif fb.result == FeedbackResult.miss:
+            misses += 1
+            bucket["miss"] += 1
+        else:
+            partials += 1
+            bucket["partial"] += 1
+
+    hit_rate = (hits + 0.5 * partials) / total if total else None
+    # Map hit-rate to small score nudge in [-0.15, +0.15] for learning loop
+    score_adj = 0.0
+    if hit_rate is not None and total >= 3:
+        score_adj = max(-0.15, min(0.15, (hit_rate - 0.5) * 0.4))
+
+    return {
+        "total": total,
+        "hits": hits,
+        "misses": misses,
+        "partials": partials,
+        "hit_rate": round(hit_rate, 3) if hit_rate is not None else None,
+        "score_adj": round(score_adj, 3),
+        "by_asset_class": by_class,
+    }
+
+
+async def feedback_adj_for_scoring(db: AsyncSession, user_id: str) -> float:
+    stats = await feedback_stats(db, user_id)
+    return float(stats.get("score_adj") or 0.0)

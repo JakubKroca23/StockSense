@@ -72,6 +72,7 @@ export default function InstrumentPage() {
   const [timeframe, setTimeframe] = useState<string>("1d");
   const [lookback, setLookback] = useState<string>("6mo");
   const [chartBusy, setChartBusy] = useState(false);
+  const [alertMsg, setAlertMsg] = useState<string | null>(null);
 
   const load = useCallback(
     async (iv: string, lb: string) => {
@@ -114,6 +115,31 @@ export default function InstrumentPage() {
       });
     } finally {
       setFeedbackBusy(false);
+    }
+  }
+
+  async function watchLevel(
+    kind: "avg_cost" | "stop" | "target" | "custom",
+    price: number,
+    direction: "above" | "below" | "cross" = "cross",
+    note?: string
+  ) {
+    if (!Number.isFinite(price) || price <= 0) return;
+    setAlertMsg(null);
+    try {
+      await apiFetch("/price-alerts", {
+        method: "POST",
+        body: JSON.stringify({
+          symbol,
+          kind,
+          price,
+          direction,
+          note: note || kind,
+        }),
+      });
+      setAlertMsg(`Hlídač ${kind} @ ${price.toFixed(2)} uložen`);
+    } catch (err) {
+      setAlertMsg(err instanceof Error ? err.message : "Hlídač se neuložil");
     }
   }
 
@@ -232,6 +258,48 @@ export default function InstrumentPage() {
             })}
           </div>
         )}
+
+        <div className="chart-alert-bar">
+          {positions[0] && (
+            <button
+              type="button"
+              className="btn text-xs px-2 py-1"
+              onClick={() =>
+                watchLevel("avg_cost", Number(positions[0].avg_cost), "cross", "Ø nákup")
+              }
+            >
+              Hlídač Ø nákup
+            </button>
+          )}
+          {data.tip?.stop != null && (
+            <button
+              type="button"
+              className="btn text-xs px-2 py-1"
+              onClick={() => watchLevel("stop", Number(data.tip!.stop), "below", "Stop tipu")}
+            >
+              Hlídač stop
+            </button>
+          )}
+          {data.tip?.target_1 != null && (
+            <button
+              type="button"
+              className="btn text-xs px-2 py-1"
+              onClick={() => watchLevel("target", Number(data.tip!.target_1), "above", "Cíl tipu")}
+            >
+              Hlídač cíl
+            </button>
+          )}
+          {data.quote.price != null && (
+            <button
+              type="button"
+              className="btn text-xs px-2 py-1"
+              onClick={() => watchLevel("custom", Number(data.quote.price), "cross", "Aktuální cena")}
+            >
+              Hlídač teď
+            </button>
+          )}
+        </div>
+        {alertMsg && <p className="muted text-sm">{alertMsg}</p>}
 
         {chartBusy && <p className="muted text-sm">Načítám data…</p>}
         <PriceChart bars={data.bars} height={380} levels={chartLevels} />

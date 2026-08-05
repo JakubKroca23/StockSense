@@ -130,6 +130,10 @@ export default function HomePage() {
           portfolio={data.portfolio || []}
           tips={data.tips || []}
           alertsUnread={data.alerts_unread || 0}
+          briefingCs={data.briefing_cs}
+          briefingTitle={data.briefing_title}
+          tipStats={data.tip_stats}
+          equity={data.equity}
         />
       )}
 

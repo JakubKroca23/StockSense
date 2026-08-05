@@ -59,6 +59,24 @@ export interface HomeData {
   tips: Tip[];
   alerts_unread: number;
   risk_profile: RiskProfile;
+  briefing_cs?: string | null;
+  briefing_title?: string | null;
+  tip_stats?: {
+    total: number;
+    hits: number;
+    misses: number;
+    partials: number;
+    hit_rate: number | null;
+    score_adj: number;
+    by_asset_class?: Record<string, unknown>;
+  } | null;
+  equity?: {
+    as_of: string;
+    total_value: number;
+    total_cost: number;
+    pnl: number;
+    pnl_pct?: number | null;
+  }[];
 }
 
 export interface Watchlist {

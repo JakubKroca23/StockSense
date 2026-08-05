@@ -15,6 +15,8 @@ from app.models import (
     ChatSession,
     ChatSessionStatus,
     PortfolioPosition,
+    PortfolioSnapshot,
+    PriceAlertRule,
     PriceBar,
     Report,
     RiskProfile,
@@ -34,12 +36,15 @@ from app.schemas import (
     ChatSessionOut,
     ChatSessionUpdate,
     ChatTurnOut,
+    EquityPointOut,
     HomeOut,
     InstrumentOut,
     MacroPointOut,
     PortfolioPositionCreate,
     PortfolioPositionOut,
     PortfolioPositionUpdate,
+    PriceAlertRuleCreate,
+    PriceAlertRuleOut,
     PriceBarOut,
     ReportOut,
     TipFeedbackCreate,
@@ -51,11 +56,12 @@ from app.schemas import (
     WatchlistCreate,
     WatchlistOut,
 )
+from app.services.feedback import feedback_stats
 from app.services.fundament_macro import fetch_edgar_recent_filings
 from app.services.instruments import get_or_create_instrument
 from app.services.llm import LLMTask, generate_chat_title, llm_complete
 from app.services.market_data import market_data
-from app.workers.jobs import generate_daily_report, run_scoring_for_user
+from app.workers.jobs import generate_daily_report, run_scoring_for_user, snapshot_portfolio
 
 router = APIRouter()
 
@@ -219,11 +225,50 @@ async def home(user: AuthUser = Depends(get_current_user), db: AsyncSession = De
             select(func.count()).select_from(Alert).where(Alert.user_id == user.id, Alert.is_read.is_(False))
         )
     ).scalar_one()
+    latest_report = (
+        await db.execute(
+            select(Report)
+            .where(Report.user_id == user.id, Report.kind == "daily")
+            .order_by(Report.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    briefing_cs = None
+    briefing_title = None
+    if latest_report:
+        briefing_title = latest_report.title
+        meta = latest_report.meta or {}
+        briefing_cs = meta.get("briefing_cs") or (latest_report.content_md or "")[:700]
+
+    stats = await feedback_stats(db, user.id)
+    equity_rows = (
+        await db.execute(
+            select(PortfolioSnapshot)
+            .where(PortfolioSnapshot.user_id == user.id)
+            .order_by(PortfolioSnapshot.as_of.asc())
+            .limit(120)
+        )
+    ).scalars().all()
+    equity = [
+        {
+            "as_of": str(r.as_of),
+            "total_value": r.total_value,
+            "total_cost": r.total_cost,
+            "pnl": r.pnl,
+            "pnl_pct": r.pnl_pct,
+        }
+        for r in equity_rows
+    ]
+
     return HomeOut(
         portfolio=portfolio,
         tips=[TipOut.model_validate(t) for t in tips],
         alerts_unread=int(unread or 0),
         risk_profile=settings.risk_profile,
+        briefing_cs=briefing_cs,
+        briefing_title=briefing_title,
+        tip_stats=stats,
+        equity=equity,
     )
 
 
@@ -429,6 +474,113 @@ async def delete_position(
     return {"ok": True}
 
 
+@router.get("/portfolio/equity", response_model=list[EquityPointOut])
+async def portfolio_equity(
+    user: AuthUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+):
+    rows = (
+        await db.execute(
+            select(PortfolioSnapshot)
+            .where(PortfolioSnapshot.user_id == user.id)
+            .order_by(PortfolioSnapshot.as_of.asc())
+            .limit(365)
+        )
+    ).scalars().all()
+    return [
+        EquityPointOut(
+            as_of=r.as_of,
+            total_value=r.total_value,
+            total_cost=r.total_cost,
+            pnl=r.pnl,
+            pnl_pct=r.pnl_pct,
+        )
+        for r in rows
+    ]
+
+
+@router.post("/portfolio/equity/snapshot", response_model=EquityPointOut)
+async def portfolio_equity_snapshot(
+    user: AuthUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+):
+    snap = await snapshot_portfolio(db, user.id)
+    if not snap:
+        raise HTTPException(400, "Snapshot se nepodařil")
+    return EquityPointOut(
+        as_of=snap.as_of,
+        total_value=snap.total_value,
+        total_cost=snap.total_cost,
+        pnl=snap.pnl,
+        pnl_pct=snap.pnl_pct,
+    )
+
+
+@router.get("/price-alerts", response_model=list[PriceAlertRuleOut])
+async def list_price_alerts(
+    user: AuthUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+):
+    rows = (
+        await db.execute(
+            select(PriceAlertRule)
+            .where(PriceAlertRule.user_id == user.id, PriceAlertRule.is_active.is_(True))
+            .options(selectinload(PriceAlertRule.instrument))
+            .order_by(PriceAlertRule.created_at.desc())
+        )
+    ).scalars().all()
+    return [PriceAlertRuleOut.model_validate(r) for r in rows]
+
+
+@router.post("/price-alerts", response_model=PriceAlertRuleOut)
+async def create_price_alert(
+    payload: PriceAlertRuleCreate,
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    inst = await get_or_create_instrument(db, symbol=payload.symbol)
+    await db.commit()
+    await db.refresh(inst)
+    kind = payload.kind if payload.kind in {"avg_cost", "stop", "target", "custom"} else "custom"
+    direction = payload.direction if payload.direction in {"above", "below", "cross"} else "cross"
+    rule = PriceAlertRule(
+        user_id=user.id,
+        instrument_id=inst.id,
+        kind=kind,
+        price=payload.price,
+        direction=direction,
+        note=payload.note,
+        is_active=True,
+    )
+    db.add(rule)
+    await db.commit()
+    row = (
+        await db.execute(
+            select(PriceAlertRule)
+            .where(PriceAlertRule.id == rule.id)
+            .options(selectinload(PriceAlertRule.instrument))
+        )
+    ).scalar_one()
+    return PriceAlertRuleOut.model_validate(row)
+
+
+@router.delete("/price-alerts/{rule_id}")
+async def delete_price_alert(
+    rule_id: int,
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    rule = (
+        await db.execute(
+            select(PriceAlertRule).where(
+                PriceAlertRule.id == rule_id, PriceAlertRule.user_id == user.id
+            )
+        )
+    ).scalar_one_or_none()
+    if not rule:
+        raise HTTPException(404, "Hlídač nenalezen")
+    rule.is_active = False
+    await db.commit()
+    return {"ok": True}
+
+
 @router.get("/tips", response_model=list[TipOut])
 async def list_tips(user: AuthUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     tips = (
@@ -440,6 +592,11 @@ async def list_tips(user: AuthUser = Depends(get_current_user), db: AsyncSession
         )
     ).scalars().all()
     return [TipOut.model_validate(t) for t in tips]
+
+
+@router.get("/tips/stats")
+async def tips_stats(user: AuthUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    return await feedback_stats(db, user.id)
 
 
 @router.post("/tips/run", response_model=list[TipOut])

@@ -11,7 +11,13 @@ from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal, Base, engine
 from app.models import UserSettings
 from app.services.instruments import ensure_discovery_universe
-from app.workers.jobs import check_price_alerts, generate_daily_report, run_scoring_for_user, sync_macro
+from app.workers.jobs import (
+    check_price_alerts,
+    generate_daily_report,
+    run_scoring_for_user,
+    snapshot_portfolio,
+    sync_macro,
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -106,6 +112,20 @@ async def job_daily_report() -> None:
                 await generate_daily_report(db, uid)
             except Exception as exc:
                 logger.warning("daily report job failed for %s: %s", uid, exc)
+            try:
+                await snapshot_portfolio(db, uid)
+            except Exception as exc:
+                logger.warning("equity snapshot failed for %s: %s", uid, exc)
+
+
+async def job_equity_snapshot() -> None:
+    user_ids = await _user_ids()
+    async with AsyncSessionLocal() as db:
+        for uid in user_ids:
+            try:
+                await snapshot_portfolio(db, uid)
+            except Exception as exc:
+                logger.warning("equity snapshot failed for %s: %s", uid, exc)
 
 
 async def job_macro() -> None:
@@ -126,6 +146,7 @@ async def lifespan(_: FastAPI):
     scheduler.add_job(job_price_poll, "interval", minutes=settings.price_poll_minutes, id="price_poll")
     scheduler.add_job(job_scoring, "cron", hour=scoring_hours, minute=10, id="scoring")
     scheduler.add_job(job_daily_report, "cron", hour=6, minute=30, id="daily_report")
+    scheduler.add_job(job_equity_snapshot, "cron", hour=21, minute=5, id="equity_snapshot")
     scheduler.add_job(job_macro, "cron", hour="*/6", minute=5, id="macro")
     scheduler.start()
     yield
