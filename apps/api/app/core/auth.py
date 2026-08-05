@@ -16,6 +16,10 @@ class AuthUser:
     name: str | None
 
 
+async def _fetch_account(client: httpx.AsyncClient, endpoint: str, headers: dict[str, str]):
+    return await client.get(f"{endpoint.rstrip('/')}/account", headers=headers)
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     settings: Settings = Depends(get_settings),
@@ -23,24 +27,34 @@ async def get_current_user(
     if credentials is None or not credentials.credentials:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Chybí autentizace")
 
+    if not settings.appwrite_project_id:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Appwrite project není nakonfigurován",
+        )
+
     token = credentials.credentials
-    headers = {
-        "X-Appwrite-Project": settings.appwrite_project_id,
-        "X-Appwrite-JWT": token,
-    }
-    # Also try session cookie style via Session header used by some Appwrite setups
+    project = settings.appwrite_project_id
+    endpoint = settings.appwrite_endpoint
+
     async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.get(
-            f"{settings.appwrite_endpoint.rstrip('/')}/account",
-            headers={
-                "X-Appwrite-Project": settings.appwrite_project_id,
-                "X-Appwrite-Session": token,
+        # Prefer JWT (what the web client mints); fall back to session secret.
+        resp = await _fetch_account(
+            client,
+            endpoint,
+            {
+                "X-Appwrite-Project": project,
+                "X-Appwrite-JWT": token,
             },
         )
         if resp.status_code != 200:
-            resp = await client.get(
-                f"{settings.appwrite_endpoint.rstrip('/')}/account",
-                headers=headers,
+            resp = await _fetch_account(
+                client,
+                endpoint,
+                {
+                    "X-Appwrite-Project": project,
+                    "X-Appwrite-Session": token,
+                },
             )
         if resp.status_code != 200:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Neplatná session")

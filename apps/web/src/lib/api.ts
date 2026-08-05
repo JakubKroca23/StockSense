@@ -1,4 +1,4 @@
-import { getSessionJwt } from "./appwrite";
+import { getFreshJwt, getSessionJwt, recoverSessionFromFallback } from "./appwrite";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
@@ -10,22 +10,47 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const jwt = await getSessionJwt();
-  const headers = new Headers(init.headers);
-  headers.set("Content-Type", "application/json");
-  if (jwt) headers.set("Authorization", `Bearer ${jwt}`);
+async function parseError(res: Response): Promise<string> {
+  let detail = res.statusText;
+  try {
+    const body = await res.json();
+    detail = body.detail || JSON.stringify(body);
+  } catch {
+    /* ignore */
+  }
+  return String(detail);
+}
 
-  const res = await fetch(`${API_URL}${path}`, { ...init, headers, cache: "no-store" });
-  if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const body = await res.json();
-      detail = body.detail || JSON.stringify(body);
-    } catch {
-      /* ignore */
+async function doFetch(path: string, init: RequestInit, token: string) {
+  const headers = new Headers(init.headers);
+  if (!headers.has("Content-Type") && init.body != null) {
+    headers.set("Content-Type", "application/json");
+  }
+  headers.set("Authorization", `Bearer ${token}`);
+  return fetch(`${API_URL}${path}`, { ...init, headers, cache: "no-store" });
+}
+
+export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+  let token = await getSessionJwt();
+  if (!token) {
+    recoverSessionFromFallback();
+    token = await getSessionJwt();
+  }
+  if (!token) {
+    throw new ApiError(401, "Chybí autentizace — zkus se znovu přihlásit");
+  }
+
+  let res = await doFetch(path, init, token);
+
+  if (res.status === 401) {
+    const retryToken = await getFreshJwt();
+    if (retryToken && retryToken !== token) {
+      res = await doFetch(path, init, retryToken);
     }
-    throw new ApiError(res.status, String(detail));
+  }
+
+  if (!res.ok) {
+    throw new ApiError(res.status, await parseError(res));
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
