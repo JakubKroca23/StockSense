@@ -333,15 +333,26 @@ textarea {
   font-size: 0.7rem;
 }
 
+.prompt-chip--compact {
+  padding: 0.5rem 0.65rem;
+}
+
+.prompt-chip--compact .prompt-chip__label {
+  font-size: 0.8rem;
+}
+
 .chat-minibar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.65rem;
-  padding: 0.65rem 0.85rem;
-  border-radius: 14px;
-  border: 1px dashed color-mix(in srgb, var(--accent) 35%, var(--line));
-  background: color-mix(in srgb, var(--accent) 6%, var(--bg-elevated));
+}
+
+.chat-minibar--pills {
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 0;
 }
 
 .chat-minibar__list {
