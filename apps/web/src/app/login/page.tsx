@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
-import { account } from "@/lib/appwrite";
+import { account, ensureApiAuth, storeSessionSecret } from "@/lib/appwrite";
 import { ID } from "appwrite";
 import { StockSenseLogo } from "@/components/StockSenseLogo";
 
@@ -27,7 +27,9 @@ export default function LoginPage() {
           name: "StockSense User",
         });
       }
-      await account.createEmailPasswordSession({ email, password });
+      const session = await account.createEmailPasswordSession({ email, password });
+      storeSessionSecret(session.secret);
+      await ensureApiAuth();
       router.replace("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Přihlášení selhalo");
