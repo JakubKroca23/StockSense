@@ -1,0 +1,59 @@
+# Lokální vývoj — bez Traefiku / Appwrite sítě
+# Použití: docker compose -f docker-compose.dev.yml up -d --build
+#          nebo: make dev
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: stocksense
+      POSTGRES_PASSWORD: stocksense
+      POSTGRES_DB: stocksense
+    ports:
+      - "5432:5432"
+    volumes:
+      - stocksense_pg_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stocksense -d stocksense"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./apps/api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL: postgresql+asyncpg://stocksense:stocksense@db:5432/stocksense
+      DATABASE_URL_SYNC: postgresql://stocksense:stocksense@db:5432/stocksense
+      OLLAMA_BASE_URL: http://ollama:11434
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      # Lokálně radši Gemini (klíč je v .env); Anthropic je prázdný
+      CLOUD_LLM_PROVIDER: ${CLOUD_LLM_PROVIDER:-gemini}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    volumes:
+      # hot-reload API kódu bez rebuildu image
+      - ./apps/api/app:/app/app
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - stocksense_ollama_dev:/root/.ollama
+
+volumes:
+  stocksense_pg_dev:
+  stocksense_ollama_dev:

@@ -29,18 +29,35 @@ docker compose exec ollama ollama pull qwen2.5:1.5b
 
 ## Lokální vývoj
 
-```bash
-# API
-cd apps/api
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+Produkční `docker-compose.yml` potřebuje Traefik síť `appwrite` (VPS). Lokálně použij:
 
-# Web
-cd apps/web
-cp ../../.env.example .env.local   # uprav NEXT_PUBLIC_*
-npm install
-npm run dev
+```bash
+# DB + API (hot-reload) + Ollama
+make dev
+
+# Jednou stáhni model
+make pull-model-dev
+
+# Frontend s hot-reload (druhý terminál)
+make web
+```
+
+- Web: http://localhost:3000  
+- API: http://localhost:8000/docs  
+- Auth zůstává na Appwrite (`appwrite.propoj.app`) — login funguje stejně jako na produkci.  
+- `apps/web/.env.local` míří API na `http://localhost:8000/api`.
+
+Zastavení: `make dev-down`
+
+Alternativa bez Docker API (jen DB/Ollama v Dockeru):
+
+```bash
+docker compose -f docker-compose.dev.yml up -d db ollama
+cd apps/api && python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+DATABASE_URL=postgresql+asyncpg://stocksense:stocksense@localhost:5432/stocksense \
+OLLAMA_BASE_URL=http://localhost:11434 \
+uvicorn app.main:app --reload --port 8000
 ```
 
 ## Co je hotové v MVP

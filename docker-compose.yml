@@ -57,6 +57,9 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
     depends_on:
       - api
     labels:

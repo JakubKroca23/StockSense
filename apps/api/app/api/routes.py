@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
@@ -48,7 +49,7 @@ from app.schemas import (
 )
 from app.services.fundament_macro import fetch_edgar_recent_filings
 from app.services.instruments import get_or_create_instrument
-from app.services.llm import LLMTask, llm_complete
+from app.services.llm import LLMTask, generate_chat_title, llm_complete
 from app.services.market_data import market_data
 from app.workers.jobs import generate_daily_report, run_scoring_for_user
 
@@ -546,10 +547,12 @@ async def chat(
     db.add(user_msg)
     await db.flush()
 
-    if session.title in {"Nový chat", "Starší konverzace"} or session.message_count == 0:
-        session.title = _title_from_message(payload.message, session.symbol)
+    needs_title = session.message_count == 0 or session.title in {
+        "Nový chat",
+        "Starší konverzace",
+    }
 
-    answer = await llm_complete(
+    answer_coro = llm_complete(
         (
             f"{payload.message}\n\n"
             "Odpověz ve strukturovaném markdownu se sekcemi ## Shrnutí, ## Analýza, "
@@ -558,6 +561,15 @@ async def chat(
         task=LLMTask.heavy if payload.symbol or "tip" in payload.message.lower() else LLMTask.light,
         context="\n".join(context_parts),
     )
+    if needs_title:
+        answer, title = await asyncio.gather(
+            answer_coro,
+            generate_chat_title(payload.message, session.symbol or payload.symbol),
+        )
+        session.title = title
+    else:
+        answer = await answer_coro
+
     assistant = ChatMessage(
         user_id=user.id, session_id=session.id, role="assistant", content=answer
     )

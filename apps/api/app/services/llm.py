@@ -180,6 +180,58 @@ async def llm_complete(user_prompt: str, *, task: LLMTask = LLMTask.light, conte
     return text or _fallback_narrative(context or user_prompt)
 
 
+def _sanitize_chat_title(raw: str, symbol: str | None = None) -> str:
+    line = (raw or "").strip().splitlines()[0] if raw else ""
+    line = line.strip(" \"'`„“«»").rstrip(".!?:;")
+    # drop markdown / labels
+    for prefix in ("název:", "title:", "nazev:"):
+        if line.lower().startswith(prefix):
+            line = line[len(prefix) :].strip()
+    words = [w for w in line.replace("/", " ").split() if w]
+    if len(words) > 3:
+        words = words[:3]
+    title = " ".join(words).strip()
+    if not title:
+        return "Nový chat"
+    if symbol and symbol.upper() not in title.upper() and len(words) < 3:
+        # keep short; don't force symbol into every title
+        pass
+    return title[:64]
+
+
+async def generate_chat_title(message: str, symbol: str | None = None) -> str:
+    """Max 3-word Czech title for a chat session from the first user message."""
+    hint = f" Symbol v kontextu: {symbol}." if symbol else ""
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Jsi pojmenovavač chatů pro investiční appku. "
+                "Odpověz výhradně názvem o 1 až 3 slovech v češtině. "
+                "Bez uvozovek, bez tečky, bez vysvětlení."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Vymysli stručný název chatu (max 3 slova) podle této otázky.{hint}\n"
+                f"Otázka: {message[:600]}"
+            ),
+        },
+    ]
+    text = await _ollama_chat(messages)
+    if not text:
+        text = await _cloud_chat(messages)
+    title = _sanitize_chat_title(text, symbol)
+    if title == "Nový chat" or not title:
+        # deterministic short fallback from message words
+        words = [w for w in message.replace("\n", " ").split() if w.strip(".,;:!?")][:3]
+        if symbol and words:
+            return _sanitize_chat_title(f"{symbol} {' '.join(words[:2])}", symbol)
+        return _sanitize_chat_title(" ".join(words) or (symbol or "Nový chat"), symbol)
+    return title
+
+
 async def narrate_tip(symbol: str, tip_payload: dict) -> str:
     ctx = (
         f"Symbol: {symbol}\n"

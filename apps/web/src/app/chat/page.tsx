@@ -14,7 +14,6 @@ type PromptIdea = {
   build: (symbol: string) => string;
 };
 
-/** Dotazy laděné na data + strukturovanou odpověď (Shrnutí / Analýza / Pre-závěr / Rizika). */
 const PROMPT_IDEAS: PromptIdea[] = [
   {
     id: "pre-zaver",
@@ -80,16 +79,43 @@ const PROMPT_IDEAS: PromptIdea[] = [
   },
 ];
 
-const STATUS_LABEL: Record<ChatSessionStatus, string> = {
-  open: "Otevřené",
-  minimized: "Minimalizované",
-  saved: "Uložené",
-  closed: "Zavřené",
-};
-
 function sortSessions(rows: ChatSession[]) {
   return [...rows].sort(
     (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+  );
+}
+
+function PinIcon({ filled }: { filled?: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+      {filled ? (
+        <path
+          d="M16 3l5 5-6.5 1.5L9 15l-2 6 6-2 5.5-5.5L20 8l-4-5z"
+          fill="currentColor"
+        />
+      ) : (
+        <path
+          d="M15.5 3.5l5 5-6.2 1.6L9 15.4 7.2 21l5.6-1.8 5.3-5.3L20 9.5l-4.5-5z"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinejoin="round"
+          fill="none"
+        />
+      )}
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M6 6l12 12M18 6L6 18"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }
 
@@ -144,8 +170,6 @@ export default function ChatPage() {
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [hint, setHint] = useState<string | null>(null);
-  const [saveOpen, setSaveOpen] = useState(false);
-  const [saveTitle, setSaveTitle] = useState("");
   const [showClosed, setShowClosed] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -154,23 +178,19 @@ export default function ChatPage() {
     () => sessions.find((s) => s.id === activeId) ?? null,
     [sessions, activeId]
   );
-  const minimized = useMemo(
-    () => sessions.filter((s) => s.status === "minimized"),
-    [sessions]
-  );
   const sidebarGroups = useMemo(() => {
-    const open = sessions.filter((s) => s.status === "open");
+    const open = sessions.filter((s) => s.status === "open" || s.status === "minimized");
     const saved = sessions.filter((s) => s.status === "saved");
     const closed = showClosed ? sessions.filter((s) => s.status === "closed") : [];
     return [
       { key: "open" as const, title: "Aktivní", items: open },
-      { key: "saved" as const, title: "Uložené", items: saved },
+      { key: "saved" as const, title: "Připnuté", items: saved },
       ...(showClosed ? [{ key: "closed" as const, title: "Zavřené", items: closed }] : []),
     ];
   }, [sessions, showClosed]);
 
-  const isMinimizedView = active?.status === "minimized";
   const hasMessages = messages.length > 0;
+  const pinned = active?.status === "saved";
 
   const refreshSessions = useCallback(async (includeClosed = showClosed) => {
     const rows = await apiFetch<ChatSession[]>(
@@ -182,7 +202,7 @@ export default function ChatPage() {
 
   const loadSession = useCallback(async (session: ChatSession) => {
     let current = session;
-    if (session.status === "closed") {
+    if (session.status === "closed" || session.status === "minimized") {
       current = await apiFetch<ChatSession>(`/chat/sessions/${session.id}`, {
         method: "PATCH",
         body: JSON.stringify({ status: "open" }),
@@ -192,7 +212,6 @@ export default function ChatPage() {
     setActiveId(current.id);
     setSymbol(current.symbol || "");
     setHint(null);
-    setSaveOpen(false);
     const history = await apiFetch<ChatMessage[]>(`/chat/history?session_id=${current.id}`);
     setMessages(history);
   }, []);
@@ -206,8 +225,8 @@ export default function ChatPage() {
         setSessions(sortSessions(rows));
         const prefer =
           rows.find((s) => s.status === "open") ||
-          rows.find((s) => s.status === "minimized") ||
           rows.find((s) => s.status === "saved") ||
+          rows.find((s) => s.status === "minimized") ||
           null;
         if (prefer) {
           setActiveId(prefer.id);
@@ -228,7 +247,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, busy, isMinimizedView]);
+  }, [messages, busy]);
 
   async function startNewChat() {
     setBusy(true);
@@ -241,7 +260,6 @@ export default function ChatPage() {
       setActiveId(session.id);
       setMessages([]);
       setHint(null);
-      setSaveOpen(false);
     } catch {
       /* ignore */
     } finally {
@@ -251,7 +269,7 @@ export default function ChatPage() {
 
   async function patchSession(
     id: number,
-    body: Partial<ChatSession> & { status?: ChatSessionStatus; title?: string; symbol?: string | null }
+    body: { status?: ChatSessionStatus; title?: string; symbol?: string | null }
   ) {
     const updated = await apiFetch<ChatSession>(`/chat/sessions/${id}`, {
       method: "PATCH",
@@ -261,9 +279,9 @@ export default function ChatPage() {
     return updated;
   }
 
-  async function minimizeActive() {
-    if (!activeId) return;
-    await patchSession(activeId, { status: "minimized" });
+  async function togglePin() {
+    if (!activeId || !active) return;
+    await patchSession(activeId, { status: pinned ? "open" : "saved" });
   }
 
   async function closeActive() {
@@ -274,31 +292,13 @@ export default function ChatPage() {
     const next =
       remaining.find((s) => s.status === "open") ||
       remaining.find((s) => s.status === "saved") ||
-      remaining.find((s) => s.status === "minimized") ||
       null;
     if (next) {
-      if (next.status === "minimized") await restoreSession(next);
-      else await loadSession(next);
+      await loadSession(next);
     } else {
       setActiveId(null);
       setMessages([]);
     }
-  }
-
-  async function saveActive() {
-    if (!activeId) return;
-    const title =
-      saveTitle.trim() ||
-      active?.title ||
-      (messages.find((m) => m.role === "user")?.content.slice(0, 64) ?? "Uložený chat");
-    await patchSession(activeId, { status: "saved", title });
-    setSaveOpen(false);
-    setSaveTitle("");
-  }
-
-  async function restoreSession(session: ChatSession) {
-    const updated = await patchSession(session.id, { status: "open" });
-    await loadSession(updated);
   }
 
   async function sendMessage(message: string) {
@@ -371,6 +371,8 @@ export default function ChatPage() {
     }
   }
 
+  const windowTitle = active?.title || "Nový chat";
+
   return (
     <div className="flex flex-col gap-4 min-h-[70vh]">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -389,7 +391,7 @@ export default function ChatPage() {
             </button>
           </div>
           {loading && <p className="muted text-sm">Načítám…</p>}
-          {!loading && sessions.filter((s) => s.status !== "minimized").length === 0 && (
+          {!loading && sessions.length === 0 && (
             <p className="muted text-sm">Zatím žádné chaty.</p>
           )}
           {sidebarGroups.map((group) =>
@@ -401,171 +403,105 @@ export default function ChatPage() {
                     key={s.id}
                     type="button"
                     className={`chat-session-item ${activeId === s.id ? "chat-session-item--active" : ""}`}
-                    onClick={() =>
-                      void (s.status === "minimized" ? restoreSession(s) : loadSession(s))
-                    }
+                    onClick={() => void loadSession(s)}
                   >
                     <span className="chat-session-item__title">{s.title}</span>
-                    <span className="chat-session-item__meta">
-                      {STATUS_LABEL[s.status]}
-                      {s.symbol ? ` · ${s.symbol}` : ""}
-                    </span>
+                    {s.symbol && (
+                      <span className="chat-session-item__meta">{s.symbol}</span>
+                    )}
                   </button>
                 ))}
               </div>
             )
           )}
 
-          {hasMessages && !isMinimizedView && (
+          {hasMessages && (
             <div className="space-y-2 pt-2 border-t border-[var(--line)]">
-              <PromptChips
-                ideas={ideas}
-                symbol={symbol}
-                busy={busy}
-                compact
-                onPick={useIdea}
-              />
+              <PromptChips ideas={ideas} symbol={symbol} busy={busy} compact onPick={useIdea} />
               {hint && <p className="text-xs text-[var(--warn)]">{hint}</p>}
             </div>
           )}
         </aside>
 
         <div className="chat-main space-y-3 min-w-0">
-          {active && (
-            <div className="card p-3 flex flex-wrap items-center gap-2 justify-between">
-              <div className="min-w-0">
-                <p className="font-semibold truncate">{active.title}</p>
-                <p className="muted text-xs">
-                  {STATUS_LABEL[active.status]}
-                  {active.symbol ? ` · ${active.symbol}` : ""}
-                </p>
+          {!hasMessages && (
+            <div className="space-y-2">
+              <PromptChips ideas={ideas} symbol={symbol} busy={busy} onPick={useIdea} />
+              {hint && <p className="text-sm text-[var(--warn)]">{hint}</p>}
+            </div>
+          )}
+
+          <div className="chat-window">
+            <div className="chat-titlebar">
+              <div className="chat-titlebar__left min-w-0">
+                <span className="chat-titlebar__title truncate">{windowTitle}</span>
+                {active?.symbol && <span className="badge">{active.symbol}</span>}
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="chat-titlebar__actions">
                 <button
                   type="button"
-                  className="btn"
+                  className={`chat-icon-btn chat-icon-btn--pin ${pinned ? "is-active" : ""}`}
                   disabled={busy || !activeId}
-                  onClick={() => {
-                    setSaveTitle(active.title === "Nový chat" ? "" : active.title);
-                    setSaveOpen((v) => !v);
-                  }}
+                  title={pinned ? "Odepnout" : "Připnout"}
+                  aria-label={pinned ? "Odepnout" : "Připnout"}
+                  onClick={() => void togglePin()}
                 >
-                  Uložit
+                  <PinIcon filled={pinned} />
                 </button>
                 <button
                   type="button"
-                  className="btn"
-                  disabled={busy || !activeId || active.status === "minimized"}
-                  onClick={() => void minimizeActive()}
-                >
-                  Minimalizovat
-                </button>
-                <button
-                  type="button"
-                  className="btn"
+                  className="chat-icon-btn chat-icon-btn--close"
                   disabled={busy || !activeId}
+                  title="Zavřít"
+                  aria-label="Zavřít"
                   onClick={() => void closeActive()}
                 >
-                  Zavřít
+                  <CloseIcon />
                 </button>
               </div>
             </div>
-          )}
 
-          {saveOpen && active && (
-            <div className="card p-3 flex flex-wrap gap-2 items-center">
-              <input
-                className="input flex-1 min-w-[180px]"
-                placeholder="Název uloženého chatu"
-                value={saveTitle}
-                onChange={(e) => setSaveTitle(e.target.value)}
-              />
-              <button type="button" className="btn btn-primary" onClick={() => void saveActive()}>
-                Potvrdit uložení
-              </button>
-              <button type="button" className="btn" onClick={() => setSaveOpen(false)}>
-                Zrušit
-              </button>
-            </div>
-          )}
-
-          {isMinimizedView ? (
-            <div className="advisor-card p-5">
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => active && void restoreSession(active)}
-              >
-                Obnovit chat
-              </button>
-            </div>
-          ) : (
-            <>
-              {!hasMessages && (
-                <div className="space-y-2">
-                  <PromptChips ideas={ideas} symbol={symbol} busy={busy} onPick={useIdea} />
-                  {hint && <p className="text-sm text-[var(--warn)]">{hint}</p>}
-                </div>
+            <div className="chat-window__body space-y-4 overflow-y-auto p-4 max-h-[48vh]">
+              {messages.length === 0 && (
+                <p className="muted text-sm">Vyber návrh nebo napiš otázku.</p>
               )}
 
-              {minimized.length > 0 && (
-                <div className="chat-minibar chat-minibar--pills">
-                  <div className="chat-minibar__list">
-                    {minimized.map((s) => (
-                      <button
-                        key={s.id}
-                        type="button"
-                        className="chat-minibar__chip"
-                        onClick={() => void restoreSession(s)}
-                        title="Obnovit chat"
-                      >
-                        <span className="chat-minibar__title">{s.title}</span>
-                        {s.symbol && <span className="badge">{s.symbol}</span>}
-                      </button>
-                    ))}
+              {messages.map((m) =>
+                m.role === "user" ? (
+                  <div key={m.id} className="chat-user-bubble rise">
+                    {m.content}
                   </div>
-                </div>
+                ) : (
+                  <AdvisorReplyCard
+                    key={m.id}
+                    content={m.content}
+                    symbol={symbol || active?.symbol || undefined}
+                    createdAt={m.created_at}
+                  />
+                )
               )}
 
-              <div className="card flex-1 space-y-4 overflow-y-auto p-4 max-h-[48vh]">
-                {messages.length === 0 && (
-                  <p className="muted text-sm">Vyber návrh nebo napiš otázku.</p>
-                )}
+              {busy && <div className="advisor-card p-4 muted text-sm">Připravuji analýzu…</div>}
+              <div ref={bottomRef} />
+            </div>
 
-                {messages.map((m) =>
-                  m.role === "user" ? (
-                    <div key={m.id} className="chat-user-bubble rise">
-                      {m.content}
-                    </div>
-                  ) : (
-                    <AdvisorReplyCard
-                      key={m.id}
-                      content={m.content}
-                      symbol={symbol || active?.symbol || undefined}
-                      createdAt={m.created_at}
-                    />
-                  )
-                )}
-
-                {busy && <div className="advisor-card p-4 muted text-sm">Připravuji analýzu…</div>}
-                <div ref={bottomRef} />
-              </div>
-
-              <form onSubmit={onSubmit} className="grid gap-2 sm:grid-cols-[180px_1fr_auto]">
-                <SymbolAutocomplete value={symbol} onChange={setSymbol} placeholder="Symbol" />
-                <input
-                  className="input"
-                  placeholder="Nebo napiš vlastní otázku…"
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  required
-                />
-                <button className="btn btn-primary" disabled={busy}>
-                  {busy ? "…" : "Odeslat"}
-                </button>
-              </form>
-            </>
-          )}
+            <form
+              onSubmit={onSubmit}
+              className="chat-window__composer grid gap-2 sm:grid-cols-[180px_1fr_auto] p-3"
+            >
+              <SymbolAutocomplete value={symbol} onChange={setSymbol} placeholder="Symbol" />
+              <input
+                className="input"
+                placeholder="Nebo napiš vlastní otázku…"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                required
+              />
+              <button className="btn btn-primary" disabled={busy}>
+                {busy ? "…" : "Odeslat"}
+              </button>
+            </form>
+          </div>
         </div>
       </div>
     </div>
