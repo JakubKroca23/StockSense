@@ -1,9 +1,60 @@
+# --- Secrets & local env (never commit) ---
 .env
-.env.local
+.env.*
+!.env.example
+!**/.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_rsa.*
+*.secret
+secrets/
+credentials.json
+service-account*.json
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# --- Node / Next.js ---
 **/node_modules/
 **/.next/
+**/out/
+**/.turbo/
+**/.vercel/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.tsbuildinfo
+
+# --- Python ---
 **/__pycache__/
+**/*.py[cod]
 **/.venv/
-**/*.pyc
-.DS_Store
-apps/web/.env*.local
+**/venv/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/*.egg-info/
+.coverage
+htmlcov/
+
+# --- Docker / local overrides ---
+docker-compose.override.yml
+*.log
+
+# --- Misc build / cache ---
+dist/
+build/
+coverage/
+tmp/
+temp/
+.env
