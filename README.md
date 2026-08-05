@@ -13,11 +13,7 @@ Osobní PWA rádce pro analýzu akcií, komodit a crypto.
 cp .env.example .env
 ```
 
-2. Síť Traefik musí existovat (`proxy`):
-
-```bash
-docker network create proxy || true
-```
+2. Traefik síť musí být stejná jako Appwrite (`appwrite` — už na VPS existuje).
 
 3. Spusť stack:
 

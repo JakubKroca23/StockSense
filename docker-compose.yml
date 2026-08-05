@@ -15,7 +15,6 @@ services:
       retries: 10
     networks:
       - stocksense
-      - proxy
 
   api:
     build:
@@ -32,14 +31,21 @@ services:
         condition: service_healthy
     labels:
       - traefik.enable=true
-      - traefik.docker.network=proxy
+      - traefik.docker.network=appwrite
       - traefik.http.routers.stocksense-api.rule=Host(`stocksense.propoj.app`) && PathPrefix(`/api`)
       - traefik.http.routers.stocksense-api.entrypoints=websecure
+      - traefik.http.routers.stocksense-api.tls=true
       - traefik.http.routers.stocksense-api.tls.certresolver=letsencrypt
+      - traefik.http.routers.stocksense-api.priority=20
       - traefik.http.services.stocksense-api.loadbalancer.server.port=8000
+      # HTTP -> HTTPS
+      - traefik.http.routers.stocksense-api-http.rule=Host(`stocksense.propoj.app`) && PathPrefix(`/api`)
+      - traefik.http.routers.stocksense-api-http.entrypoints=web
+      - traefik.http.routers.stocksense-api-http.middlewares=stocksense-https-redirect
+      - traefik.http.middlewares.stocksense-https-redirect.redirectscheme.scheme=https
     networks:
       - stocksense
-      - proxy
+      - appwrite
 
   web:
     build:
@@ -55,15 +61,19 @@ services:
       - api
     labels:
       - traefik.enable=true
-      - traefik.docker.network=proxy
+      - traefik.docker.network=appwrite
       - traefik.http.routers.stocksense-web.rule=Host(`stocksense.propoj.app`)
       - traefik.http.routers.stocksense-web.entrypoints=websecure
+      - traefik.http.routers.stocksense-web.tls=true
       - traefik.http.routers.stocksense-web.tls.certresolver=letsencrypt
       - traefik.http.routers.stocksense-web.priority=1
       - traefik.http.services.stocksense-web.loadbalancer.server.port=3000
+      - traefik.http.routers.stocksense-web-http.rule=Host(`stocksense.propoj.app`)
+      - traefik.http.routers.stocksense-web-http.entrypoints=web
+      - traefik.http.routers.stocksense-web-http.middlewares=stocksense-https-redirect
     networks:
       - stocksense
-      - proxy
+      - appwrite
 
   ollama:
     image: ollama/ollama:latest
@@ -80,5 +90,5 @@ volumes:
 networks:
   stocksense:
     driver: bridge
-  proxy:
+  appwrite:
     external: true
