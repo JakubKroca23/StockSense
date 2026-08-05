@@ -74,7 +74,7 @@ async def mint_user_jwt(
     user_id: str,
     *,
     session_id: str | None = None,
-    duration_sec: int = 86_400,
+    duration_sec: int = 3_600,
 ) -> str:
     """Mint Appwrite JWT via Users API (API key) — works without browser cookies."""
     if not settings.appwrite_api_key:
@@ -82,6 +82,8 @@ async def mint_user_jwt(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Appwrite API key není nastaven",
         )
+    # Appwrite accepts duration in 0..3600 seconds only.
+    duration_sec = max(0, min(int(duration_sec), 3_600))
     payload: dict = {"duration": duration_sec}
     if session_id:
         payload["sessionId"] = session_id

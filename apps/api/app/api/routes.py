@@ -152,7 +152,7 @@ async def health():
     return {"status": "ok", "service": "stocksense-api"}
 
 
-JWT_TTL_SEC = 86_400  # 24h
+JWT_TTL_SEC = 3_600  # Appwrite max for Users.createJWT duration
 
 
 @router.post("/auth/login", response_model=AuthTokenOut)
