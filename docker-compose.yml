@@ -55,7 +55,7 @@ services:
       - api
     labels:
       - traefik.enable=true
-      - traefik.docker.network=appwrite
+      - traefik.docker.network=proxy
       - traefik.http.routers.stocksense-web.rule=Host(`stocksense.propoj.app`)
       - traefik.http.routers.stocksense-web.entrypoints=websecure
       - traefik.http.routers.stocksense-web.tls.certresolver=letsencrypt
@@ -64,7 +64,6 @@ services:
     networks:
       - stocksense
       - proxy
-      - appwrite
 
   ollama:
     image: ollama/ollama:latest
