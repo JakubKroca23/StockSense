@@ -44,8 +44,15 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
 
   if (res.status === 401) {
     const retryToken = await getFreshJwt();
-    if (retryToken && retryToken !== token) {
+    if (retryToken) {
       res = await doFetch(path, init, retryToken);
+    }
+    // Last resort: raw session from cookieFallback (JWT mint may be unavailable)
+    if (!res.ok && res.status === 401) {
+      const session = recoverSessionFromFallback();
+      if (session && session !== retryToken && session !== token) {
+        res = await doFetch(path, init, session);
+      }
     }
   }
 

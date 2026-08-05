@@ -8,7 +8,7 @@ import {
   clearAuthTokens,
   ensureApiAuth,
   getCurrentUser,
-  recoverSessionFromFallback,
+  syncSessionFromStorage,
 } from "@/lib/appwrite";
 import { StockSenseLogo } from "@/components/StockSenseLogo";
 import { NAV_ICON_SIZE, navIcons } from "@/components/NavIcons";
@@ -81,7 +81,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         router.replace("/login");
         return;
       }
-      recoverSessionFromFallback();
+      syncSessionFromStorage();
       await ensureApiAuth();
       if (cancelled) return;
       setName(user.name || user.email || "Ty");

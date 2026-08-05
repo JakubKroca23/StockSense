@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
-import { account, ensureApiAuth, storeSessionSecret } from "@/lib/appwrite";
+import { account, ensureApiAuth, recoverSessionFromFallback, storeSessionSecret } from "@/lib/appwrite";
 import { ID } from "appwrite";
 import { StockSenseLogo } from "@/components/StockSenseLogo";
 
@@ -28,8 +28,13 @@ export default function LoginPage() {
         });
       }
       const session = await account.createEmailPasswordSession({ email, password });
-      storeSessionSecret(session.secret);
-      await ensureApiAuth();
+      // Session.secret is empty for browser SDK (Appwrite 1.8+) — use cookieFallback.
+      if (session.secret) storeSessionSecret(session.secret);
+      recoverSessionFromFallback();
+      const ok = await ensureApiAuth();
+      if (!ok) {
+        throw new Error("Přihlášení proběhlo, ale API token se nevytvořil. Zkus obnovit stránku.");
+      }
       router.replace("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Přihlášení selhalo");
