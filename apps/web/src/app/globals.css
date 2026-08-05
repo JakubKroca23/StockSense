@@ -63,6 +63,7 @@ body {
 }
 
 .app-header__inner {
+  position: relative;
   min-height: 2.75rem;
   overflow: visible;
 }
@@ -89,6 +90,7 @@ body {
     -webkit-app-region: drag;
     app-region: drag;
     z-index: 60;
+    overflow: visible;
   }
 
   .app-header__inner {
@@ -101,6 +103,7 @@ body {
     padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
     padding-right: max(0.75rem, env(safe-area-inset-right, 0px));
     box-sizing: border-box;
+    overflow: visible;
   }
 }
 
@@ -289,11 +292,14 @@ a {
   pointer-events: auto;
 }
 
-/* Roller-blind menu: panel expands above burger, burger rides down */
+/* Roller-blind menu: expands as overlay so header height cannot clip items */
 .nav-roll {
   position: relative;
   z-index: 45;
   align-self: flex-start;
+  width: 2.35rem;
+  height: 2.35rem;
+  flex-shrink: 0;
 }
 
 .nav-roll__sheet {
@@ -310,7 +316,15 @@ a {
 }
 
 .nav-roll__sheet.is-open {
-  width: min(13.5rem, calc(100vw - 2.5rem));
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 50;
+  width: min(14rem, calc(100vw - 2rem));
+  max-height: min(calc(100dvh - 1.25rem), 36rem);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: linear-gradient(
     180deg,
     color-mix(in srgb, #243552 94%, #fff),
@@ -333,9 +347,10 @@ a {
 }
 
 .nav-roll__sheet.is-open .nav-roll__panel {
-  max-height: 22rem;
+  max-height: none;
   opacity: 1;
   pointer-events: auto;
+  overflow: visible;
 }
 
 .nav-roll__list {
@@ -349,8 +364,8 @@ a {
   display: flex;
   align-items: center;
   width: 100%;
-  min-height: 2.15rem;
-  padding: 0.35rem 0.55rem;
+  min-height: 2.35rem;
+  padding: 0.4rem 0.55rem;
   border-radius: 8px;
   border: 1px solid transparent;
   color: #dce7fa;
