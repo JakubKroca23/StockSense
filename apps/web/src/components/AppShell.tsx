@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   clearAuthTokens,
   ensureApiAuth,
@@ -44,9 +44,9 @@ function NavLabel({
   );
 }
 
-function BurgerIcon({ open }: { open: boolean }) {
+function MenuGlyph({ open }: { open: boolean }) {
   return (
-    <span className={`burger-icon ${open ? "burger-icon--open" : ""}`} aria-hidden>
+    <span className={`menu-glyph ${open ? "menu-glyph--open" : ""}`} aria-hidden>
       <span />
       <span />
       <span />
@@ -58,12 +58,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const menuId = useId();
+  const panelRef = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
   const [name, setName] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPath, setMenuPath] = useState(pathname);
 
-  // Close the sheet when the route changes (adjust state during render).
+  const activeLink = links.find((l) => isActive(pathname, l.href)) ?? links[0];
+
+  // Close the panel when the route changes (adjust state during render).
   if (menuPath !== pathname) {
     setMenuPath(pathname);
     if (menuOpen) setMenuOpen(false);
@@ -99,12 +102,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setMenuOpen(false);
     };
+    const onPointer = (e: MouseEvent | TouchEvent) => {
+      const t = e.target as Node | null;
+      if (panelRef.current && t && !panelRef.current.contains(t)) {
+        setMenuOpen(false);
+      }
+    };
     window.addEventListener("keydown", onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    window.addEventListener("mousedown", onPointer);
     return () => {
       window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prev;
+      window.removeEventListener("mousedown", onPointer);
     };
   }, [menuOpen]);
 
@@ -118,26 +126,58 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="app-shell min-h-screen pb-28 md:pb-8">
-      <header className="app-header sticky top-0 z-40 border-b border-[var(--line)] bg-[color-mix(in_srgb,var(--bg)_85%,transparent)] backdrop-blur-md">
-        <div className="app-header__inner mx-auto flex max-w-6xl items-center gap-3 px-4 py-2.5">
-          <div className="flex min-w-0 flex-1 items-center gap-5">
+    <div className="app-shell min-h-screen pb-8">
+      <header className="app-header sticky top-0 z-40">
+        <div className="app-header__inner mx-auto flex max-w-6xl items-center gap-2.5 px-4 py-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2.5 sm:gap-3">
             <Link href="/" className="brand-logo app-no-drag shrink-0" aria-label="StockSense">
               <StockSenseLogo height={28} />
             </Link>
-            <nav className="app-no-drag hidden md:flex items-center gap-3 lg:gap-4">
-              {links.map((l) => (
-                <Link
-                  key={l.href}
-                  href={l.href}
-                  className={`nav-link ${isActive(pathname, l.href) ? "nav-link--active" : ""}`}
-                >
-                  <NavLabel href={l.href} label={l.label} />
-                </Link>
-              ))}
-            </nav>
+
+            <div className="app-no-drag relative" ref={panelRef}>
+              <button
+                type="button"
+                className={`nav-toggle ${menuOpen ? "is-open" : ""}`}
+                aria-label={menuOpen ? "Zavřít menu" : "Otevřít menu"}
+                aria-expanded={menuOpen}
+                aria-controls={menuId}
+                onClick={() => setMenuOpen((v) => !v)}
+              >
+                <MenuGlyph open={menuOpen} />
+                <span className="nav-toggle__text">Menu</span>
+              </button>
+
+              <div
+                id={menuId}
+                className={`nav-flyout ${menuOpen ? "nav-flyout--open" : ""}`}
+                aria-hidden={!menuOpen}
+              >
+                <p className="nav-flyout__title">Navigace</p>
+                <div className="nav-flyout__grid">
+                  {links.map((l) => (
+                    <Link
+                      key={l.href}
+                      href={l.href}
+                      className={`nav-flyout__link ${isActive(pathname, l.href) ? "is-active" : ""}`}
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      <NavLabel href={l.href} label={l.label} compact />
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <Link
+              href={activeLink.href}
+              className="nav-link nav-link--active nav-link--current app-no-drag"
+              aria-current="page"
+            >
+              <NavLabel href={activeLink.href} label={activeLink.label} />
+            </Link>
           </div>
-          <div className="app-no-drag flex shrink-0 items-center gap-3 text-sm">
+
+          <div className="app-no-drag flex shrink-0 items-center gap-2 sm:gap-3 text-sm">
             <span className="muted hidden sm:inline">{name}</span>
             <button
               className="btn"
@@ -152,48 +192,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
-
-      <div className="md:hidden">
+      {menuOpen && (
         <button
           type="button"
-          className={`fab-burger ${menuOpen ? "fab-burger--open" : ""}`}
-          aria-label={menuOpen ? "Zavřít menu" : "Otevřít menu"}
-          aria-expanded={menuOpen}
-          aria-controls={menuId}
-          onClick={() => setMenuOpen((v) => !v)}
-        >
-          <BurgerIcon open={menuOpen} />
-        </button>
-
-        <div
-          className={`nav-sheet-backdrop ${menuOpen ? "nav-sheet-backdrop--open" : ""}`}
+          className="nav-flyout-scrim"
+          aria-label="Zavřít menu"
           onClick={() => setMenuOpen(false)}
-          aria-hidden={!menuOpen}
         />
+      )}
 
-        <nav
-          id={menuId}
-          className={`nav-sheet ${menuOpen ? "nav-sheet--open" : ""}`}
-          aria-hidden={!menuOpen}
-          aria-label="Hlavní menu"
-        >
-          <div className="nav-sheet__handle" aria-hidden />
-          <p className="nav-sheet__title">Menu</p>
-          <div className="nav-sheet__grid">
-            {links.map((l) => (
-              <Link
-                key={l.href}
-                href={l.href}
-                className={`nav-sheet__link ${isActive(pathname, l.href) ? "nav-sheet__link--active" : ""}`}
-                onClick={() => setMenuOpen(false)}
-              >
-                <NavLabel href={l.href} label={l.label} compact />
-              </Link>
-            ))}
-          </div>
-        </nav>
-      </div>
+      <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
     </div>
   );
 }
