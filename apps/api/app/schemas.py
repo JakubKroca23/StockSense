@@ -12,6 +12,7 @@ from app.models import (
     RiskProfile,
     TipAction,
     TipHorizon,
+    TipStatus,
 )
 
 
@@ -117,6 +118,14 @@ class PortfolioPositionOut(ORMModel):
     pnl_pct: float | None = None
 
 
+class TipFeedbackOut(ORMModel):
+    id: int
+    tip_id: int
+    result: FeedbackResult
+    notes: str | None
+    created_at: datetime
+
+
 class TipOut(ORMModel):
     id: int
     instrument: InstrumentOut
@@ -135,12 +144,15 @@ class TipOut(ORMModel):
     rationale: dict[str, Any]
     risks: str | None
     narrative_cs: str | None
+    entry_notes: str | None = None
     data_quality: DataQuality
     risk_profile: RiskProfile
     suggested_size_pct: float | None
     is_active: bool
+    status: str = TipStatus.proposed.value
     as_of: datetime
     created_at: datetime
+    feedback: TipFeedbackOut | None = None
 
 
 class TipFeedbackCreate(BaseModel):
@@ -148,12 +160,16 @@ class TipFeedbackCreate(BaseModel):
     notes: str | None = None
 
 
-class TipFeedbackOut(ORMModel):
-    id: int
-    tip_id: int
-    result: FeedbackResult
-    notes: str | None
-    created_at: datetime
+class TipLifecycleUpdate(BaseModel):
+    status: TipStatus
+    result: FeedbackResult | None = None
+    notes: str | None = None
+
+
+class TipJournalUpdate(BaseModel):
+    entry_notes: str | None = None
+    exit_notes: str | None = None
+    result: FeedbackResult | None = None
 
 
 class UserSettingsOut(ORMModel):
@@ -163,6 +179,8 @@ class UserSettingsOut(ORMModel):
     alert_push: bool
     email: str | None
     preferences: dict[str, Any]
+    push_configured: bool = False
+    vapid_public_key: str | None = None
 
 
 class UserSettingsUpdate(BaseModel):
@@ -173,6 +191,18 @@ class UserSettingsUpdate(BaseModel):
     email: str | None = None
     preferences: dict[str, Any] | None = None
     push_subscription: dict[str, Any] | None = None
+
+
+class HomeOut(BaseModel):
+    portfolio: list[PortfolioPositionOut]
+    tips: list[TipOut]
+    alerts_unread: int
+    risk_profile: RiskProfile
+    briefing_cs: str | None = None
+    briefing_title: str | None = None
+    briefing_at: datetime | None = None
+    tip_stats: dict[str, Any] | None = None
+    equity: list[dict[str, Any]] = []
 
 
 class ChatRequest(BaseModel):
@@ -236,17 +266,6 @@ class AlertOut(ORMModel):
     created_at: datetime
 
 
-class HomeOut(BaseModel):
-    portfolio: list[PortfolioPositionOut]
-    tips: list[TipOut]
-    alerts_unread: int
-    risk_profile: RiskProfile
-    briefing_cs: str | None = None
-    briefing_title: str | None = None
-    tip_stats: dict[str, Any] | None = None
-    equity: list[dict[str, Any]] = []
-
-
 class MacroPointOut(BaseModel):
     series_id: str
     name: str
@@ -281,3 +300,38 @@ class EquityPointOut(BaseModel):
     total_cost: float
     pnl: float
     pnl_pct: float | None = None
+
+
+class WatchlistDigestItem(BaseModel):
+    item_id: int
+    watchlist_id: int
+    symbol: str
+    name: str
+    asset_class: AssetClass
+    price: float | None = None
+    change_pct: float | None = None
+    tip: TipOut | None = None
+    flags: list[str] = []
+
+
+class WatchlistDigestOut(BaseModel):
+    digest_cs: str
+    movers: list[WatchlistDigestItem]
+    as_of: datetime
+
+
+class PaperPositionPreview(BaseModel):
+    tip_id: int
+    symbol: str
+    quantity: float
+    avg_cost: float
+    size_pct: float
+    notional: float
+    portfolio_equity: float
+    is_paper: bool = True
+    notes: str
+
+
+class PaperPositionOut(BaseModel):
+    preview: PaperPositionPreview
+    position: PortfolioPositionOut

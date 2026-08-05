@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { AdvisorReplyCard } from "@/components/AdvisorReplyCard";
 import { SymbolAutocomplete } from "@/components/SymbolAutocomplete";
@@ -162,6 +163,15 @@ function PromptChips({
 }
 
 export default function ChatPage() {
+  return (
+    <Suspense fallback={<div className="muted">Načítám Sense…</div>}>
+      <ChatPageInner />
+    </Suspense>
+  );
+}
+
+function ChatPageInner() {
+  const searchParams = useSearchParams();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -223,16 +233,82 @@ export default function ChatPage() {
         const rows = await apiFetch<ChatSession[]>("/chat/sessions");
         if (cancelled) return;
         setSessions(sortSessions(rows));
-        const prefer =
-          rows.find((s) => s.status === "open") ||
-          rows.find((s) => s.status === "saved") ||
-          rows.find((s) => s.status === "minimized") ||
-          null;
-        if (prefer) {
-          setActiveId(prefer.id);
-          setSymbol(prefer.symbol || "");
-          const history = await apiFetch<ChatMessage[]>(`/chat/history?session_id=${prefer.id}`);
-          if (!cancelled) setMessages(history);
+
+        const qSymbol = (searchParams.get("symbol") || "").trim().toUpperCase();
+        const qPrompt = searchParams.get("prompt") || "";
+        const fresh = searchParams.get("fresh") === "1";
+
+        if (qSymbol) {
+          setSymbol(qSymbol);
+          let session: ChatSession | null = null;
+          if (fresh) {
+            session = await apiFetch<ChatSession>("/chat/sessions", {
+              method: "POST",
+              body: JSON.stringify({ title: `Sense ${qSymbol}`, symbol: qSymbol }),
+            });
+          } else {
+            session =
+              rows.find(
+                (s) =>
+                  (s.symbol || "").toUpperCase() === qSymbol &&
+                  (s.status === "open" || s.status === "saved")
+              ) || null;
+            if (!session) {
+              session = await apiFetch<ChatSession>("/chat/sessions", {
+                method: "POST",
+                body: JSON.stringify({ title: `Sense ${qSymbol}`, symbol: qSymbol }),
+              });
+            }
+          }
+          if (!session || cancelled) return;
+          setSessions((prev) => sortSessions([session!, ...prev.filter((s) => s.id !== session!.id)]));
+          setActiveId(session.id);
+
+          const idea = qPrompt ? PROMPT_IDEAS.find((p) => p.id === qPrompt) : null;
+          if (idea) {
+            setBusy(true);
+            try {
+              const turn = await apiFetch<ChatTurn>("/chat", {
+                method: "POST",
+                body: JSON.stringify({
+                  message: idea.build(qSymbol),
+                  symbol: qSymbol,
+                  session_id: session.id,
+                }),
+              });
+              if (cancelled) return;
+              setSessions((prev) =>
+                sortSessions([turn.session, ...prev.filter((s) => s.id !== turn.session.id)])
+              );
+              setActiveId(turn.session.id);
+              setMessages([turn.user_message, turn.assistant_message]);
+            } catch (err) {
+              if (!cancelled) {
+                setHint(err instanceof Error ? err.message : "Chat selhal");
+                const history = await apiFetch<ChatMessage[]>(
+                  `/chat/history?session_id=${session.id}`
+                );
+                if (!cancelled) setMessages(history);
+              }
+            } finally {
+              if (!cancelled) setBusy(false);
+            }
+          } else {
+            const history = await apiFetch<ChatMessage[]>(`/chat/history?session_id=${session.id}`);
+            if (!cancelled) setMessages(history);
+          }
+        } else {
+          const prefer =
+            rows.find((s) => s.status === "open") ||
+            rows.find((s) => s.status === "saved") ||
+            rows.find((s) => s.status === "minimized") ||
+            null;
+          if (prefer) {
+            setActiveId(prefer.id);
+            setSymbol(prefer.symbol || "");
+            const history = await apiFetch<ChatMessage[]>(`/chat/history?session_id=${prefer.id}`);
+            if (!cancelled) setMessages(history);
+          }
         }
       } catch {
         /* empty */
@@ -243,6 +319,8 @@ export default function ChatPage() {
     return () => {
       cancelled = true;
     };
+    // Bootstrap from deep-link query once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

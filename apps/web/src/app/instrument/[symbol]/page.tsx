@@ -1,10 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { PriceChart, ChartBar, ChartLevel } from "@/components/PriceChart";
-import { PortfolioPosition, Tip, actionLabel, horizonLabel } from "@/lib/types";
+import { DataQualityBadge } from "@/components/DataQualityBadge";
+import { PortfolioPosition, Tip, TipStatus, actionLabel, horizonLabel, tipStatusLabel } from "@/lib/types";
 
 interface Detail {
   instrument: { symbol: string; name: string; asset_class: string; currency?: string };
@@ -72,7 +74,7 @@ export default function InstrumentPage() {
   const [timeframe, setTimeframe] = useState<string>("1d");
   const [lookback, setLookback] = useState<string>("6mo");
   const [chartBusy, setChartBusy] = useState(false);
-  const [alertMsg, setAlertMsg] = useState<string | null>(null);
+  const [actionMsg, setActionMsg] = useState<string | null>(null);
 
   const load = useCallback(
     async (iv: string, lb: string) => {
@@ -113,33 +115,23 @@ export default function InstrumentPage() {
         method: "POST",
         body: JSON.stringify({ result }),
       });
+      await load(timeframe, lookback);
     } finally {
       setFeedbackBusy(false);
     }
   }
 
-  async function watchLevel(
-    kind: "avg_cost" | "stop" | "target" | "custom",
-    price: number,
-    direction: "above" | "below" | "cross" = "cross",
-    note?: string
-  ) {
-    if (!Number.isFinite(price) || price <= 0) return;
-    setAlertMsg(null);
+  async function setTipLifecycle(status: TipStatus, result?: "hit" | "miss" | "partial") {
+    if (!data?.tip) return;
+    setFeedbackBusy(true);
     try {
-      await apiFetch("/price-alerts", {
+      await apiFetch(`/tips/${data.tip.id}/lifecycle`, {
         method: "POST",
-        body: JSON.stringify({
-          symbol,
-          kind,
-          price,
-          direction,
-          note: note || kind,
-        }),
+        body: JSON.stringify({ status, result: result || null }),
       });
-      setAlertMsg(`Hlídač ${kind} @ ${price.toFixed(2)} uložen`);
-    } catch (err) {
-      setAlertMsg(err instanceof Error ? err.message : "Hlídač se neuložil");
+      await load(timeframe, lookback);
+    } finally {
+      setFeedbackBusy(false);
     }
   }
 
@@ -183,26 +175,25 @@ export default function InstrumentPage() {
   const ranges = LOOKBACKS_BY_TF[timeframe] || LOOKBACKS_BY_TF["1d"];
 
   return (
-    <div className="space-y-6">
-      <section className="rise">
-        <p className="muted text-sm">
-          {data.instrument.asset_class} · {data.quote.source} · DQ {data.quote.data_quality}
-        </p>
-        <h1 className="display text-4xl">{data.instrument.symbol}</h1>
-        <p className="muted">{data.instrument.name}</p>
-        <div className="mt-3 flex items-end gap-3">
-          <div className="text-3xl font-semibold">
+    <div className="instrument-page space-y-4">
+      <section className="instrument-page__head rise">
+        <div className="instrument-page__title">
+          <h1 className="display text-2xl sm:text-3xl leading-none">{data.instrument.symbol}</h1>
+          <span className="muted text-sm truncate">{data.instrument.name}</span>
+          <DataQualityBadge quality={data.quote.data_quality} compact />
+        </div>
+        <div className="instrument-page__price">
+          <span className="text-2xl font-semibold tabular-nums">
             {data.quote.price != null ? data.quote.price.toFixed(2) : "—"}
-          </div>
-          <div className={ch != null && ch >= 0 ? "text-[var(--ok)]" : "text-[var(--danger)]"}>
+          </span>
+          <span className={ch != null && ch >= 0 ? "text-[var(--ok)]" : "text-[var(--danger)]"}>
             {ch != null ? `${ch >= 0 ? "+" : ""}${ch.toFixed(2)}%` : ""}
-          </div>
+          </span>
         </div>
       </section>
 
-      <section className="card p-4 sm:p-5 space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="display text-2xl">Graf</h2>
+      <section className="instrument-chart card">
+        <div className="instrument-chart__bar">
           <div className="chart-controls">
             <div className="chart-controls__group" role="group" aria-label="Timeframe">
               {TIMEFRAMES.map((tf) => (
@@ -231,78 +222,11 @@ export default function InstrumentPage() {
               ))}
             </div>
           </div>
+          {chartBusy && <span className="muted text-xs">Načítám…</span>}
         </div>
-
-        {positions.length > 0 && (
-          <div className="chart-positions">
-            {positions.map((p) => {
-              const cost = Number(p.avg_cost);
-              const px = data.quote.price;
-              const pnlPct =
-                px != null && cost > 0 ? ((px - cost) / cost) * 100 : p.pnl_pct != null ? Number(p.pnl_pct) : null;
-              return (
-                <div key={p.id} className="chart-positions__item">
-                  <span className="chart-positions__dot" aria-hidden />
-                  <span>
-                    Pozice {Number(p.quantity)} @ {cost.toFixed(2)}
-                    {p.is_paper ? " (paper)" : ""}
-                  </span>
-                  {pnlPct != null && (
-                    <span className={pnlPct >= 0 ? "text-[var(--ok)]" : "text-[var(--danger)]"}>
-                      {pnlPct >= 0 ? "+" : ""}
-                      {pnlPct.toFixed(2)}%
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        <div className="chart-alert-bar">
-          {positions[0] && (
-            <button
-              type="button"
-              className="btn text-xs px-2 py-1"
-              onClick={() =>
-                watchLevel("avg_cost", Number(positions[0].avg_cost), "cross", "Ø nákup")
-              }
-            >
-              Hlídač Ø nákup
-            </button>
-          )}
-          {data.tip?.stop != null && (
-            <button
-              type="button"
-              className="btn text-xs px-2 py-1"
-              onClick={() => watchLevel("stop", Number(data.tip!.stop), "below", "Stop tipu")}
-            >
-              Hlídač stop
-            </button>
-          )}
-          {data.tip?.target_1 != null && (
-            <button
-              type="button"
-              className="btn text-xs px-2 py-1"
-              onClick={() => watchLevel("target", Number(data.tip!.target_1), "above", "Cíl tipu")}
-            >
-              Hlídač cíl
-            </button>
-          )}
-          {data.quote.price != null && (
-            <button
-              type="button"
-              className="btn text-xs px-2 py-1"
-              onClick={() => watchLevel("custom", Number(data.quote.price), "cross", "Aktuální cena")}
-            >
-              Hlídač teď
-            </button>
-          )}
+        <div className="instrument-chart__stage">
+          <PriceChart bars={data.bars} levels={chartLevels} />
         </div>
-        {alertMsg && <p className="muted text-sm">{alertMsg}</p>}
-
-        {chartBusy && <p className="muted text-sm">Načítám data…</p>}
-        <PriceChart bars={data.bars} height={380} levels={chartLevels} />
       </section>
 
       {data.tip && (
@@ -311,6 +235,9 @@ export default function InstrumentPage() {
             <h2 className="display text-2xl">Aktivní tip</h2>
             <span className={`badge ${data.tip.action}`}>{actionLabel[data.tip.action]}</span>
             <span className="badge">{horizonLabel[data.tip.horizon]}</span>
+            <span className="badge">
+              {tipStatusLabel[data.tip.status || "proposed"] || data.tip.status}
+            </span>
           </div>
           <p className="text-sm">
             Score {data.tip.score} · confidence {(data.tip.confidence * 100).toFixed(0)}%
@@ -325,17 +252,160 @@ export default function InstrumentPage() {
             {JSON.stringify(data.tip.rationale, null, 2)}
           </div>
           <p className="text-sm text-[var(--warn)]">{data.tip.risks}</p>
+          {(data.tip.entry_notes || data.tip.feedback?.notes) && (
+            <div className="text-sm muted space-y-1">
+              {data.tip.entry_notes && <p>Vstup: {data.tip.entry_notes}</p>}
+              {data.tip.feedback?.notes && <p>Výstup: {data.tip.feedback.notes}</p>}
+            </div>
+          )}
+          <div className="tip-journal space-y-2">
+            <label className="block space-y-1">
+              <span className="text-xs muted">Journal — proč vstupuji</span>
+              <textarea
+                className="input"
+                defaultValue={data.tip.entry_notes || ""}
+                id="tip-entry-notes"
+                placeholder="Krátký zápis k vstupu…"
+              />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs muted">Journal — proč vycházím</span>
+              <textarea
+                className="input"
+                defaultValue={data.tip.feedback?.notes || ""}
+                id="tip-exit-notes"
+                placeholder="Krátký zápis k výstupu…"
+              />
+            </label>
+          </div>
           <div className="flex flex-wrap gap-2">
-            <button className="btn" disabled={feedbackBusy} onClick={() => sendFeedback("hit")}>
+            <button
+              className="btn"
+              disabled={feedbackBusy}
+              onClick={async () => {
+                if (!data.tip) return;
+                const entry = (document.getElementById("tip-entry-notes") as HTMLTextAreaElement)?.value || "";
+                const exit = (document.getElementById("tip-exit-notes") as HTMLTextAreaElement)?.value || "";
+                setFeedbackBusy(true);
+                try {
+                  await apiFetch(`/tips/${data.tip.id}/journal`, {
+                    method: "PATCH",
+                    body: JSON.stringify({
+                      entry_notes: entry,
+                      exit_notes: exit || null,
+                      result: data.tip.feedback?.result || (exit ? "partial" : null),
+                    }),
+                  });
+                  await load(timeframe, lookback);
+                } finally {
+                  setFeedbackBusy(false);
+                }
+              }}
+            >
+              Uložit journal
+            </button>
+            {(data.tip.status || "proposed") === "proposed" && (
+              <>
+                <button
+                  className="btn btn-primary"
+                  disabled={feedbackBusy}
+                  onClick={() => {
+                    const entry = (document.getElementById("tip-entry-notes") as HTMLTextAreaElement)?.value;
+                    void setTipLifecycle("accepted").then(() => {
+                      if (entry) {
+                        void apiFetch(`/tips/${data.tip!.id}/journal`, {
+                          method: "PATCH",
+                          body: JSON.stringify({ entry_notes: entry }),
+                        }).then(() => load(timeframe, lookback));
+                      }
+                    });
+                  }}
+                >
+                  Přijmout
+                </button>
+                <button
+                  className="btn"
+                  disabled={feedbackBusy}
+                  onClick={() => setTipLifecycle("rejected")}
+                >
+                  Odmítnout
+                </button>
+              </>
+            )}
+            <button
+              className="btn btn-primary"
+              disabled={feedbackBusy}
+              onClick={async () => {
+                if (!data.tip) return;
+                setFeedbackBusy(true);
+                try {
+                  const res = await apiFetch<{
+                    preview: { quantity: number; avg_cost: number; size_pct: number };
+                  }>(`/tips/${data.tip.id}/paper-position`, { method: "POST" });
+                  setActionMsg(
+                    `Paper: ${res.preview.quantity} @ ${res.preview.avg_cost} (${res.preview.size_pct}%)`
+                  );
+                  await load(timeframe, lookback);
+                } catch (err) {
+                  setActionMsg(err instanceof Error ? err.message : "Paper selhal");
+                } finally {
+                  setFeedbackBusy(false);
+                }
+              }}
+            >
+              Přidat paper pozici
+            </button>
+            <Link
+              href={`/chat?symbol=${encodeURIComponent(symbol)}&prompt=pre-zaver&fresh=1`}
+              className="btn"
+            >
+              Analyzovat v Sense
+            </Link>
+            <button
+              className="btn"
+              disabled={feedbackBusy}
+              onClick={() => {
+                const exit = (document.getElementById("tip-exit-notes") as HTMLTextAreaElement)?.value;
+                void apiFetch(`/tips/${data.tip!.id}/feedback`, {
+                  method: "POST",
+                  body: JSON.stringify({ result: "hit", notes: exit || null }),
+                }).then(() => load(timeframe, lookback));
+              }}
+            >
               Tip vyšel
             </button>
-            <button className="btn" disabled={feedbackBusy} onClick={() => sendFeedback("partial")}>
+            <button
+              className="btn"
+              disabled={feedbackBusy}
+              onClick={() => {
+                const exit = (document.getElementById("tip-exit-notes") as HTMLTextAreaElement)?.value;
+                void apiFetch(`/tips/${data.tip!.id}/feedback`, {
+                  method: "POST",
+                  body: JSON.stringify({ result: "partial", notes: exit || null }),
+                }).then(() => load(timeframe, lookback));
+              }}
+            >
               Částečně
             </button>
-            <button className="btn" disabled={feedbackBusy} onClick={() => sendFeedback("miss")}>
+            <button
+              className="btn"
+              disabled={feedbackBusy}
+              onClick={() => {
+                const exit = (document.getElementById("tip-exit-notes") as HTMLTextAreaElement)?.value;
+                void apiFetch(`/tips/${data.tip!.id}/feedback`, {
+                  method: "POST",
+                  body: JSON.stringify({ result: "miss", notes: exit || null }),
+                }).then(() => load(timeframe, lookback));
+              }}
+            >
               Nevyšel
             </button>
+            {data.tip.feedback && (
+              <span className="badge">uloženo: {data.tip.feedback.result}</span>
+            )}
+            <DataQualityBadge quality={data.tip.data_quality} />
           </div>
+          {actionMsg && <p className="muted text-sm">{actionMsg}</p>}
         </section>
       )}
 

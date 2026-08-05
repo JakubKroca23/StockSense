@@ -225,16 +225,22 @@ export function HomeOverview({
   alertsUnread,
   briefingCs,
   briefingTitle,
+  briefingAt,
   tipStats,
   equity,
+  onGenerateBriefing,
+  briefingBusy,
 }: {
   portfolio: PortfolioPosition[];
   tips: Tip[];
   alertsUnread: number;
   briefingCs?: string | null;
   briefingTitle?: string | null;
+  briefingAt?: string | null;
   tipStats?: HomeData["tip_stats"];
   equity?: HomeData["equity"];
+  onGenerateBriefing?: () => void;
+  briefingBusy?: boolean;
 }) {
   const values = portfolio.map((p) => ({
     p,
@@ -280,18 +286,40 @@ export function HomeOverview({
 
   return (
     <section className="home-overview rise space-y-4">
-      {(briefingCs || briefingTitle) && (
-        <div className="card p-4 sm:p-5 home-briefing">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-            <h3 className="home-chart-title">Sense briefing</h3>
+      <div className="card p-4 sm:p-5 home-briefing">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <h3 className="home-chart-title">Sense briefing</h3>
+          <div className="flex flex-wrap gap-2">
+            {onGenerateBriefing && (
+              <button
+                type="button"
+                className="btn btn-primary text-xs px-2 py-1"
+                disabled={briefingBusy}
+                onClick={onGenerateBriefing}
+              >
+                {briefingBusy ? "Generuji…" : "Vygenerovat teď"}
+              </button>
+            )}
             <Link href="/reports" className="btn text-xs px-2 py-1">
               Celý report
             </Link>
           </div>
-          {briefingTitle && <p className="muted text-xs mb-2">{briefingTitle}</p>}
-          <p className="home-briefing__text">{briefingCs}</p>
         </div>
-      )}
+        {briefingAt && (
+          <p className="muted text-xs mb-2">
+            Poslední běh: {new Date(briefingAt).toLocaleString("cs-CZ")}
+            {briefingTitle ? ` · ${briefingTitle}` : ""}
+          </p>
+        )}
+        {!briefingAt && !briefingCs && (
+          <p className="muted text-sm mb-2">Zatím žádný denní Sense — vygeneruj teď nebo počkej na cron 8:30.</p>
+        )}
+        {briefingCs ? (
+          <p className="home-briefing__text">{briefingCs}</p>
+        ) : (
+          !briefingBusy && <p className="muted text-sm">Briefing bude tady po úspěšném reportu.</p>
+        )}
+      </div>
 
       <div className="home-kpi-grid">
         <div className="home-kpi">

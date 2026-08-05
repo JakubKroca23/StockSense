@@ -28,6 +28,17 @@ export interface PortfolioPosition {
   pnl_pct?: number | null;
 }
 
+export type TipStatus = "proposed" | "accepted" | "rejected" | "closed";
+export type FeedbackResult = "hit" | "miss" | "partial";
+
+export interface TipFeedback {
+  id: number;
+  tip_id: number;
+  result: FeedbackResult;
+  notes?: string | null;
+  created_at: string;
+}
+
 export interface Tip {
   id: number;
   instrument: Instrument;
@@ -50,8 +61,11 @@ export interface Tip {
   risk_profile: RiskProfile;
   suggested_size_pct?: number | null;
   is_active: boolean;
+  status?: TipStatus | string;
+  entry_notes?: string | null;
   as_of: string;
   created_at: string;
+  feedback?: TipFeedback | null;
 }
 
 export interface HomeData {
@@ -61,6 +75,7 @@ export interface HomeData {
   risk_profile: RiskProfile;
   briefing_cs?: string | null;
   briefing_title?: string | null;
+  briefing_at?: string | null;
   tip_stats?: {
     total: number;
     hits: number;
@@ -85,14 +100,40 @@ export interface Watchlist {
   items: { id: number; instrument: Instrument; notes?: string | null }[];
 }
 
+export interface AlertPrefs {
+  alert_kinds?: {
+    new_tip?: boolean;
+    daily_report?: boolean;
+    price_stop?: boolean;
+    price_target?: boolean;
+    price_rule?: boolean;
+    tip_invalidated?: boolean;
+  };
+  quiet_hours?: {
+    enabled?: boolean;
+    start?: string;
+    end?: string;
+    timezone?: string;
+  };
+}
+
 export interface UserSettings {
   risk_profile: RiskProfile;
   max_position_pct: number;
   alert_email: boolean;
   alert_push: boolean;
   email?: string | null;
-  preferences: Record<string, unknown>;
+  preferences: AlertPrefs & Record<string, unknown>;
+  push_configured?: boolean;
+  vapid_public_key?: string | null;
 }
+
+export const tipStatusLabel: Record<string, string> = {
+  proposed: "Navržený",
+  accepted: "Přijatý",
+  rejected: "Odmítnutý",
+  closed: "Uzavřený",
+};
 
 export interface AlertItem {
   id: number;

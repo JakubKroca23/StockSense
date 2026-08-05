@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     alert_email_to: str = ""
 
+    # Web Push (VAPID). Empty = push disabled.
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    vapid_subject: str = "mailto:stocksense@propoj.app"
+
     default_risk_profile: str = "balanced"
     price_poll_minutes: int = 5
     scoring_cron_hours: str = "7,12,17,21"

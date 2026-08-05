@@ -134,38 +134,37 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <StockSenseLogo height={28} />
             </Link>
 
-            <div className="app-no-drag relative" ref={panelRef}>
-              <button
-                type="button"
-                className={`nav-toggle ${menuOpen ? "is-open" : ""}`}
-                aria-label={menuOpen ? "Zavřít menu" : "Otevřít menu"}
-                aria-expanded={menuOpen}
-                aria-controls={menuId}
-                onClick={() => setMenuOpen((v) => !v)}
-              >
-                <MenuGlyph open={menuOpen} />
-                <span className="nav-toggle__text">Menu</span>
-              </button>
-
-              <div
-                id={menuId}
-                className={`nav-flyout ${menuOpen ? "nav-flyout--open" : ""}`}
-                aria-hidden={!menuOpen}
-              >
-                <p className="nav-flyout__title">Navigace</p>
-                <div className="nav-flyout__grid">
-                  {links.map((l, i) => (
-                    <Link
-                      key={l.href}
-                      href={l.href}
-                      className={`nav-flyout__link ${isActive(pathname, l.href) ? "is-active" : ""}`}
-                      style={{ ["--nav-item-delay" as string]: `${40 + i * 38}ms` }}
-                      onClick={() => setMenuOpen(false)}
-                    >
-                      <NavLabel href={l.href} label={l.label} compact />
-                    </Link>
-                  ))}
+            <div className="app-no-drag nav-roll" ref={panelRef}>
+              <div className={`nav-roll__sheet ${menuOpen ? "is-open" : ""}`}>
+                <div
+                  id={menuId}
+                  className="nav-roll__panel"
+                  aria-hidden={!menuOpen}
+                >
+                  <div className="nav-roll__list">
+                    {links.map((l) => (
+                      <Link
+                        key={l.href}
+                        href={l.href}
+                        className={`nav-roll__link ${isActive(pathname, l.href) ? "is-active" : ""}`}
+                        tabIndex={menuOpen ? 0 : -1}
+                        onClick={() => setMenuOpen(false)}
+                      >
+                        <NavLabel href={l.href} label={l.label} />
+                      </Link>
+                    ))}
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  className={`nav-toggle ${menuOpen ? "is-open" : ""}`}
+                  aria-label={menuOpen ? "Zavřít menu" : "Otevřít menu"}
+                  aria-expanded={menuOpen}
+                  aria-controls={menuId}
+                  onClick={() => setMenuOpen((v) => !v)}
+                >
+                  <MenuGlyph open={menuOpen} />
+                </button>
               </div>
             </div>
 

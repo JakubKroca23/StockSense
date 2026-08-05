@@ -1,8 +1,9 @@
-const CACHE = "stocksense-v4";
-const ASSETS = ["/", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
+const CACHE = "stocksense-v6";
+const ASSETS = ["/", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/login"];
 
 function shouldBypass(url) {
   // Never cache authenticated API / Next data — avoids stale 401s.
+  // Offline home/tips live in IndexedDB (apps/web/src/lib/offline.ts).
   return (
     url.pathname.startsWith("/api") ||
     url.pathname.startsWith("/_next")
@@ -10,7 +11,7 @@ function shouldBypass(url) {
 }
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)).catch(() => {}));
   self.skipWaiting();
 });
 
@@ -38,6 +39,24 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // Navigations: network-first, then cache (last visited shell pages)
+  if (req.mode === "navigate") {
+    event.respondWith(
+      fetch(req)
+        .then((res) => {
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((cache) => cache.put(req, copy)).catch(() => {});
+          }
+          return res;
+        })
+        .catch(() =>
+          caches.match(req).then((cached) => cached || caches.match("/") || caches.match("/login"))
+        )
+    );
+    return;
+  }
+
   event.respondWith(
     fetch(req)
       .then((res) => {
@@ -52,11 +71,35 @@ self.addEventListener("fetch", (event) => {
 });
 
 self.addEventListener("push", (event) => {
-  let data = { title: "StockSense", body: "Nový alert" };
+  let data = { title: "StockSense", body: "Nový alert", url: "/alerts" };
   try {
-    data = event.data ? event.data.json() : data;
+    data = { ...data, ...(event.data ? event.data.json() : {}) };
   } catch {
     data.body = event.data ? event.data.text() : data.body;
   }
-  event.waitUntil(self.registration.showNotification(data.title, { body: data.body }));
+  event.waitUntil(
+    self.registration.showNotification(data.title || "StockSense", {
+      body: data.body || "",
+      data: { url: data.url || "/alerts" },
+      icon: "/icon-192.png",
+      badge: "/icon-192.png",
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const path = (event.notification.data && event.notification.data.url) || "/alerts";
+  const target = new URL(path, self.location.origin).href;
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      for (const client of list) {
+        if ("focus" in client) {
+          client.navigate(target);
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) return clients.openWindow(target);
+    })
+  );
 });

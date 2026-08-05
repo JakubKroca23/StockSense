@@ -202,20 +202,35 @@ export default function PortfolioPage() {
         <div>
           <h1 className="display text-3xl">Portfolio</h1>
           <p className="muted mt-1">
-            Ceny pozic zadávej v podkladové měně instrumentu. Součty v {displayCcy}.
+            Ceny pozic zadávej v podkladové měně instrumentu. Součty v {displayCcy}. Export pro Excel/daně.
           </p>
         </div>
-        <div className="currency-switch" role="group" aria-label="Měna portfolia">
-          {DISPLAY_CURRENCIES.map((ccy) => (
-            <button
-              key={ccy}
-              type="button"
-              className={`currency-switch__btn ${displayCcy === ccy ? "is-active" : ""}`}
-              onClick={() => void setCurrency(ccy)}
-            >
-              {ccy === "USD" ? "$ USD" : ccy === "EUR" ? "€ EUR" : "Kč CZK"}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              void import("@/lib/csv").then(({ downloadApiCsv }) =>
+                downloadApiCsv("/export/portfolio.csv", "stocksense-portfolio.csv").catch((err) =>
+                  setError(err instanceof Error ? err.message : "Export selhal")
+                )
+              );
+            }}
+          >
+            Export CSV
+          </button>
+          <div className="currency-switch" role="group" aria-label="Měna portfolia">
+            {DISPLAY_CURRENCIES.map((ccy) => (
+              <button
+                key={ccy}
+                type="button"
+                className={`currency-switch__btn ${displayCcy === ccy ? "is-active" : ""}`}
+                onClick={() => void setCurrency(ccy)}
+              >
+                {ccy === "USD" ? "$ USD" : ccy === "EUR" ? "€ EUR" : "Kč CZK"}
+              </button>
+            ))}
+          </div>
         </div>
       </section>
 

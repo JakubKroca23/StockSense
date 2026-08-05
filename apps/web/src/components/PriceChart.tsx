@@ -20,6 +20,7 @@ export type ChartBar = {
   low: number;
   close: number;
   volume?: number;
+  data_quality?: string;
 };
 
 export type ChartLevel = {
@@ -31,8 +32,10 @@ export type ChartLevel = {
 
 type Props = {
   bars: ChartBar[];
+  /** Fixed px height, or omit to fill parent (`.price-chart--fill`). */
   height?: number;
   levels?: ChartLevel[];
+  className?: string;
 };
 
 function toUnix(ts: string): Time {
@@ -49,12 +52,13 @@ function hexAlpha(hex: string, alpha: number): string {
   return `#${h}${a}`;
 }
 
-export function PriceChart({ bars, height = 360, levels = [] }: Props) {
+export function PriceChart({ bars, height, levels = [], className }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const linesRef = useRef<IPriceLine[]>([]);
+  const fill = height == null;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -67,9 +71,13 @@ export function PriceChart({ bars, height = 360, levels = [] }: Props) {
     const sense = styles.getPropertyValue("--sense").trim() || "#5dde8a";
     const bgSoft = styles.getPropertyValue("--bg-soft").trim() || "#182238";
 
+    const initialH = fill
+      ? Math.max(containerRef.current.clientHeight || 480, 240)
+      : height;
+
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
-      height,
+      height: initialH,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
         textColor: muted,
@@ -140,9 +148,14 @@ export function PriceChart({ bars, height = 360, levels = [] }: Props) {
     seriesRef.current = candle;
     volumeRef.current = volume;
 
-    const ro = new ResizeObserver(() => {
+    const ro = new ResizeObserver((entries) => {
       if (!containerRef.current || !chartRef.current) return;
-      chartRef.current.applyOptions({ width: containerRef.current.clientWidth });
+      const entry = entries[0];
+      const w = entry?.contentRect.width ?? containerRef.current.clientWidth;
+      const h = fill
+        ? Math.max(entry?.contentRect.height ?? containerRef.current.clientHeight, 240)
+        : height!;
+      chartRef.current.applyOptions({ width: w, height: h });
     });
     ro.observe(containerRef.current);
 
@@ -154,7 +167,7 @@ export function PriceChart({ bars, height = 360, levels = [] }: Props) {
       volumeRef.current = null;
       linesRef.current = [];
     };
-  }, [height]);
+  }, [height, fill]);
 
   useEffect(() => {
     if (!seriesRef.current || !volumeRef.current || !chartRef.current) return;
@@ -248,23 +261,17 @@ export function PriceChart({ bars, height = 360, levels = [] }: Props) {
     });
   }, [levels]);
 
-  function resetZoom() {
-    chartRef.current?.timeScale().fitContent();
-  }
-
   if (!bars.length) {
     return <p className="muted text-sm">Graf zatím nemá data.</p>;
   }
 
   return (
-    <div className="price-chart">
-      <div className="price-chart__toolbar">
-        <span className="muted text-xs">Kolečko = zoom · táhni = posun · dvojklik na osu = reset</span>
-        <button type="button" className="btn text-xs px-2 py-1" onClick={resetZoom}>
-          Celý rozsah
-        </button>
-      </div>
-      <div ref={containerRef} className="price-chart__canvas" style={{ height }} />
+    <div className={`price-chart${fill ? " price-chart--fill" : ""}${className ? ` ${className}` : ""}`}>
+      <div
+        ref={containerRef}
+        className="price-chart__canvas"
+        style={fill ? undefined : { height }}
+      />
     </div>
   );
 }

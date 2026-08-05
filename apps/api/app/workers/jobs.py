@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models import (
     Alert,
+    FeedbackResult,
     Instrument,
     MacroSnapshot,
     PortfolioPosition,
@@ -18,6 +19,7 @@ from app.models import (
     Report,
     RiskProfile,
     Tip,
+    TipStatus,
     UserSettings,
     Watchlist,
 )
@@ -28,6 +30,7 @@ from app.services.instruments import ensure_discovery_universe
 from app.services.llm import LLMTask, llm_complete, narrate_tip
 from app.services.market_data import market_data
 from app.services.scoring import score_instrument
+from app.services.tip_lifecycle import close_tip, invalidate_expired_tips, score_flip
 
 logger = logging.getLogger(__name__)
 
@@ -187,9 +190,17 @@ async def _run_scoring(
     instruments = await _instruments_for_user(db, user_id)
     await sync_prices_for_instruments(db, instruments)
 
-    # deactivate old tips
-    old = await db.execute(select(Tip).where(Tip.user_id == user_id, Tip.is_active.is_(True)))
+    # deactivate old tips (keep accepted ones the user is following)
+    old = await db.execute(
+        select(Tip)
+        .where(Tip.user_id == user_id, Tip.is_active.is_(True))
+        .options(selectinload(Tip.instrument))
+    )
+    accepted_by_inst: dict[int, Tip] = {}
     for tip in old.scalars().all():
+        if (tip.status or "proposed") == TipStatus.accepted.value:
+            accepted_by_inst[tip.instrument_id] = tip
+            continue
         tip.is_active = False
 
     created: list[Tip] = []
@@ -202,6 +213,28 @@ async def _run_scoring(
             )
             if not result:
                 continue
+
+            accepted = accepted_by_inst.get(inst.id)
+            if accepted:
+                if score_flip(
+                    accepted.score,
+                    accepted.action.value,
+                    result.score,
+                    result.action.value,
+                ):
+                    await close_tip(
+                        db,
+                        accepted,
+                        result=FeedbackResult.miss,
+                        notes=(
+                            f"Velká změna scoringu: {accepted.score:.0f}/{accepted.action.value} → "
+                            f"{result.score:.0f}/{result.action.value}."
+                        ),
+                    )
+                    # fall through to create a fresh proposed tip
+                else:
+                    continue
+
             tip = Tip(
                 user_id=user_id,
                 instrument_id=inst.id,
@@ -223,6 +256,7 @@ async def _run_scoring(
                 risk_profile=risk,
                 suggested_size_pct=result.suggested_size_pct,
                 is_active=True,
+                status=TipStatus.proposed.value,
             )
             # narrative for stronger tips
             if abs(result.score) >= 20:
@@ -336,6 +370,47 @@ async def generate_daily_report(db: AsyncSession, user_id: str) -> Report:
     )
     briefing = _briefing_excerpt(narrative)
     title = f"Denní report {datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
+
+    by_action: dict[str, int] = {}
+    for t in tips:
+        key = t.action.value
+        by_action[key] = by_action.get(key, 0) + 1
+    tip_cards = [
+        {
+            "symbol": t.instrument.symbol,
+            "name": t.instrument.name or "",
+            "action": t.action.value,
+            "horizon": t.horizon.value,
+            "score": round(float(t.score), 1),
+            "confidence": round(float(t.confidence), 3),
+            "stop": t.stop,
+            "target_1": t.target_1,
+            "entry_low": t.entry_low,
+            "entry_high": t.entry_high,
+            "narrative": (t.narrative_cs or t.scenario_base or "")[:220],
+            "data_quality": t.data_quality.value,
+        }
+        for t in tips[:8]
+    ]
+    macro_points = [
+        {
+            "series_id": sid,
+            "name": m.name or sid,
+            "value": m.value,
+        }
+        for sid, m in list(macro_by.items())[:6]
+    ]
+    portfolio_cards = [
+        {
+            "symbol": p.instrument.symbol,
+            "qty": float(p.quantity),
+            "avg_cost": float(p.avg_cost),
+            "is_paper": bool(p.is_paper),
+            "asset_class": p.instrument.asset_class.value,
+        }
+        for p in positions[:10]
+    ]
+
     report = Report(
         user_id=user_id,
         kind="daily",
@@ -346,16 +421,28 @@ async def generate_daily_report(db: AsyncSession, user_id: str) -> Report:
             "position_count": len(positions),
             "briefing_cs": briefing,
             "focus_symbols": [t.instrument.symbol for t in top2],
+            "by_action": by_action,
+            "tips": tip_cards,
+            "macro": macro_points,
+            "portfolio": portfolio_cards,
+            "avg_score": round(sum(float(t.score) for t in tips) / len(tips), 1) if tips else 0,
+            "avg_confidence": round(
+                sum(float(t.confidence) for t in tips) / len(tips), 3
+            )
+            if tips
+            else 0,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
         },
     )
     db.add(report)
+    await db.flush()
     await create_alert(
         db,
         user_id=user_id,
         kind="daily_report",
         title=title,
         body="Denní Sense briefing je připravený.",
-        payload={},
+        payload={"report_id": report.id},
     )
     await db.commit()
     await db.refresh(report)
@@ -461,6 +548,9 @@ async def _recent_alert_exists(
 
 async def check_price_alerts(db: AsyncSession, user_id: str) -> int:
     n = 0
+    # Expiry by tip horizon (intraday/swing/…)
+    n += await invalidate_expired_tips(db, user_id)
+
     # 1) Tip-derived levels
     tips = (
         await db.execute(
@@ -507,9 +597,17 @@ async def check_price_alerts(db: AsyncSession, user_id: str) -> int:
                     "level_price": level_px,
                 },
             )
+            # Auto-close: stop = miss, target = hit
+            await close_tip(
+                db,
+                tip,
+                result=FeedbackResult.miss if hit == "stop" else FeedbackResult.hit,
+                notes=f"Auto-uzavření po zásahu {hit} @ {price:.4f} (level {level_px}).",
+                alert=False,  # price_* alert already created
+            )
             n += 1
 
-    # 2) User price rules (+ auto avg_cost near-touch)
+    # 2) User price rules
     rules = (
         await db.execute(
             select(PriceAlertRule)

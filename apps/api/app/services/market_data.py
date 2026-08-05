@@ -190,6 +190,11 @@ class YFinanceProvider:
         dq = DataQuality.medium if price is not None else DataQuality.unavailable
         if price is not None and not info:
             dq = DataQuality.low
+        # Rich fundamentals → higher confidence in quote quality
+        elif price is not None and fundamentals.get("market_cap") and (
+            fundamentals.get("pe") or fundamentals.get("sector")
+        ):
+            dq = DataQuality.high
         return QuoteSnapshot(
             symbol=symbol,
             price=float(price) if price is not None else None,
@@ -239,7 +244,7 @@ class StooqProvider:
                     close=float(row["Close"]),
                     volume=float(row.get("Volume") or 0),
                     source="stooq",
-                    data_quality=DataQuality.medium,
+                    data_quality=DataQuality.proxy,
                 )
             )
         return bars
@@ -264,7 +269,7 @@ class StooqProvider:
             price=last.close,
             change_pct=change,
             source="stooq",
-            data_quality=DataQuality.medium,
+            data_quality=DataQuality.proxy,
             as_of=datetime.now(timezone.utc),
             fundamentals={},
         )
@@ -331,7 +336,9 @@ class CcxtProvider:
             price=float(ticker["last"]) if ticker.get("last") is not None else None,
             change_pct=float(ticker["percentage"]) if ticker.get("percentage") is not None else None,
             source=f"ccxt:{self.exchange_id}",
-            data_quality=DataQuality.high,
+            data_quality=(
+                DataQuality.high if ticker.get("last") is not None else DataQuality.unavailable
+            ),
             as_of=datetime.now(timezone.utc),
             fundamentals={"funding_rate": funding} if funding is not None else {},
         )
@@ -377,6 +384,7 @@ class YahooChartProvider:
         closes = quote.get("close") or []
         vols = quote.get("volume") or []
         bars: list[OhlcvBar] = []
+        dq = DataQuality.low if iv not in ("1d", "1wk") else DataQuality.medium
         for i, ts in enumerate(ts_list):
             c = closes[i] if i < len(closes) else None
             if c is None:
@@ -390,7 +398,7 @@ class YahooChartProvider:
                     close=float(c),
                     volume=float(vols[i] if i < len(vols) and vols[i] is not None else 0),
                     source="yahoo_chart",
-                    data_quality=DataQuality.medium,
+                    data_quality=dq,
                 )
             )
         if iv == "4h":
@@ -417,7 +425,7 @@ class YahooChartProvider:
             price=last.close,
             change_pct=change,
             source="yahoo_chart",
-            data_quality=DataQuality.medium,
+            data_quality=last.data_quality,
             as_of=datetime.now(timezone.utc),
             fundamentals={},
         )

@@ -68,6 +68,16 @@ async def _ensure_chat_schema(conn) -> None:
     await conn.execute(
         text("CREATE INDEX IF NOT EXISTS ix_chat_messages_session_id ON chat_messages (session_id);")
     )
+    await conn.execute(
+        text("ALTER TABLE tips ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'proposed'")
+    )
+    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tips_status ON tips (status)"))
+    await conn.execute(
+        text("UPDATE tips SET status = 'proposed' WHERE status IS NULL OR status = ''")
+    )
+    await conn.execute(
+        text("ALTER TABLE tips ADD COLUMN IF NOT EXISTS entry_notes TEXT")
+    )
 
 
 async def _init_db() -> None:

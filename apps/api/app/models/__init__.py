@@ -66,6 +66,13 @@ class FeedbackResult(str, enum.Enum):
     partial = "partial"
 
 
+class TipStatus(str, enum.Enum):
+    proposed = "proposed"
+    accepted = "accepted"
+    rejected = "rejected"
+    closed = "closed"
+
+
 class Instrument(Base):
     __tablename__ = "instruments"
 
@@ -173,10 +180,12 @@ class Tip(Base):
     rationale: Mapped[dict] = mapped_column(JSONB, default=dict)
     risks: Mapped[str | None] = mapped_column(Text, nullable=True)
     narrative_cs: Mapped[str | None] = mapped_column(Text, nullable=True)
+    entry_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     data_quality: Mapped[DataQuality] = mapped_column(Enum(DataQuality), default=DataQuality.medium)
     risk_profile: Mapped[RiskProfile] = mapped_column(Enum(RiskProfile), default=RiskProfile.balanced)
     suggested_size_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    status: Mapped[str] = mapped_column(String(32), default=TipStatus.proposed.value, index=True)
     as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
