@@ -33,7 +33,7 @@ services:
         condition: service_healthy
     labels:
       - traefik.enable=true
-      - traefik.docker.network=appwrite
+      - traefik.docker.network=proxy
       - traefik.http.routers.stocksense-api.rule=Host(`stocksense.propoj.app`) && PathPrefix(`/api`)
       - traefik.http.routers.stocksense-api.entrypoints=websecure
       - traefik.http.routers.stocksense-api.tls.certresolver=letsencrypt
@@ -41,7 +41,6 @@ services:
     networks:
       - stocksense
       - proxy
-      - appwrite
 
   web:
     build:
