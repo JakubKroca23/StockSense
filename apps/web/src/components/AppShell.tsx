@@ -123,7 +123,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="app-header__inner mx-auto flex max-w-6xl items-center gap-3 px-4 py-2.5">
           <div className="flex min-w-0 flex-1 items-center gap-5">
             <Link href="/" className="brand-logo app-no-drag shrink-0" aria-label="StockSense">
-              <StockSenseLogo height={36} />
+              <StockSenseLogo height={28} />
             </Link>
             <nav className="app-no-drag hidden md:flex items-center gap-3 lg:gap-4">
               {links.map((l) => (
