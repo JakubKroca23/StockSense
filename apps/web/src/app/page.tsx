@@ -1,9 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import { SymbolAutocomplete } from "@/components/SymbolAutocomplete";
 import {
   HomeData,
   PortfolioPosition,
@@ -77,9 +76,6 @@ export default function HomePage() {
   const [data, setData] = useState<HomeData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [symbol, setSymbol] = useState("");
-  const [qty, setQty] = useState("1");
-  const [cost, setCost] = useState("");
 
   async function load() {
     try {
@@ -102,29 +98,6 @@ export default function HomePage() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Scoring selhal");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function addPosition(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      await apiFetch("/portfolio", {
-        method: "POST",
-        body: JSON.stringify({
-          symbol,
-          quantity: Number(qty),
-          avg_cost: Number(cost),
-          is_paper: false,
-        }),
-      });
-      setSymbol("");
-      setCost("");
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Uložení selhalo");
     } finally {
       setBusy(false);
     }
@@ -155,21 +128,29 @@ export default function HomePage() {
         <section className="card p-5 rise">
           <div className="flex items-center justify-between mb-3">
             <h2 className="display text-2xl">Portfolio</h2>
+            <Link href="/portfolio" className="btn text-xs px-2 py-1">
+              Spravovat
+            </Link>
           </div>
           <div>
             {(data?.portfolio || []).length === 0 && (
-              <p className="muted text-sm mb-3">Zatím prázdné — přidej ruční evidenci.</p>
+              <p className="muted text-sm mb-3">
+                Zatím prázdné —{" "}
+                <Link href="/portfolio" className="text-[var(--accent)]">
+                  přidej pozice
+                </Link>
+                .
+              </p>
             )}
-            {(data?.portfolio || []).map((p) => (
+            {(data?.portfolio || []).slice(0, 6).map((p) => (
               <PositionRow key={p.id} p={p} />
             ))}
+            {(data?.portfolio || []).length > 6 && (
+              <Link href="/portfolio" className="muted text-sm mt-2 inline-block">
+                +{(data?.portfolio.length || 0) - 6} dalších →
+              </Link>
+            )}
           </div>
-          <form onSubmit={addPosition} className="mt-4 grid grid-cols-3 gap-2">
-            <SymbolAutocomplete value={symbol} onChange={setSymbol} required placeholder="Symbol" />
-            <input className="input" placeholder="Qty" value={qty} onChange={(e) => setQty(e.target.value)} required />
-            <input className="input" placeholder="Avg cost" value={cost} onChange={(e) => setCost(e.target.value)} required />
-            <button className="btn col-span-3" disabled={busy}>Přidat pozici</button>
-          </form>
         </section>
 
         <section className="space-y-3">

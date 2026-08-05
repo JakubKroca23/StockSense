@@ -84,6 +84,14 @@ class PortfolioPositionCreate(BaseModel):
     notes: str | None = None
 
 
+class PortfolioPositionUpdate(BaseModel):
+    quantity: Decimal | None = None
+    avg_cost: Decimal | None = None
+    opened_at: date | None = None
+    is_paper: bool | None = None
+    notes: str | None = None
+
+
 class PortfolioPositionOut(ORMModel):
     id: int
     instrument: InstrumentOut

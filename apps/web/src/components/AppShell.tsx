@@ -7,6 +7,7 @@ import { account, getCurrentUser } from "@/lib/appwrite";
 
 const links = [
   { href: "/", label: "Home" },
+  { href: "/portfolio", label: "Portfolio" },
   { href: "/watchlist", label: "Watchlist" },
   { href: "/chat", label: "Chat" },
   { href: "/reports", label: "Reporty" },
@@ -57,7 +58,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 key={l.href}
                 href={l.href}
                 className={`rounded-lg px-3 py-2 text-sm ${
-                  pathname === l.href ? "bg-[var(--bg-soft)] text-[var(--accent)]" : "muted hover:text-[var(--text)]"
+                  pathname === l.href || (l.href !== "/" && pathname.startsWith(l.href))
+                    ? "bg-[var(--bg-soft)] text-[var(--accent)]"
+                    : "muted hover:text-[var(--text)]"
                 }`}
               >
                 {l.label}
@@ -80,13 +83,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </header>
       <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--line)] bg-[color-mix(in_srgb,var(--bg)_92%,transparent)] backdrop-blur-md md:hidden">
-        <div className="grid grid-cols-6 gap-1 px-1 py-2 text-[11px]">
+        <div className="grid grid-cols-7 gap-0.5 px-0.5 py-2 text-[10px]">
           {links.map((l) => (
             <Link
               key={l.href}
               href={l.href}
-              className={`rounded-lg px-1 py-2 text-center ${
-                pathname === l.href ? "text-[var(--accent)]" : "muted"
+              className={`rounded-lg px-0.5 py-2 text-center leading-tight ${
+                pathname === l.href || (l.href !== "/" && pathname.startsWith(l.href))
+                  ? "text-[var(--accent)]"
+                  : "muted"
               }`}
             >
               {l.label}

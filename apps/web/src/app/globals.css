@@ -428,6 +428,47 @@ textarea {
   background: color-mix(in srgb, var(--bg-soft) 70%, transparent);
 }
 
+.portfolio-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.portfolio-table th,
+.portfolio-table td {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.portfolio-table th {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.portfolio-table tr.is-editing {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.price-chart__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.price-chart__canvas {
+  width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
 .chat-minibar {
   display: flex;
   flex-wrap: wrap;

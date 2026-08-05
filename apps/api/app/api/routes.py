@@ -36,6 +36,7 @@ from app.schemas import (
     MacroPointOut,
     PortfolioPositionCreate,
     PortfolioPositionOut,
+    PortfolioPositionUpdate,
     PriceBarOut,
     ReportOut,
     TipFeedbackCreate,
@@ -316,6 +317,30 @@ async def add_position(
     return next(p for p in positions if p.id == pos.id)
 
 
+@router.patch("/portfolio/{position_id}", response_model=PortfolioPositionOut)
+async def update_position(
+    position_id: int,
+    payload: PortfolioPositionUpdate,
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    pos = (
+        await db.execute(
+            select(PortfolioPosition).where(
+                PortfolioPosition.id == position_id, PortfolioPosition.user_id == user.id
+            )
+        )
+    ).scalar_one_or_none()
+    if not pos:
+        raise HTTPException(404, "Pozice nenalezena")
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        setattr(pos, key, value)
+    await db.commit()
+    positions = await _portfolio_with_marks(db, user.id)
+    return next(p for p in positions if p.id == position_id)
+
+
 @router.delete("/portfolio/{position_id}")
 async def delete_position(
     position_id: int,
@@ -408,10 +433,14 @@ async def instruments_search(
 @router.get("/instruments/{symbol}")
 async def instrument_detail(
     symbol: str,
+    lookback: str = "6mo",
     user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     from app.models import AssetClass, Instrument
+
+    allowed = {"1mo", "3mo", "6mo", "1y", "2y", "5y"}
+    lb = lookback if lookback in allowed else "6mo"
 
     inst = (
         await db.execute(select(Instrument).where(Instrument.symbol == symbol.upper()))
@@ -422,7 +451,7 @@ async def instrument_detail(
         await db.refresh(inst)
 
     quote = await market_data.fetch_quote(inst.symbol, inst.asset_class)
-    bars = await market_data.fetch_ohlcv(inst.symbol, inst.asset_class, lookback="6mo")
+    bars = await market_data.fetch_ohlcv(inst.symbol, inst.asset_class, lookback=lb)
     filings = []
     if inst.asset_class in (AssetClass.stock, AssetClass.etf):
         try:

@@ -1,8 +1,9 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { PriceChart, ChartBar } from "@/components/PriceChart";
 import { Tip, actionLabel, horizonLabel } from "@/lib/types";
 
 interface Detail {
@@ -14,10 +15,19 @@ interface Detail {
     data_quality: string;
     fundamentals: Record<string, number | string | null>;
   };
-  bars: { ts: string; close: number; volume: number }[];
+  bars: ChartBar[];
   filings: { form: string; filing_date: string }[];
   tip: Tip | null;
 }
+
+const RANGES = [
+  { id: "1mo", label: "1M" },
+  { id: "3mo", label: "3M" },
+  { id: "6mo", label: "6M" },
+  { id: "1y", label: "1R" },
+  { id: "2y", label: "2R" },
+  { id: "5y", label: "5R" },
+] as const;
 
 export default function InstrumentPage() {
   const params = useParams<{ symbol: string }>();
@@ -25,29 +35,30 @@ export default function InstrumentPage() {
   const [data, setData] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [feedbackBusy, setFeedbackBusy] = useState(false);
+  const [lookback, setLookback] = useState<string>("6mo");
+  const [chartBusy, setChartBusy] = useState(false);
+
+  const load = useCallback(
+    async (lb: string) => {
+      setChartBusy(true);
+      try {
+        const detail = await apiFetch<Detail>(
+          `/instruments/${encodeURIComponent(symbol)}?lookback=${lb}`
+        );
+        setData(detail);
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Chyba načtení");
+      } finally {
+        setChartBusy(false);
+      }
+    },
+    [symbol]
+  );
 
   useEffect(() => {
-    apiFetch<Detail>(`/instruments/${encodeURIComponent(symbol)}`)
-      .then(setData)
-      .catch((err) => setError(err.message));
-  }, [symbol]);
-
-  const spark = useMemo(() => {
-    const closes = data?.bars.map((b) => b.close) || [];
-    if (closes.length < 2) return null;
-    const min = Math.min(...closes);
-    const max = Math.max(...closes);
-    const w = 320;
-    const h = 80;
-    const pts = closes
-      .map((c, i) => {
-        const x = (i / (closes.length - 1)) * w;
-        const y = h - ((c - min) / (max - min || 1)) * h;
-        return `${x},${y}`;
-      })
-      .join(" ");
-    return { pts, w, h };
-  }, [data]);
+    void load(lookback);
+  }, [load, lookback]);
 
   async function sendFeedback(result: "hit" | "miss" | "partial") {
     if (!data?.tip) return;
@@ -62,7 +73,7 @@ export default function InstrumentPage() {
     }
   }
 
-  if (error) return <div className="card p-4 text-[var(--danger)]">{error}</div>;
+  if (error && !data) return <div className="card p-4 text-[var(--danger)]">{error}</div>;
   if (!data) return <div className="muted">Načítám {symbol}…</div>;
 
   const ch = data.quote.change_pct;
@@ -70,7 +81,9 @@ export default function InstrumentPage() {
   return (
     <div className="space-y-6">
       <section className="rise">
-        <p className="muted text-sm">{data.instrument.asset_class} · {data.quote.source} · DQ {data.quote.data_quality}</p>
+        <p className="muted text-sm">
+          {data.instrument.asset_class} · {data.quote.source} · DQ {data.quote.data_quality}
+        </p>
         <h1 className="display text-4xl">{data.instrument.symbol}</h1>
         <p className="muted">{data.instrument.name}</p>
         <div className="mt-3 flex items-end gap-3">
@@ -81,11 +94,27 @@ export default function InstrumentPage() {
             {ch != null ? `${ch >= 0 ? "+" : ""}${ch.toFixed(2)}%` : ""}
           </div>
         </div>
-        {spark && (
-          <svg viewBox={`0 0 ${spark.w} ${spark.h}`} className="mt-4 w-full max-w-xl h-20">
-            <polyline fill="none" stroke="var(--accent)" strokeWidth="2" points={spark.pts} />
-          </svg>
-        )}
+      </section>
+
+      <section className="card p-4 sm:p-5 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="display text-2xl">Graf</h2>
+          <div className="flex flex-wrap gap-1">
+            {RANGES.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                className={`btn text-xs px-2.5 py-1 ${lookback === r.id ? "btn-primary" : ""}`}
+                disabled={chartBusy}
+                onClick={() => setLookback(r.id)}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {chartBusy && <p className="muted text-sm">Načítám data…</p>}
+        <PriceChart bars={data.bars} height={380} />
       </section>
 
       {data.tip && (
@@ -95,7 +124,9 @@ export default function InstrumentPage() {
             <span className={`badge ${data.tip.action}`}>{actionLabel[data.tip.action]}</span>
             <span className="badge">{horizonLabel[data.tip.horizon]}</span>
           </div>
-          <p className="text-sm">Score {data.tip.score} · confidence {(data.tip.confidence * 100).toFixed(0)}%</p>
+          <p className="text-sm">
+            Score {data.tip.score} · confidence {(data.tip.confidence * 100).toFixed(0)}%
+          </p>
           {data.tip.narrative_cs && <p className="leading-relaxed">{data.tip.narrative_cs}</p>}
           <div className="grid sm:grid-cols-3 gap-3 text-sm">
             <div className="card p-3">Bull: {data.tip.scenario_bull}</div>
@@ -107,9 +138,15 @@ export default function InstrumentPage() {
           </div>
           <p className="text-sm text-[var(--warn)]">{data.tip.risks}</p>
           <div className="flex flex-wrap gap-2">
-            <button className="btn" disabled={feedbackBusy} onClick={() => sendFeedback("hit")}>Tip vyšel</button>
-            <button className="btn" disabled={feedbackBusy} onClick={() => sendFeedback("partial")}>Částečně</button>
-            <button className="btn" disabled={feedbackBusy} onClick={() => sendFeedback("miss")}>Nevyšel</button>
+            <button className="btn" disabled={feedbackBusy} onClick={() => sendFeedback("hit")}>
+              Tip vyšel
+            </button>
+            <button className="btn" disabled={feedbackBusy} onClick={() => sendFeedback("partial")}>
+              Částečně
+            </button>
+            <button className="btn" disabled={feedbackBusy} onClick={() => sendFeedback("miss")}>
+              Nevyšel
+            </button>
           </div>
         </section>
       )}
@@ -120,7 +157,9 @@ export default function InstrumentPage() {
           {Object.entries(data.quote.fundamentals || {}).map(([k, v]) => (
             <div key={k} className="rounded-xl border border-[var(--line)] p-3">
               <div className="muted text-xs">{k}</div>
-              <div className="font-medium">{typeof v === "number" ? Number(v).toPrecision(4) : String(v)}</div>
+              <div className="font-medium">
+                {typeof v === "number" ? Number(v).toPrecision(4) : String(v)}
+              </div>
             </div>
           ))}
           {Object.keys(data.quote.fundamentals || {}).length === 0 && (
@@ -134,7 +173,10 @@ export default function InstrumentPage() {
           <h2 className="display text-2xl mb-3">SEC filings</h2>
           <ul className="space-y-2 text-sm">
             {data.filings.map((f, i) => (
-              <li key={`${f.form}-${f.filing_date}-${i}`} className="flex justify-between border-b border-[var(--line)] py-2">
+              <li
+                key={`${f.form}-${f.filing_date}-${i}`}
+                className="flex justify-between border-b border-[var(--line)] py-2"
+              >
                 <span>{f.form}</span>
                 <span className="muted">{f.filing_date}</span>
               </li>
