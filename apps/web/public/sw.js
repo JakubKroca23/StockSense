@@ -2,11 +2,10 @@ const CACHE = "stocksense-v4";
 const ASSETS = ["/", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
 
 function shouldBypass(url) {
-  // Never cache authenticated API / Appwrite / Next data — avoids stale 401s.
+  // Never cache authenticated API / Next data — avoids stale 401s.
   return (
     url.pathname.startsWith("/api") ||
-    url.pathname.startsWith("/_next") ||
-    url.hostname.includes("appwrite")
+    url.pathname.startsWith("/_next")
   );
 }
 
