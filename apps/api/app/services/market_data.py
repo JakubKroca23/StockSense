@@ -47,14 +47,84 @@ def _ensure_aware(ts: datetime) -> datetime:
     return ts
 
 
+def normalize_interval(interval: str) -> str:
+    raw = (interval or "1d").lower().strip()
+    aliases = {
+        "15min": "15m",
+        "60m": "1h",
+        "60min": "1h",
+        "1hour": "1h",
+        "4hour": "4h",
+        "1day": "1d",
+        "day": "1d",
+        "1w": "1wk",
+        "1week": "1wk",
+        "week": "1wk",
+    }
+    return aliases.get(raw, raw)
+
+
+def clamp_lookback(interval: str, lookback: str) -> str:
+    """Yahoo/yfinance reject long ranges for intraday intervals."""
+    iv = normalize_interval(interval)
+    allowed = {
+        "15m": ("5d", "1mo"),
+        "1h": ("5d", "1mo", "3mo", "6mo"),
+        "4h": ("1mo", "3mo", "6mo", "1y"),
+        "1d": ("5d", "1mo", "3mo", "6mo", "1y", "2y", "5y"),
+        "1wk": ("1y", "2y", "5y"),
+    }
+    opts = allowed.get(iv, allowed["1d"])
+    if lookback in opts:
+        return lookback
+    return opts[-1] if iv in ("1d", "1wk") else opts[0]
+
+
+def aggregate_bars_hours(bars: list[OhlcvBar], hours: int) -> list[OhlcvBar]:
+    """Bucket 1h (or finer) bars into N-hour candles (e.g. 4h)."""
+    if hours <= 1 or not bars:
+        return bars
+    buckets: dict[datetime, list[OhlcvBar]] = {}
+    order: list[datetime] = []
+    for b in bars:
+        ts = _ensure_aware(b.ts)
+        floored = ts.replace(hour=(ts.hour // hours) * hours, minute=0, second=0, microsecond=0)
+        if floored not in buckets:
+            buckets[floored] = []
+            order.append(floored)
+        buckets[floored].append(b)
+    out: list[OhlcvBar] = []
+    for key in order:
+        chunk = buckets[key]
+        out.append(
+            OhlcvBar(
+                ts=key,
+                open=chunk[0].open,
+                high=max(c.high for c in chunk),
+                low=min(c.low for c in chunk),
+                close=chunk[-1].close,
+                volume=sum(c.volume for c in chunk),
+                source=chunk[0].source,
+                data_quality=chunk[0].data_quality,
+            )
+        )
+    return out
+
+
 class YFinanceProvider:
     async def fetch_ohlcv(
         self, symbol: str, asset_class: AssetClass, interval: str = "1d", lookback: str = "6mo"
     ) -> list[OhlcvBar]:
         import yfinance as yf
 
+        iv = normalize_interval(interval)
+        lb = clamp_lookback(iv, lookback)
+        yf_interval = "1h" if iv == "4h" else iv
+        if yf_interval == "1wk":
+            yf_interval = "1wk"
+
         ticker = yf.Ticker(symbol)
-        df = ticker.history(period=lookback, interval=interval, auto_adjust=True)
+        df = ticker.history(period=lb, interval=yf_interval, auto_adjust=True)
         if df is None or df.empty:
             return []
         bars: list[OhlcvBar] = []
@@ -69,9 +139,11 @@ class YFinanceProvider:
                     close=float(row["Close"]),
                     volume=float(row.get("Volume") or 0),
                     source="yfinance",
-                    data_quality=DataQuality.medium if interval == "1d" else DataQuality.low,
+                    data_quality=DataQuality.medium if iv == "1d" else DataQuality.low,
                 )
             )
+        if iv == "4h":
+            bars = aggregate_bars_hours(bars, 4)
         return bars
 
     async def fetch_quote(self, symbol: str, asset_class: AssetClass) -> QuoteSnapshot:
@@ -218,8 +290,11 @@ class CcxtProvider:
         exchange_cls = getattr(ccxt, self.exchange_id)
         exchange = exchange_cls({"enableRateLimit": True})
         market = self._normalize(symbol)
-        timeframe = "1d" if interval in ("1d", "1day") else "1h"
-        limit = 180 if timeframe == "1d" else 168
+        iv = normalize_interval(interval)
+        tf_map = {"15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d", "1wk": "1w"}
+        timeframe = tf_map.get(iv, "1d")
+        limit_map = {"15m": 288, "1h": 336, "4h": 180, "1d": 365, "1w": 260}
+        limit = limit_map.get(timeframe, 180)
         raw = exchange.fetch_ohlcv(market, timeframe=timeframe, limit=limit)
         bars: list[OhlcvBar] = []
         for row in raw:
@@ -268,11 +343,22 @@ class YahooChartProvider:
     async def fetch_ohlcv(
         self, symbol: str, asset_class: AssetClass, interval: str = "1d", lookback: str = "6mo"
     ) -> list[OhlcvBar]:
-        range_map = {"1mo": "1mo", "3mo": "3mo", "6mo": "6mo", "1y": "1y", "5d": "5d"}
-        rng = range_map.get(lookback, "6mo")
-        iv = "1d" if interval in ("1d", "1day") else "1h"
+        iv = normalize_interval(interval)
+        lb = clamp_lookback(iv, lookback)
+        range_map = {
+            "5d": "5d",
+            "1mo": "1mo",
+            "3mo": "3mo",
+            "6mo": "6mo",
+            "1y": "1y",
+            "2y": "2y",
+            "5y": "5y",
+        }
+        rng = range_map.get(lb, "6mo")
+        # Yahoo has no native 4h — pull 60m and aggregate.
+        yahoo_iv = {"15m": "15m", "1h": "60m", "4h": "60m", "1d": "1d", "1wk": "1wk"}.get(iv, "1d")
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-        params = {"range": rng, "interval": iv}
+        params = {"range": rng, "interval": yahoo_iv}
         headers = {"User-Agent": "Mozilla/5.0 StockSense/1.0"}
         async with httpx.AsyncClient(timeout=30.0, headers=headers) as client:
             resp = await client.get(url, params=params)
@@ -307,6 +393,8 @@ class YahooChartProvider:
                     data_quality=DataQuality.medium,
                 )
             )
+        if iv == "4h":
+            bars = aggregate_bars_hours(bars, 4)
         return bars
 
     async def fetch_quote(self, symbol: str, asset_class: AssetClass) -> QuoteSnapshot:
@@ -345,17 +433,19 @@ class CompositeMarketData:
     async def fetch_ohlcv(
         self, symbol: str, asset_class: AssetClass, interval: str = "1d", lookback: str = "6mo"
     ) -> list[OhlcvBar]:
+        iv = normalize_interval(interval)
+        lb = clamp_lookback(iv, lookback)
         if asset_class == AssetClass.crypto:
-            bars = await self.ccxt.fetch_ohlcv(symbol, asset_class, interval, lookback)
+            bars = await self.ccxt.fetch_ohlcv(symbol, asset_class, iv, lb)
             if bars:
                 return bars
-        bars = await self.yahoo_chart.fetch_ohlcv(symbol, asset_class, interval, lookback)
+        bars = await self.yahoo_chart.fetch_ohlcv(symbol, asset_class, iv, lb)
         if bars:
             return bars
-        bars = await self.yf.fetch_ohlcv(symbol, asset_class, interval, lookback)
+        bars = await self.yf.fetch_ohlcv(symbol, asset_class, iv, lb)
         if bars:
             return bars
-        return await self.stooq.fetch_ohlcv(symbol, asset_class, interval, lookback)
+        return await self.stooq.fetch_ohlcv(symbol, asset_class, iv, lb)
 
     async def fetch_quote(self, symbol: str, asset_class: AssetClass) -> QuoteSnapshot:
         if asset_class == AssetClass.crypto:

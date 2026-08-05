@@ -1,10 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import { SymbolAutocomplete } from "@/components/SymbolAutocomplete";
-import { PortfolioPosition } from "@/lib/types";
+import { SymbolAutocomplete, SymbolSuggestion } from "@/components/SymbolAutocomplete";
+import { PortfolioPosition, UserSettings } from "@/lib/types";
+
+type DisplayCurrency = "USD" | "EUR" | "CZK";
+
+type FxRates = {
+  base: string;
+  rates: Record<string, number>;
+  as_of?: string;
+};
 
 type EditState = {
   id: number;
@@ -12,32 +20,77 @@ type EditState = {
   avg_cost: string;
   is_paper: boolean;
   notes: string;
+  currency: string;
 };
+
+const DISPLAY_CURRENCIES: DisplayCurrency[] = ["USD", "EUR", "CZK"];
+
+function nativeCcy(p: PortfolioPosition): string {
+  return (p.instrument.currency || "USD").toUpperCase();
+}
+
+function convert(amount: number, from: string, to: string, rates: Record<string, number>): number {
+  const src = (from || "USD").toUpperCase();
+  const dst = (to || "USD").toUpperCase();
+  if (src === dst) return amount;
+  const rSrc = rates[src] ?? 1;
+  const rDst = rates[dst] ?? 1;
+  return (amount / rSrc) * rDst;
+}
+
+function fmt(amount: number | null | undefined, ccy: string, digits = 2): string {
+  if (amount == null || Number.isNaN(amount)) return "—";
+  return `${amount.toFixed(digits)} ${ccy}`;
+}
 
 export default function PortfolioPage() {
   const [positions, setPositions] = useState<PortfolioPosition[]>([]);
+  const [rates, setRates] = useState<Record<string, number>>({ USD: 1, EUR: 0.92, CZK: 23 });
+  const [displayCcy, setDisplayCcy] = useState<DisplayCurrency>("USD");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [symbol, setSymbol] = useState("");
+  const [entryCcy, setEntryCcy] = useState("USD");
   const [qty, setQty] = useState("1");
   const [cost, setCost] = useState("");
   const [paper, setPaper] = useState(false);
   const [notes, setNotes] = useState("");
   const [editing, setEditing] = useState<EditState | null>(null);
 
-  async function load() {
+  const load = useCallback(async () => {
     try {
-      const rows = await apiFetch<PortfolioPosition[]>("/portfolio");
+      const [rows, settings, fx] = await Promise.all([
+        apiFetch<PortfolioPosition[]>("/portfolio"),
+        apiFetch<UserSettings>("/settings"),
+        apiFetch<FxRates>("/fx/rates").catch(() => null),
+      ]);
       setPositions(rows);
+      const pref = String(settings.preferences?.display_currency || "USD").toUpperCase();
+      if (pref === "USD" || pref === "EUR" || pref === "CZK") {
+        setDisplayCcy(pref);
+      }
+      if (fx?.rates) setRates({ USD: 1, ...fx.rates });
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Chyba načtení");
     }
-  }
+  }, []);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
+
+  async function setCurrency(ccy: DisplayCurrency) {
+    setDisplayCcy(ccy);
+    try {
+      await apiFetch<UserSettings>("/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ preferences: { display_currency: ccy } }),
+      });
+    } catch {
+      /* keep local selection */
+    }
+  }
 
   const totals = useMemo(() => {
     let value = 0;
@@ -45,14 +98,20 @@ export default function PortfolioPage() {
     for (const p of positions) {
       const q = Number(p.quantity);
       const c = Number(p.avg_cost);
-      costBasis += q * c;
-      if (p.market_value != null) value += p.market_value;
-      else if (p.last_price != null) value += q * p.last_price;
+      const ccy = nativeCcy(p);
+      costBasis += convert(q * c, ccy, displayCcy, rates);
+      const mvNative =
+        p.market_value != null
+          ? p.market_value
+          : p.last_price != null
+            ? q * p.last_price
+            : null;
+      if (mvNative != null) value += convert(mvNative, ccy, displayCcy, rates);
     }
     const pnl = value - costBasis;
     const pnlPct = costBasis ? (pnl / costBasis) * 100 : 0;
     return { value, costBasis, pnl, pnlPct };
-  }, [positions]);
+  }, [positions, displayCcy, rates]);
 
   async function addPosition(e: FormEvent) {
     e.preventDefault();
@@ -73,6 +132,7 @@ export default function PortfolioPage() {
       setNotes("");
       setQty("1");
       setPaper(false);
+      setEntryCcy("USD");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Uložení selhalo");
@@ -88,6 +148,7 @@ export default function PortfolioPage() {
       avg_cost: String(p.avg_cost),
       is_paper: p.is_paper,
       notes: p.notes || "",
+      currency: nativeCcy(p),
     });
   }
 
@@ -128,12 +189,33 @@ export default function PortfolioPage() {
     }
   }
 
+  function onSymbolChange(sym: string, suggestion?: SymbolSuggestion) {
+    setSymbol(sym);
+    if (suggestion?.currency) {
+      setEntryCcy(String(suggestion.currency).toUpperCase());
+    }
+  }
+
   return (
     <div className="space-y-6">
       <section className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="display text-3xl">Portfolio</h1>
-          <p className="muted mt-1">Ruční evidence pozic — upravuj a maž podle potřeby.</p>
+          <p className="muted mt-1">
+            Ceny pozic zadávej v podkladové měně instrumentu. Součty v {displayCcy}.
+          </p>
+        </div>
+        <div className="currency-switch" role="group" aria-label="Měna portfolia">
+          {DISPLAY_CURRENCIES.map((ccy) => (
+            <button
+              key={ccy}
+              type="button"
+              className={`currency-switch__btn ${displayCcy === ccy ? "is-active" : ""}`}
+              onClick={() => void setCurrency(ccy)}
+            >
+              {ccy === "USD" ? "$ USD" : ccy === "EUR" ? "€ EUR" : "Kč CZK"}
+            </button>
+          ))}
         </div>
       </section>
 
@@ -141,26 +223,22 @@ export default function PortfolioPage() {
 
       <section className="grid gap-3 sm:grid-cols-3">
         <div className="card p-4">
-          <p className="muted text-xs uppercase tracking-wide">Tržní hodnota</p>
-          <p className="text-2xl font-semibold mt-1">
-            {totals.value ? totals.value.toFixed(2) : "—"}
-          </p>
+          <p className="muted text-xs uppercase tracking-wide">Tržní hodnota ({displayCcy})</p>
+          <p className="text-2xl font-semibold mt-1">{fmt(totals.value || null, displayCcy)}</p>
         </div>
         <div className="card p-4">
-          <p className="muted text-xs uppercase tracking-wide">Náklady</p>
-          <p className="text-2xl font-semibold mt-1">
-            {totals.costBasis ? totals.costBasis.toFixed(2) : "—"}
-          </p>
+          <p className="muted text-xs uppercase tracking-wide">Náklady ({displayCcy})</p>
+          <p className="text-2xl font-semibold mt-1">{fmt(totals.costBasis || null, displayCcy)}</p>
         </div>
         <div className="card p-4">
-          <p className="muted text-xs uppercase tracking-wide">PnL</p>
+          <p className="muted text-xs uppercase tracking-wide">PnL ({displayCcy})</p>
           <p
             className={`text-2xl font-semibold mt-1 ${
               totals.pnl >= 0 ? "text-[var(--ok)]" : "text-[var(--danger)]"
             }`}
           >
             {totals.costBasis
-              ? `${totals.pnl >= 0 ? "+" : ""}${totals.pnl.toFixed(2)} (${totals.pnlPct.toFixed(1)}%)`
+              ? `${totals.pnl >= 0 ? "+" : ""}${fmt(totals.pnl, displayCcy)} (${totals.pnlPct.toFixed(1)}%)`
               : "—"}
           </p>
         </div>
@@ -172,6 +250,7 @@ export default function PortfolioPage() {
             <thead>
               <tr>
                 <th>Symbol</th>
+                <th>Měna</th>
                 <th>Qty</th>
                 <th>Avg cost</th>
                 <th>Cena</th>
@@ -183,13 +262,14 @@ export default function PortfolioPage() {
             <tbody>
               {positions.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="muted text-sm py-6 text-center">
+                  <td colSpan={8} className="muted text-sm py-6 text-center">
                     Zatím prázdné — přidej první pozici níže.
                   </td>
                 </tr>
               )}
               {positions.map((p) => {
                 const pnl = p.pnl ?? 0;
+                const ccy = nativeCcy(p);
                 const isEditing = editing?.id === p.id;
                 return (
                   <tr key={p.id} className={isEditing ? "is-editing" : ""}>
@@ -203,13 +283,16 @@ export default function PortfolioPage() {
                       {p.is_paper && <span className="badge ml-2">paper</span>}
                       {p.notes && <div className="muted text-xs mt-0.5">{p.notes}</div>}
                     </td>
+                    <td>
+                      <span className="badge">{ccy}</span>
+                    </td>
                     <td>{Number(p.quantity)}</td>
-                    <td>{Number(p.avg_cost).toFixed(2)}</td>
-                    <td>{p.last_price != null ? p.last_price.toFixed(2) : "—"}</td>
-                    <td>{p.market_value != null ? p.market_value.toFixed(2) : "—"}</td>
+                    <td>{fmt(Number(p.avg_cost), ccy)}</td>
+                    <td>{fmt(p.last_price, ccy)}</td>
+                    <td>{fmt(p.market_value, ccy)}</td>
                     <td className={pnl >= 0 ? "text-[var(--ok)]" : "text-[var(--danger)]"}>
                       {p.pnl != null
-                        ? `${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} (${p.pnl_pct?.toFixed(1)}%)`
+                        ? `${pnl >= 0 ? "+" : ""}${fmt(pnl, ccy)} (${p.pnl_pct?.toFixed(1)}%)`
                         : "—"}
                     </td>
                     <td>
@@ -250,15 +333,18 @@ export default function PortfolioPage() {
               onChange={(e) => setEditing({ ...editing, quantity: e.target.value })}
               required
             />
-            <input
-              className="input"
-              type="number"
-              step="any"
-              placeholder="Avg cost"
-              value={editing.avg_cost}
-              onChange={(e) => setEditing({ ...editing, avg_cost: e.target.value })}
-              required
-            />
+            <div className="relative">
+              <input
+                className="input pr-14"
+                type="number"
+                step="any"
+                placeholder={`Avg cost (${editing.currency})`}
+                value={editing.avg_cost}
+                onChange={(e) => setEditing({ ...editing, avg_cost: e.target.value })}
+                required
+              />
+              <span className="input-ccy">{editing.currency}</span>
+            </div>
             <input
               className="input"
               placeholder="Poznámka"
@@ -281,6 +367,9 @@ export default function PortfolioPage() {
                 Zrušit
               </button>
             </div>
+            <p className="sm:col-span-5 muted text-xs">
+              Avg cost zadávej v podkladové měně pozice ({editing.currency}).
+            </p>
           </form>
         )}
       </section>
@@ -288,7 +377,12 @@ export default function PortfolioPage() {
       <section className="card p-5">
         <h2 className="display text-xl mb-3">Přidat pozici</h2>
         <form onSubmit={addPosition} className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
-          <SymbolAutocomplete value={symbol} onChange={setSymbol} required placeholder="Symbol" />
+          <SymbolAutocomplete
+            value={symbol}
+            onChange={onSymbolChange}
+            required
+            placeholder="Symbol"
+          />
           <input
             className="input"
             placeholder="Qty"
@@ -296,13 +390,16 @@ export default function PortfolioPage() {
             onChange={(e) => setQty(e.target.value)}
             required
           />
-          <input
-            className="input"
-            placeholder="Avg cost"
-            value={cost}
-            onChange={(e) => setCost(e.target.value)}
-            required
-          />
+          <div className="relative">
+            <input
+              className="input pr-14"
+              placeholder={`Avg cost (${entryCcy})`}
+              value={cost}
+              onChange={(e) => setCost(e.target.value)}
+              required
+            />
+            <span className="input-ccy">{entryCcy}</span>
+          </div>
           <input
             className="input"
             placeholder="Poznámka"
@@ -317,6 +414,10 @@ export default function PortfolioPage() {
             Přidat
           </button>
         </form>
+        <p className="muted text-xs mt-2">
+          Cenu vždy zadávej v měně instrumentu
+          {symbol ? ` (${entryCcy})` : ""} — ne v měně zobrazení portfolia.
+        </p>
       </section>
     </div>
   );

@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { IBM_Plex_Sans, Source_Serif_4 } from "next/font/google";
+import { IBM_Plex_Sans, Source_Serif_4, Space_Grotesk } from "next/font/google";
 import { AppShell } from "@/components/AppShell";
 import "./globals.css";
 
@@ -15,11 +15,26 @@ const display = Source_Serif_4({
   variable: "--font-display-loaded",
 });
 
+const brand = Space_Grotesk({
+  subsets: ["latin", "latin-ext"],
+  weight: ["500", "600", "700"],
+  variable: "--font-brand-loaded",
+});
+
 export const metadata: Metadata = {
   title: "StockSense",
-  description: "Osobní analytický rádce pro akcie, komodity a crypto",
+  description: "Osobní analytický rádce pro akcie, komodity a crypto — Sense AI",
   applicationName: "StockSense",
   manifest: "/manifest.webmanifest",
+  icons: {
+    icon: [
+      { url: "/favicon.png", sizes: "32x32", type: "image/png" },
+      { url: "/sense-eye.svg", type: "image/svg+xml" },
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
@@ -32,16 +47,18 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="cs">
-      <body className={`${body.variable} ${display.variable} antialiased`}>
+      <body className={`${body.variable} ${display.variable} ${brand.variable} antialiased`}>
         <style>{`
           :root {
             --font-body: var(--font-body-loaded), "IBM Plex Sans", sans-serif;
             --font-display: var(--font-display-loaded), "Source Serif 4", serif;
+            --font-brand: var(--font-brand-loaded), "Space Grotesk", sans-serif;
           }
         `}</style>
         <AppShell>{children}</AppShell>

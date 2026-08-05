@@ -8,6 +8,7 @@ export type SymbolSuggestion = {
   symbol: string;
   name: string;
   asset_class: AssetClass | string;
+  currency?: string;
   exchange?: string;
   source?: string;
 };
@@ -137,7 +138,10 @@ export function SymbolAutocomplete({
                   <span className="font-semibold">{item.symbol}</span>
                   <span className="muted block text-xs line-clamp-1">{item.name}</span>
                 </span>
-                <span className="badge shrink-0">{item.asset_class}</span>
+                <span className="badge shrink-0">
+                  {item.currency ? `${item.currency} · ` : ""}
+                  {item.asset_class}
+                </span>
               </button>
             </li>
           ))}

@@ -1,9 +1,10 @@
 {
   "name": "StockSense",
   "short_name": "StockSense",
-  "description": "Osobní analytický rádce pro akcie, komodity a crypto",
+  "description": "Osobní analytický rádce pro akcie, komodity a crypto — Sense AI",
   "start_url": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
   "background_color": "#0b1220",
   "theme_color": "#0b1220",
   "lang": "cs",
@@ -11,12 +12,20 @@
     {
       "src": "/icon-192.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
       "src": "/icon-512.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

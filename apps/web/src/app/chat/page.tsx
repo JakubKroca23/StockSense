@@ -376,7 +376,10 @@ export default function ChatPage() {
   return (
     <div className="flex flex-col gap-4 min-h-[70vh]">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <h1 className="display text-3xl">AI rádce</h1>
+        <div>
+          <h1 className="display text-3xl">Sense</h1>
+          <p className="muted">AI rádce pro analýzu trhů</p>
+        </div>
         <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void startNewChat()}>
           Nový chat
         </button>

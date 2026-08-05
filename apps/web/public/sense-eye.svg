@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 42" fill="none" role="img" aria-label="Sense">
+  <title>Sense</title>
+  <defs>
+    <filter id="glow" x="-30%" y="-40%" width="160%" height="180%">
+      <feGaussianBlur stdDeviation="1.2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <g fill="none" stroke="#5dde8a" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)">
+    <path d="M5 21C14 8.5 27 4 40 4c10.5 0 20 4.2 30 12.5 2.8 2.3 4.6 4.2 5 4.5" stroke-width="3.2"/>
+    <path d="M9 23.5C17 34.5 28 38.5 40 38.5c9.5 0 18.5-3.2 27-10.5 3.2-2.7 5.8-5.5 7-7" stroke-width="3.2"/>
+    <path d="M26 16.5c6.5-4.2 14-5 22-2.8" stroke-width="2.4"/>
+    <path d="M27 26c6.5 4 14.5 4.5 22.5 1.2" stroke-width="2.4"/>
+  </g>
+  <circle cx="42" cy="21" r="4.6" fill="#5dde8a" filter="url(#glow)"/>
+</svg>

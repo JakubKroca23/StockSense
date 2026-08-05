@@ -194,11 +194,22 @@ async def update_settings(
 ):
     row = await _ensure_settings(db, user)
     data = payload.model_dump(exclude_unset=True)
+    if "preferences" in data and isinstance(data["preferences"], dict):
+        row.preferences = {**(row.preferences or {}), **data["preferences"]}
+        data.pop("preferences")
     for k, v in data.items():
         setattr(row, k, v)
     await db.commit()
     await db.refresh(row)
     return UserSettingsOut.model_validate(row)
+
+
+@router.get("/fx/rates")
+async def fx_rates(user: AuthUser = Depends(get_current_user)):
+    from app.services.fx import fetch_usd_rates, rates_payload
+
+    rates = await fetch_usd_rates()
+    return rates_payload(rates)
 
 
 @router.get("/watchlists", response_model=list[WatchlistOut])
@@ -299,9 +310,18 @@ async def add_position(
     user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from app.services.fx import guess_currency
+
+    ccy = guess_currency(payload.symbol)
     inst = await get_or_create_instrument(
-        db, symbol=payload.symbol, name=payload.name, asset_class=payload.asset_class
+        db,
+        symbol=payload.symbol,
+        name=payload.name,
+        asset_class=payload.asset_class,
+        currency=ccy,
     )
+    if not inst.currency:
+        inst.currency = ccy
     pos = PortfolioPosition(
         user_id=user.id,
         instrument_id=inst.id,
@@ -434,13 +454,20 @@ async def instruments_search(
 async def instrument_detail(
     symbol: str,
     lookback: str = "6mo",
+    interval: str = "1d",
     user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     from app.models import AssetClass, Instrument
+    from app.services.market_data import clamp_lookback, normalize_interval
 
-    allowed = {"1mo", "3mo", "6mo", "1y", "2y", "5y"}
-    lb = lookback if lookback in allowed else "6mo"
+    allowed_lb = {"5d", "1mo", "3mo", "6mo", "1y", "2y", "5y"}
+    allowed_iv = {"15m", "1h", "4h", "1d", "1wk"}
+    iv = normalize_interval(interval)
+    if iv not in allowed_iv:
+        iv = "1d"
+    lb_raw = lookback if lookback in allowed_lb else "6mo"
+    lb = clamp_lookback(iv, lb_raw)
 
     inst = (
         await db.execute(select(Instrument).where(Instrument.symbol == symbol.upper()))
@@ -451,7 +478,7 @@ async def instrument_detail(
         await db.refresh(inst)
 
     quote = await market_data.fetch_quote(inst.symbol, inst.asset_class)
-    bars = await market_data.fetch_ohlcv(inst.symbol, inst.asset_class, lookback=lb)
+    bars = await market_data.fetch_ohlcv(inst.symbol, inst.asset_class, interval=iv, lookback=lb)
     filings = []
     if inst.asset_class in (AssetClass.stock, AssetClass.etf):
         try:
@@ -469,6 +496,9 @@ async def instrument_detail(
         )
     ).scalar_one_or_none()
 
+    positions = await _portfolio_with_marks(db, user.id)
+    own = [p for p in positions if p.instrument.id == inst.id]
+
     return {
         "instrument": InstrumentOut.model_validate(inst),
         "quote": {
@@ -479,6 +509,8 @@ async def instrument_detail(
             "as_of": quote.as_of,
             "fundamentals": quote.fundamentals,
         },
+        "interval": iv,
+        "lookback": lb,
         "bars": [
             PriceBarOut(
                 ts=b.ts,
@@ -493,6 +525,7 @@ async def instrument_detail(
             )
             for b in bars
         ],
+        "positions": own,
         "filings": filings,
         "tip": TipOut.model_validate(tip) if tip else None,
     }

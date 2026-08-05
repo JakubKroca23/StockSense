@@ -127,6 +127,8 @@ async def search_instruments(db: AsyncSession, query: str, limit: int = 10) -> l
                 "symbol": inst.symbol,
                 "name": inst.name,
                 "asset_class": inst.asset_class.value,
+                "currency": (inst.currency or "USD").upper(),
+                "exchange": inst.exchange,
                 "source": "db",
             }
         )
@@ -153,11 +155,17 @@ async def search_instruments(db: AsyncSession, query: str, limit: int = 10) -> l
                         if not symbol.startswith("^"):
                             continue
                     asset = _guess_asset_class(item.get("quoteType"), symbol)
+                    from app.services.fx import guess_currency
+
+                    currency = (item.get("currency") or "").upper() or guess_currency(
+                        symbol, item.get("exchDisp") or item.get("exchange")
+                    )
                     out.append(
                         {
                             "symbol": symbol,
                             "name": item.get("shortname") or item.get("longname") or symbol,
                             "asset_class": asset.value,
+                            "currency": currency,
                             "exchange": item.get("exchDisp") or item.get("exchange"),
                             "source": "yahoo",
                         }

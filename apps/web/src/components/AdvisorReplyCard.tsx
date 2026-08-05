@@ -107,7 +107,7 @@ export function AdvisorReplyCard({
     <article className="advisor-card rise w-full max-w-2xl">
       <header className="advisor-card__head">
         <div>
-          <p className="advisor-card__eyebrow">StockSense rádce</p>
+          <p className="advisor-card__eyebrow">Sense</p>
           <h3 className="advisor-card__title display">Odpověď analýzy</h3>
         </div>
         <div className="flex flex-wrap items-center gap-2">

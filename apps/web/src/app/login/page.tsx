@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { account } from "@/lib/appwrite";
 import { ID } from "appwrite";
+import { StockSenseLogo } from "@/components/StockSenseLogo";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -38,11 +39,10 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen grid place-items-center px-4">
       <div className="card rise w-full max-w-md p-8">
-        <p className="muted text-sm mb-2">Osobní tržní rádce</p>
-        <h1 className="display text-4xl mb-2">
-          Stock<span className="text-[var(--accent)]">Sense</span>
-        </h1>
-        <p className="muted mb-6">Přihlášení přes Appwrite · stocksense.propoj.app</p>
+        <div className="mb-4">
+          <StockSenseLogo height={44} />
+        </div>
+        <p className="muted mb-6">Přihlášení přes Appwrite · Sense AI analýza</p>
         <form className="space-y-3" onSubmit={onSubmit}>
           <input
             className="input"

@@ -5,8 +5,10 @@ import {
   ColorType,
   CrosshairMode,
   IChartApi,
+  IPriceLine,
   ISeriesApi,
   CandlestickData,
+  LineStyle,
   Time,
   createChart,
 } from "lightweight-charts";
@@ -20,9 +22,17 @@ export type ChartBar = {
   volume?: number;
 };
 
+export type ChartLevel = {
+  price: number;
+  title: string;
+  color?: string;
+  style?: "solid" | "dashed" | "dotted";
+};
+
 type Props = {
   bars: ChartBar[];
   height?: number;
+  levels?: ChartLevel[];
 };
 
 function toUnix(ts: string): Time {
@@ -30,22 +40,32 @@ function toUnix(ts: string): Time {
   return Math.floor(d.getTime() / 1000) as Time;
 }
 
-export function PriceChart({ bars, height = 360 }: Props) {
+function hexAlpha(hex: string, alpha: number): string {
+  const h = hex.replace("#", "").trim();
+  if (h.length !== 6) return hex;
+  const a = Math.round(Math.min(1, Math.max(0, alpha)) * 255)
+    .toString(16)
+    .padStart(2, "0");
+  return `#${h}${a}`;
+}
+
+export function PriceChart({ bars, height = 360, levels = [] }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const linesRef = useRef<IPriceLine[]>([]);
 
   useEffect(() => {
     if (!containerRef.current) return;
 
     const styles = getComputedStyle(document.documentElement);
-    const text = styles.getPropertyValue("--text").trim() || "#e8e6e1";
-    const muted = styles.getPropertyValue("--muted").trim() || "#9a9590";
-    const line = styles.getPropertyValue("--line").trim() || "#3a3834";
-    const ok = styles.getPropertyValue("--ok").trim() || "#3d9a6a";
-    const danger = styles.getPropertyValue("--danger").trim() || "#d45d4c";
-    const accent = styles.getPropertyValue("--accent").trim() || "#c9a227";
+    const muted = styles.getPropertyValue("--muted").trim() || "#93a0b8";
+    const line = styles.getPropertyValue("--line").trim() || "#243049";
+    const ok = styles.getPropertyValue("--ok").trim() || "#5dde8a";
+    const danger = styles.getPropertyValue("--danger").trim() || "#ff6b7a";
+    const sense = styles.getPropertyValue("--sense").trim() || "#5dde8a";
+    const bgSoft = styles.getPropertyValue("--bg-soft").trim() || "#182238";
 
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
@@ -55,13 +75,23 @@ export function PriceChart({ bars, height = 360 }: Props) {
         textColor: muted,
       },
       grid: {
-        vertLines: { color: line },
-        horzLines: { color: line },
+        vertLines: { color: hexAlpha(line, 0.55) },
+        horzLines: { color: hexAlpha(line, 0.55) },
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: accent, width: 1, style: 2, labelBackgroundColor: accent },
-        horzLine: { color: accent, width: 1, style: 2, labelBackgroundColor: accent },
+        vertLine: {
+          color: hexAlpha(sense, 0.55),
+          width: 1,
+          style: LineStyle.Dashed,
+          labelBackgroundColor: bgSoft,
+        },
+        horzLine: {
+          color: hexAlpha(sense, 0.55),
+          width: 1,
+          style: LineStyle.Dashed,
+          labelBackgroundColor: bgSoft,
+        },
       },
       rightPriceScale: {
         borderColor: line,
@@ -94,8 +124,8 @@ export function PriceChart({ bars, height = 360 }: Props) {
       downColor: danger,
       borderUpColor: ok,
       borderDownColor: danger,
-      wickUpColor: ok,
-      wickDownColor: danger,
+      wickUpColor: hexAlpha(ok, 0.85),
+      wickDownColor: hexAlpha(danger, 0.85),
     });
 
     const volume = chart.addHistogramSeries({
@@ -122,6 +152,7 @@ export function PriceChart({ bars, height = 360 }: Props) {
       chartRef.current = null;
       seriesRef.current = null;
       volumeRef.current = null;
+      linesRef.current = [];
     };
   }, [height]);
 
@@ -144,7 +175,6 @@ export function PriceChart({ bars, height = 360 }: Props) {
       }))
       .sort((a, b) => Number(a.time) - Number(b.time));
 
-    // Deduplicate same timestamp
     const seen = new Set<number>();
     const unique = candleData.filter((d) => {
       const t = Number(d.time);
@@ -154,8 +184,8 @@ export function PriceChart({ bars, height = 360 }: Props) {
     });
 
     const styles = getComputedStyle(document.documentElement);
-    const ok = styles.getPropertyValue("--ok").trim() || "#3d9a6a";
-    const danger = styles.getPropertyValue("--danger").trim() || "#d45d4c";
+    const ok = styles.getPropertyValue("--ok").trim() || "#5dde8a";
+    const danger = styles.getPropertyValue("--danger").trim() || "#ff6b7a";
 
     const volumeData = bars
       .map((b) => {
@@ -163,16 +193,12 @@ export function PriceChart({ bars, height = 360 }: Props) {
         return {
           time: toUnix(b.ts),
           value: b.volume ?? 0,
-          color: up ? `${ok}99` : `${danger}99`,
+          color: up ? hexAlpha(ok, 0.35) : hexAlpha(danger, 0.35),
         };
       })
-      .filter((d) => {
-        const t = Number(d.time);
-        return seen.has(t);
-      })
+      .filter((d) => seen.has(Number(d.time)))
       .sort((a, b) => Number(a.time) - Number(b.time));
 
-    // Deduplicate volume
     const vSeen = new Set<number>();
     const uniqueVol = volumeData.filter((d) => {
       const t = Number(d.time);
@@ -185,6 +211,42 @@ export function PriceChart({ bars, height = 360 }: Props) {
     volumeRef.current.setData(uniqueVol);
     chartRef.current.timeScale().fitContent();
   }, [bars]);
+
+  useEffect(() => {
+    if (!seriesRef.current) return;
+
+    for (const line of linesRef.current) {
+      seriesRef.current.removePriceLine(line);
+    }
+    linesRef.current = [];
+
+    const styles = getComputedStyle(document.documentElement);
+    const accent2 = styles.getPropertyValue("--accent-2").trim() || "#6ea8ff";
+    const warn = styles.getPropertyValue("--warn").trim() || "#f0c14a";
+    const sense = styles.getPropertyValue("--sense").trim() || "#5dde8a";
+    const danger = styles.getPropertyValue("--danger").trim() || "#ff6b7a";
+
+    const palette = [accent2, warn, sense, danger];
+
+    levels.forEach((lvl, i) => {
+      if (!Number.isFinite(lvl.price) || lvl.price <= 0) return;
+      const style =
+        lvl.style === "dotted"
+          ? LineStyle.Dotted
+          : lvl.style === "solid"
+            ? LineStyle.Solid
+            : LineStyle.Dashed;
+      const pl = seriesRef.current!.createPriceLine({
+        price: lvl.price,
+        color: lvl.color || palette[i % palette.length],
+        lineWidth: 2,
+        lineStyle: style,
+        axisLabelVisible: true,
+        title: lvl.title,
+      });
+      linesRef.current.push(pl);
+    });
+  }, [levels]);
 
   function resetZoom() {
     chartRef.current?.timeScale().fitContent();
