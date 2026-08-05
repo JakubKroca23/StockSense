@@ -1,7 +1,7 @@
 import { Account, Client } from "appwrite";
 
-const endpoint = process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT || "";
-const projectId = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || "";
+const endpoint = process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT || "https://cloud.appwrite.io/v1";
+const projectId = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || "stocksense";
 
 const SESSION_KEY = "stocksense_session";
 /** Appwrite JWT default lifetime is 15 minutes — refresh a bit earlier. */
