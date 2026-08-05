@@ -20,14 +20,7 @@ class ORMModel(BaseModel):
 
 
 class AuthLogin(BaseModel):
-    email: str
-    password: str = Field(min_length=8)
-
-
-class AuthRegister(BaseModel):
-    email: str
-    password: str = Field(min_length=8)
-    name: str = "StockSense User"
+    password: str = Field(min_length=1)
 
 
 class AuthTokenOut(BaseModel):

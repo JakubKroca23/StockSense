@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { HomeOverview } from "@/components/HomeOverview";
 import {
   HomeData,
   PortfolioPosition,
@@ -123,6 +124,14 @@ export default function HomePage() {
       </section>
 
       {error && <div className="card p-4 text-[var(--danger)]">{error}</div>}
+
+      {data && (
+        <HomeOverview
+          portfolio={data.portfolio || []}
+          tips={data.tips || []}
+          alertsUnread={data.alerts_unread || 0}
+        />
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="card p-5 rise">

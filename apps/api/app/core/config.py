@@ -13,11 +13,13 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://stocksense:stocksense@db:5432/stocksense"
     database_url_sync: str = "postgresql://stocksense:stocksense@db:5432/stocksense"
 
-    appwrite_endpoint: str = "https://appwrite.propoj.app/v1"
-    appwrite_project_id: str = ""
-    appwrite_api_key: str = ""
-    # Comma-separated user IDs allowed to use the app (single-user). Empty = allow any authenticated.
-    allowed_user_ids: str = ""
+    # Simple single-user password auth (replaces Appwrite)
+    auth_password: str = ""
+    auth_secret: str = ""
+    auth_user_id: str = "admin"
+    auth_display_name: str = "Jakub"
+    auth_email: str = ""
+    auth_token_ttl_sec: int = 60 * 60 * 24 * 7  # 7 days
 
     cors_origins: str = "https://stocksense.propoj.app,http://localhost:3000"
 
@@ -42,10 +44,6 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
-
-    @property
-    def allowed_user_id_list(self) -> list[str]:
-        return [u.strip() for u in self.allowed_user_ids.split(",") if u.strip()]
 
 
 @lru_cache

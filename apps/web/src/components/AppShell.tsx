@@ -7,7 +7,7 @@ import {
   clearAuthTokens,
   ensureApiAuth,
   getCurrentUser,
-} from "@/lib/appwrite";
+} from "@/lib/auth";
 import { StockSenseLogo } from "@/components/StockSenseLogo";
 import { NAV_ICON_SIZE, navIcons } from "@/components/NavIcons";
 
@@ -125,7 +125,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Link href="/" className="brand-logo app-no-drag shrink-0" aria-label="StockSense">
               <StockSenseLogo height={36} />
             </Link>
-            <nav className="app-no-drag hidden md:flex items-center gap-0.5">
+            <nav className="app-no-drag hidden md:flex items-center gap-3 lg:gap-4">
               {links.map((l) => (
                 <Link
                   key={l.href}

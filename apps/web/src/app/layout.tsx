@@ -59,6 +59,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
             --font-body: var(--font-body-loaded), "IBM Plex Sans", sans-serif;
             --font-display: var(--font-display-loaded), "Source Serif 4", serif;
             --font-brand: var(--font-brand-loaded), "Space Grotesk", sans-serif;
+            --font-nav: var(--font-brand-loaded), "Space Grotesk", sans-serif;
           }
         `}</style>
         <AppShell>{children}</AppShell>

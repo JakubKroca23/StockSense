@@ -3,17 +3,19 @@
 Osobní PWA rádce pro analýzu akcií, komodit a crypto.
 
 - **URL:** https://stocksense.propoj.app
-- **Stack:** Next.js PWA + FastAPI + Postgres + Appwrite auth + Traefik + Ollama (CPU) + cloud LLM
+- **Stack:** Next.js PWA + FastAPI + Postgres + Traefik + Ollama (CPU) + cloud LLM
 
 ## Rychlý start (server)
 
-1. Zkopíruj env a doplň Appwrite / LLM klíče:
+1. Doplň v `.env` heslo a secret + LLM klíče:
 
 ```bash
-cp .env.example .env
+AUTH_PASSWORD=tvoje-heslo
+AUTH_SECRET=dlouhy-nahodny-retezec
+AUTH_USER_ID=admin
 ```
 
-2. Traefik síť musí být stejná jako Appwrite (`appwrite` — už na VPS existuje).
+2. Traefik síť na VPS se jmenuje `appwrite` (historicky — jen Docker network, ne auth).
 
 3. Spusť stack:
 
@@ -44,8 +46,8 @@ make web
 
 - Web: http://localhost:3000  
 - API: http://localhost:8000/docs  
-- Auth zůstává na Appwrite (`appwrite.propoj.app`) — login funguje stejně jako na produkci.  
-- `apps/web/.env.local` míří API na `http://localhost:8000/api`.
+- Auth: jen heslo z `AUTH_PASSWORD` v `.env`  
+- `apps/web/.env.local` míří API na produkci nebo `http://localhost:8000/api`.
 
 Zastavení: `make dev-down`
 

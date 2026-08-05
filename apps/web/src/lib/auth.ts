@@ -1,4 +1,4 @@
-/** StockSense API auth token (server-minted Appwrite JWT). */
+/** StockSense password auth — locally signed API JWT (no Appwrite). */
 
 const TOKEN_KEY = "stocksense_api_token";
 const TOKEN_EXP_KEY = "stocksense_api_token_exp";
@@ -33,7 +33,6 @@ export function clearAuthTokens() {
   window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(TOKEN_EXP_KEY);
   window.localStorage.removeItem(USER_KEY);
-  // Legacy keys from cookieFallback-based auth
   window.localStorage.removeItem("stocksense_session");
 }
 
@@ -50,17 +49,7 @@ export function readStoredUser(): AuthUserInfo | null {
 
 export function getStoredApiToken(): string | null {
   if (!canUseStorage()) return null;
-  const token = window.localStorage.getItem(TOKEN_KEY);
-  if (!token) return null;
-  const expRaw = window.localStorage.getItem(TOKEN_EXP_KEY);
-  if (expRaw) {
-    const exp = Number(expRaw);
-    // Refresh window: treat as expired 60s before real expiry
-    if (Number.isFinite(exp) && Date.now() > exp - 60_000) {
-      return token; // still return; caller may refresh
-    }
-  }
-  return token;
+  return window.localStorage.getItem(TOKEN_KEY);
 }
 
 export function isTokenExpired(): boolean {
@@ -99,19 +88,8 @@ async function postAuth(path: string, body: unknown, token?: string): Promise<Au
   return res.json() as Promise<AuthResponse>;
 }
 
-export async function loginWithPassword(email: string, password: string): Promise<AuthUserInfo> {
-  const data = await postAuth("/auth/login", { email, password });
-  storeApiToken(data.access_token, data.expires_in);
-  storeAuthUser(data.user);
-  return data.user;
-}
-
-export async function registerWithPassword(
-  email: string,
-  password: string,
-  name = "StockSense User"
-): Promise<AuthUserInfo> {
-  const data = await postAuth("/auth/register", { email, password, name });
+export async function loginWithPassword(password: string): Promise<AuthUserInfo> {
+  const data = await postAuth("/auth/login", { password });
   storeApiToken(data.access_token, data.expires_in);
   storeAuthUser(data.user);
   return data.user;
@@ -130,14 +108,12 @@ export async function refreshApiToken(): Promise<string | null> {
   }
 }
 
-/** Bearer token for StockSense API. */
 export async function getSessionJwt(): Promise<string | null> {
   const token = getStoredApiToken();
   if (!token) return null;
   if (isTokenExpired()) {
     const refreshed = await refreshApiToken();
     if (refreshed) return refreshed;
-    // Token past TTL and refresh failed — force re-login
     clearAuthTokens();
     return null;
   }
@@ -169,17 +145,4 @@ export async function getCurrentUser(): Promise<AuthUserInfo | null> {
   } catch {
     return null;
   }
-}
-
-/** Compatibility no-ops — Appwrite browser session no longer drives API auth. */
-export function recoverSessionFromFallback(): string | null {
-  return null;
-}
-
-export function syncSessionFromStorage(): string | null {
-  return getStoredApiToken();
-}
-
-export function storeSessionSecret(_secret: string | undefined | null) {
-  /* deprecated */
 }

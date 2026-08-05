@@ -6,13 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.auth import AuthUser, get_current_user
-from app.core.appwrite_auth import (
-    appwrite_create_user,
-    appwrite_email_session,
-    fetch_account_with_jwt,
-    mint_user_jwt,
-)
+from app.core.auth import AuthUser, get_current_user, mint_access_token, verify_password
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.models import (
@@ -33,7 +27,6 @@ from app.models import (
 from app.schemas import (
     AlertOut,
     AuthLogin,
-    AuthRegister,
     AuthTokenOut,
     ChatMessageOut,
     ChatRequest,
@@ -113,17 +106,27 @@ async def _portfolio_with_marks(
             .options(selectinload(PortfolioPosition.instrument))
         )
     ).scalars().all()
+    if not rows:
+        return []
+
+    instrument_ids = list({p.instrument_id for p in rows})
+    # One query for latest 1d close per instrument (avoids N+1 on homepage).
+    latest_rows = (
+        await db.execute(
+            select(PriceBar.instrument_id, PriceBar.close)
+            .where(
+                PriceBar.instrument_id.in_(instrument_ids),
+                PriceBar.interval == "1d",
+            )
+            .distinct(PriceBar.instrument_id)
+            .order_by(PriceBar.instrument_id, PriceBar.ts.desc())
+        )
+    ).all()
+    last_by_inst = {int(iid): float(close) for iid, close in latest_rows}
+
     out: list[PortfolioPositionOut] = []
     for p in rows:
-        last = (
-            await db.execute(
-                select(PriceBar)
-                .where(PriceBar.instrument_id == p.instrument_id, PriceBar.interval == "1d")
-                .order_by(PriceBar.ts.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        last_price = float(last.close) if last else None
+        last_price = last_by_inst.get(p.instrument_id)
         qty = float(p.quantity)
         cost = float(p.avg_cost)
         mv = last_price * qty if last_price is not None else None
@@ -152,57 +155,37 @@ async def health():
     return {"status": "ok", "service": "stocksense-api"}
 
 
-JWT_TTL_SEC = 3_600  # Appwrite max for Users.createJWT duration
-
-
 @router.post("/auth/login", response_model=AuthTokenOut)
 async def auth_login(payload: AuthLogin):
-    """Email/password → Appwrite session verify + server-minted JWT for API Bearer."""
+    """Single-user password login → locally signed JWT."""
     settings = get_settings()
-    session = await appwrite_email_session(settings, payload.email, payload.password)
-    user_id = session.get("userId") or ""
-    session_id = session.get("$id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Neplatná session")
-    token = await mint_user_jwt(
-        settings, user_id, session_id=session_id, duration_sec=JWT_TTL_SEC
-    )
-    account = await fetch_account_with_jwt(settings, token)
+    if not settings.auth_password:
+        raise HTTPException(
+            status_code=500,
+            detail="AUTH_PASSWORD není nastaveno na serveru",
+        )
+    if not verify_password(settings, payload.password):
+        raise HTTPException(status_code=401, detail="Neplatné heslo")
+    token = mint_access_token(settings)
     return AuthTokenOut(
         access_token=token,
-        expires_in=JWT_TTL_SEC,
+        expires_in=settings.auth_token_ttl_sec,
         user={
-            "id": account.get("$id") or user_id,
-            "email": account.get("email"),
-            "name": account.get("name"),
+            "id": settings.auth_user_id,
+            "email": settings.auth_email or None,
+            "name": settings.auth_display_name,
         },
     )
-
-
-@router.post("/auth/register", response_model=AuthTokenOut)
-async def auth_register(payload: AuthRegister):
-    settings = get_settings()
-    import uuid
-
-    user_id = uuid.uuid4().hex
-    await appwrite_create_user(
-        settings,
-        user_id=user_id,
-        email=payload.email,
-        password=payload.password,
-        name=payload.name or "StockSense User",
-    )
-    return await auth_login(AuthLogin(email=payload.email, password=payload.password))
 
 
 @router.post("/auth/refresh", response_model=AuthTokenOut)
 async def auth_refresh(user: AuthUser = Depends(get_current_user)):
     """Mint a fresh JWT for an already-authenticated user."""
     settings = get_settings()
-    token = await mint_user_jwt(settings, user.id, duration_sec=JWT_TTL_SEC)
+    token = mint_access_token(settings)
     return AuthTokenOut(
         access_token=token,
-        expires_in=JWT_TTL_SEC,
+        expires_in=settings.auth_token_ttl_sec,
         user={"id": user.id, "email": user.email, "name": user.name},
     )
 

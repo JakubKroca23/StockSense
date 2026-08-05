@@ -52,8 +52,6 @@ services:
       context: ./apps/web
       args:
         NEXT_PUBLIC_API_URL: https://stocksense.propoj.app/api
-        NEXT_PUBLIC_APPWRITE_ENDPOINT: ${NEXT_PUBLIC_APPWRITE_ENDPOINT}
-        NEXT_PUBLIC_APPWRITE_PROJECT_ID: ${NEXT_PUBLIC_APPWRITE_PROJECT_ID}
     restart: unless-stopped
     env_file:
       - .env

@@ -2,14 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
-import { loginWithPassword, registerWithPassword } from "@/lib/appwrite";
+import { loginWithPassword } from "@/lib/auth";
 import { StockSenseLogo } from "@/components/StockSenseLogo";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"login" | "register">("login");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -18,11 +16,7 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
     try {
-      if (mode === "register") {
-        await registerWithPassword(email, password);
-      } else {
-        await loginWithPassword(email, password);
-      }
+      await loginWithPassword(password);
       router.replace("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Přihlášení selhalo");
@@ -37,16 +31,8 @@ export default function LoginPage() {
         <div className="mb-4">
           <StockSenseLogo height={44} />
         </div>
-        <p className="muted mb-6">Přihlášení přes Appwrite · Sense AI analýza</p>
+        <p className="muted mb-6">Přihlášení heslem · Sense AI analýza</p>
         <form className="space-y-3" onSubmit={onSubmit}>
-          <input
-            className="input"
-            type="email"
-            placeholder="E-mail"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
           <input
             className="input"
             type="password"
@@ -54,19 +40,14 @@ export default function LoginPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            minLength={8}
+            autoFocus
+            autoComplete="current-password"
           />
           {error && <p className="text-[var(--danger)] text-sm">{error}</p>}
           <button className="btn btn-primary w-full" disabled={loading}>
-            {loading ? "Pracuji…" : mode === "login" ? "Přihlásit" : "Vytvořit účet"}
+            {loading ? "Pracuji…" : "Přihlásit"}
           </button>
         </form>
-        <button
-          className="btn w-full mt-3"
-          onClick={() => setMode(mode === "login" ? "register" : "login")}
-        >
-          {mode === "login" ? "Nemám účet — registrace" : "Už mám účet — přihlášení"}
-        </button>
       </div>
     </div>
   );
