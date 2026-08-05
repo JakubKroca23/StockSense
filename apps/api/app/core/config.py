@@ -1,0 +1,53 @@
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    app_name: str = "StockSense"
+    environment: str = "development"
+    api_prefix: str = "/api"
+
+    database_url: str = "postgresql+asyncpg://stocksense:stocksense@db:5432/stocksense"
+    database_url_sync: str = "postgresql://stocksense:stocksense@db:5432/stocksense"
+
+    appwrite_endpoint: str = "https://appwrite.propoj.app/v1"
+    appwrite_project_id: str = ""
+    appwrite_api_key: str = ""
+    # Comma-separated user IDs allowed to use the app (single-user). Empty = allow any authenticated.
+    allowed_user_ids: str = ""
+
+    cors_origins: str = "https://stocksense.propoj.app,http://localhost:3000"
+
+    ollama_base_url: str = "http://ollama:11434"
+    ollama_model: str = "qwen2.5:1.5b"
+    cloud_llm_provider: str = "anthropic"  # anthropic | openai | gemini | none
+    anthropic_api_key: str = ""
+    openai_api_key: str = ""
+    gemini_api_key: str = ""
+
+    fred_api_key: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    alert_email_to: str = ""
+
+    default_risk_profile: str = "balanced"
+    price_poll_minutes: int = 5
+    scoring_cron_hours: str = "7,12,17,21"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def allowed_user_id_list(self) -> list[str]:
+        return [u.strip() for u in self.allowed_user_ids.split(",") if u.strip()]
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

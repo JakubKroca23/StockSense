@@ -1,0 +1,84 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: stocksense
+      POSTGRES_PASSWORD: stocksense
+      POSTGRES_DB: stocksense
+    volumes:
+      - stocksense_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stocksense -d stocksense"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - stocksense
+      - proxy
+
+  api:
+    build:
+      context: ./apps/api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://stocksense:stocksense@db:5432/stocksense
+      DATABASE_URL_SYNC: postgresql://stocksense:stocksense@db:5432/stocksense
+      OLLAMA_BASE_URL: http://ollama:11434
+    depends_on:
+      db:
+        condition: service_healthy
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=proxy
+      - traefik.http.routers.stocksense-api.rule=Host(`stocksense.propoj.app`) && PathPrefix(`/api`)
+      - traefik.http.routers.stocksense-api.entrypoints=websecure
+      - traefik.http.routers.stocksense-api.tls.certresolver=letsencrypt
+      - traefik.http.services.stocksense-api.loadbalancer.server.port=8000
+    networks:
+      - stocksense
+      - proxy
+
+  web:
+    build:
+      context: ./apps/web
+      args:
+        NEXT_PUBLIC_API_URL: https://stocksense.propoj.app/api
+        NEXT_PUBLIC_APPWRITE_ENDPOINT: ${NEXT_PUBLIC_APPWRITE_ENDPOINT}
+        NEXT_PUBLIC_APPWRITE_PROJECT_ID: ${NEXT_PUBLIC_APPWRITE_PROJECT_ID}
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - api
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=proxy
+      - traefik.http.routers.stocksense-web.rule=Host(`stocksense.propoj.app`)
+      - traefik.http.routers.stocksense-web.entrypoints=websecure
+      - traefik.http.routers.stocksense-web.tls.certresolver=letsencrypt
+      - traefik.http.routers.stocksense-web.priority=1
+      - traefik.http.services.stocksense-web.loadbalancer.server.port=3000
+    networks:
+      - stocksense
+      - proxy
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - stocksense_ollama:/root/.ollama
+    networks:
+      - stocksense
+
+volumes:
+  stocksense_pg:
+  stocksense_ollama:
+
+networks:
+  stocksense:
+    driver: bridge
+  proxy:
+    external: true

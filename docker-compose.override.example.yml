@@ -1,0 +1,15 @@
+services:
+  db:
+    ports:
+      - "5433:5432"
+  api:
+    ports:
+      - "8000:8000"
+    labels: []
+  web:
+    ports:
+      - "3000:3000"
+    labels: []
+  ollama:
+    ports:
+      - "11434:11434"
