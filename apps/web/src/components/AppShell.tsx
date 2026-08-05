@@ -4,11 +4,9 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useId, useState } from "react";
 import {
-  account,
   clearAuthTokens,
   ensureApiAuth,
   getCurrentUser,
-  syncSessionFromStorage,
 } from "@/lib/appwrite";
 import { StockSenseLogo } from "@/components/StockSenseLogo";
 import { NAV_ICON_SIZE, navIcons } from "@/components/NavIcons";
@@ -75,15 +73,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (pathname === "/login") return;
     let cancelled = false;
     (async () => {
-      const user = await getCurrentUser();
+      const ok = await ensureApiAuth();
       if (cancelled) return;
-      if (!user) {
+      if (!ok) {
         router.replace("/login");
         return;
       }
-      syncSessionFromStorage();
-      await ensureApiAuth();
+      const user = await getCurrentUser();
       if (cancelled) return;
+      if (!user) {
+        clearAuthTokens();
+        router.replace("/login");
+        return;
+      }
       setName(user.name || user.email || "Ty");
       setReady(true);
     })();
@@ -139,13 +141,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <span className="muted hidden sm:inline">{name}</span>
             <button
               className="btn"
-              onClick={async () => {
+              onClick={() => {
                 clearAuthTokens();
-                try {
-                  await account.deleteSession({ sessionId: "current" });
-                } catch {
-                  /* ignore */
-                }
                 router.replace("/login");
               }}
             >

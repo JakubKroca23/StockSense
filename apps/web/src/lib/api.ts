@@ -1,4 +1,4 @@
-import { getFreshJwt, getSessionJwt, recoverSessionFromFallback } from "./appwrite";
+import { getFreshJwt, getSessionJwt } from "./appwrite";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
@@ -33,10 +33,6 @@ async function doFetch(path: string, init: RequestInit, token: string) {
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   let token = await getSessionJwt();
   if (!token) {
-    recoverSessionFromFallback();
-    token = await getSessionJwt();
-  }
-  if (!token) {
     throw new ApiError(401, "Chybí autentizace — zkus se znovu přihlásit");
   }
 
@@ -44,15 +40,8 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
 
   if (res.status === 401) {
     const retryToken = await getFreshJwt();
-    if (retryToken) {
+    if (retryToken && retryToken !== token) {
       res = await doFetch(path, init, retryToken);
-    }
-    // Last resort: raw session from cookieFallback (JWT mint may be unavailable)
-    if (!res.ok && res.status === 401) {
-      const session = recoverSessionFromFallback();
-      if (session && session !== retryToken && session !== token) {
-        res = await doFetch(path, init, session);
-      }
     }
   }
 

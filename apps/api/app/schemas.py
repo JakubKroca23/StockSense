@@ -19,6 +19,24 @@ class ORMModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AuthLogin(BaseModel):
+    email: str
+    password: str = Field(min_length=8)
+
+
+class AuthRegister(BaseModel):
+    email: str
+    password: str = Field(min_length=8)
+    name: str = "StockSense User"
+
+
+class AuthTokenOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: dict[str, str | None]
+
+
 class InstrumentOut(ORMModel):
     id: int
     symbol: str

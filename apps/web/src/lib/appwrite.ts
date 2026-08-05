@@ -1,170 +1,185 @@
-import { Account, Client } from "appwrite";
+/** StockSense API auth token (server-minted Appwrite JWT). */
 
-const endpoint = process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT || "https://cloud.appwrite.io/v1";
-const projectId = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || "stocksense";
+const TOKEN_KEY = "stocksense_api_token";
+const TOKEN_EXP_KEY = "stocksense_api_token_exp";
+const USER_KEY = "stocksense_user";
 
-const SESSION_KEY = "stocksense_session";
-/** Appwrite JWT default lifetime is 15 minutes — refresh a bit earlier. */
-const JWT_TTL_MS = 14 * 60 * 1000;
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
-export const appwriteClient = new Client().setEndpoint(endpoint).setProject(projectId);
-export const account = new Account(appwriteClient);
-
-type CachedJwt = { token: string; expiresAt: number };
-
-let cachedJwt: CachedJwt | null = null;
+export type AuthUserInfo = {
+  id: string;
+  email?: string | null;
+  name?: string | null;
+};
 
 function canUseStorage() {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
 }
 
-/** Persist session secret so the API can auth without minting a JWT every call. */
-export function storeSessionSecret(secret: string | undefined | null) {
-  if (!secret || !canUseStorage()) return;
-  try {
-    window.localStorage.setItem(SESSION_KEY, secret);
-    appwriteClient.setSession(secret);
-  } catch {
-    /* ignore quota / private mode */
-  }
+export function storeApiToken(token: string, expiresInSec: number) {
+  if (!canUseStorage()) return;
+  const exp = Date.now() + expiresInSec * 1000;
+  window.localStorage.setItem(TOKEN_KEY, token);
+  window.localStorage.setItem(TOKEN_EXP_KEY, String(exp));
 }
 
-export function clearJwtCache() {
-  cachedJwt = null;
+export function storeAuthUser(user: AuthUserInfo) {
+  if (!canUseStorage()) return;
+  window.localStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
 export function clearAuthTokens() {
-  clearJwtCache();
   if (!canUseStorage()) return;
-  try {
-    window.localStorage.removeItem(SESSION_KEY);
-  } catch {
-    /* ignore */
-  }
+  window.localStorage.removeItem(TOKEN_KEY);
+  window.localStorage.removeItem(TOKEN_EXP_KEY);
+  window.localStorage.removeItem(USER_KEY);
+  // Legacy keys from cookieFallback-based auth
+  window.localStorage.removeItem("stocksense_session");
 }
 
-function readStoredSessionSecret(): string | null {
+export function readStoredUser(): AuthUserInfo | null {
   if (!canUseStorage()) return null;
   try {
-    return window.localStorage.getItem(SESSION_KEY);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Appwrite client sessions store the secret in cookieFallback (cross-origin),
- * not in Session.secret (that field is empty without an API key).
- */
-export function recoverSessionFromFallback(): string | null {
-  if (!canUseStorage()) return null;
-  try {
-    const raw = window.localStorage.getItem("cookieFallback");
+    const raw = window.localStorage.getItem(USER_KEY);
     if (!raw) return null;
-    const cookies = JSON.parse(raw) as Record<string, unknown>;
-    const preferred = projectId ? `a_session_${projectId}` : null;
-    if (preferred && typeof cookies[preferred] === "string" && cookies[preferred]) {
-      const secret = cookies[preferred] as string;
-      storeSessionSecret(secret);
-      return secret;
-    }
-    for (const [key, value] of Object.entries(cookies)) {
-      if (
-        key.startsWith("a_session_") &&
-        !key.endsWith("_legacy") &&
-        typeof value === "string" &&
-        value.length > 0
-      ) {
-        storeSessionSecret(value);
-        return value;
-      }
-    }
+    return JSON.parse(raw) as AuthUserInfo;
   } catch {
-    /* ignore */
-  }
-  return null;
-}
-
-/** Keep Client + localStorage in sync with Appwrite cookieFallback. */
-export function syncSessionFromStorage(): string | null {
-  const fromFallback = recoverSessionFromFallback();
-  if (fromFallback) return fromFallback;
-  const stored = readStoredSessionSecret();
-  if (stored) {
-    try {
-      appwriteClient.setSession(stored);
-    } catch {
-      /* ignore */
-    }
-    return stored;
-  }
-  return null;
-}
-
-async function mintJwt(): Promise<string | null> {
-  if (cachedJwt && cachedJwt.expiresAt > Date.now() + 15_000) {
-    return cachedJwt.token;
-  }
-  syncSessionFromStorage();
-  try {
-    let result;
-    try {
-      result = await account.createJWT({ duration: 900 });
-    } catch {
-      // Some Appwrite builds reject custom duration — fall back to default TTL.
-      result = await account.createJWT();
-    }
-    const token = result?.jwt;
-    if (!token) return null;
-    cachedJwt = { token, expiresAt: Date.now() + JWT_TTL_MS };
-    return token;
-  } catch {
-    cachedJwt = null;
     return null;
   }
 }
 
-/**
- * Token for StockSense API (Bearer).
- * Prefer short-lived JWT (reliable with Appwrite 1.8+); session secret as fallback.
- */
+export function getStoredApiToken(): string | null {
+  if (!canUseStorage()) return null;
+  const token = window.localStorage.getItem(TOKEN_KEY);
+  if (!token) return null;
+  const expRaw = window.localStorage.getItem(TOKEN_EXP_KEY);
+  if (expRaw) {
+    const exp = Number(expRaw);
+    // Refresh window: treat as expired 60s before real expiry
+    if (Number.isFinite(exp) && Date.now() > exp - 60_000) {
+      return token; // still return; caller may refresh
+    }
+  }
+  return token;
+}
+
+export function isTokenExpired(): boolean {
+  if (!canUseStorage()) return true;
+  const expRaw = window.localStorage.getItem(TOKEN_EXP_KEY);
+  if (!expRaw) return !window.localStorage.getItem(TOKEN_KEY);
+  const exp = Number(expRaw);
+  return !Number.isFinite(exp) || Date.now() > exp - 60_000;
+}
+
+type AuthResponse = {
+  access_token: string;
+  expires_in: number;
+  user: AuthUserInfo;
+};
+
+async function postAuth(path: string, body: unknown, token?: string): Promise<AuthResponse> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const data = await res.json();
+      detail = data.detail || detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(typeof detail === "string" ? detail : "Autentizace selhala");
+  }
+  return res.json() as Promise<AuthResponse>;
+}
+
+export async function loginWithPassword(email: string, password: string): Promise<AuthUserInfo> {
+  const data = await postAuth("/auth/login", { email, password });
+  storeApiToken(data.access_token, data.expires_in);
+  storeAuthUser(data.user);
+  return data.user;
+}
+
+export async function registerWithPassword(
+  email: string,
+  password: string,
+  name = "StockSense User"
+): Promise<AuthUserInfo> {
+  const data = await postAuth("/auth/register", { email, password, name });
+  storeApiToken(data.access_token, data.expires_in);
+  storeAuthUser(data.user);
+  return data.user;
+}
+
+export async function refreshApiToken(): Promise<string | null> {
+  const current = getStoredApiToken();
+  if (!current) return null;
+  try {
+    const data = await postAuth("/auth/refresh", {}, current);
+    storeApiToken(data.access_token, data.expires_in);
+    storeAuthUser(data.user);
+    return data.access_token;
+  } catch {
+    return null;
+  }
+}
+
+/** Bearer token for StockSense API. */
 export async function getSessionJwt(): Promise<string | null> {
-  const jwt = await mintJwt();
-  if (jwt) return jwt;
-
-  const synced = syncSessionFromStorage();
-  if (synced) return synced;
-
-  return null;
-}
-
-/** Force a fresh Appwrite JWT (used after a 401). */
-export async function getFreshJwt(): Promise<string | null> {
-  clearJwtCache();
-  // Drop cached session secret — it may be stale; re-read cookieFallback.
-  if (canUseStorage()) {
-    try {
-      window.localStorage.removeItem(SESSION_KEY);
-    } catch {
-      /* ignore */
-    }
+  const token = getStoredApiToken();
+  if (!token) return null;
+  if (isTokenExpired()) {
+    const refreshed = await refreshApiToken();
+    if (refreshed) return refreshed;
+    // Token past TTL and refresh failed — force re-login
+    clearAuthTokens();
+    return null;
   }
-  syncSessionFromStorage();
-  return mintJwt();
+  return token;
 }
 
-/** Warm auth token cache before rendering authenticated pages. */
+export async function getFreshJwt(): Promise<string | null> {
+  return refreshApiToken();
+}
+
 export async function ensureApiAuth(): Promise<boolean> {
-  syncSessionFromStorage();
-  const token = await getSessionJwt();
-  return Boolean(token);
+  return Boolean(await getSessionJwt());
 }
 
-export async function getCurrentUser() {
+export async function getCurrentUser(): Promise<AuthUserInfo | null> {
+  const token = await getSessionJwt();
+  if (!token) return null;
+  const cached = readStoredUser();
+  if (cached) return cached;
   try {
-    syncSessionFromStorage();
-    return await account.get();
+    const res = await fetch(`${API_URL}/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as AuthUserInfo;
+    storeAuthUser(data);
+    return data;
   } catch {
     return null;
   }
+}
+
+/** Compatibility no-ops — Appwrite browser session no longer drives API auth. */
+export function recoverSessionFromFallback(): string | null {
+  return null;
+}
+
+export function syncSessionFromStorage(): string | null {
+  return getStoredApiToken();
+}
+
+export function storeSessionSecret(_secret: string | undefined | null) {
+  /* deprecated */
 }

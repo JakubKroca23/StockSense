@@ -7,6 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.auth import AuthUser, get_current_user
+from app.core.appwrite_auth import (
+    appwrite_create_user,
+    appwrite_email_session,
+    fetch_account_with_jwt,
+    mint_user_jwt,
+)
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.models import (
     Alert,
@@ -25,6 +32,9 @@ from app.models import (
 )
 from app.schemas import (
     AlertOut,
+    AuthLogin,
+    AuthRegister,
+    AuthTokenOut,
     ChatMessageOut,
     ChatRequest,
     ChatSessionCreate,
@@ -140,6 +150,61 @@ async def _portfolio_with_marks(
 @router.get("/health")
 async def health():
     return {"status": "ok", "service": "stocksense-api"}
+
+
+JWT_TTL_SEC = 86_400  # 24h
+
+
+@router.post("/auth/login", response_model=AuthTokenOut)
+async def auth_login(payload: AuthLogin):
+    """Email/password → Appwrite session verify + server-minted JWT for API Bearer."""
+    settings = get_settings()
+    session = await appwrite_email_session(settings, payload.email, payload.password)
+    user_id = session.get("userId") or ""
+    session_id = session.get("$id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Neplatná session")
+    token = await mint_user_jwt(
+        settings, user_id, session_id=session_id, duration_sec=JWT_TTL_SEC
+    )
+    account = await fetch_account_with_jwt(settings, token)
+    return AuthTokenOut(
+        access_token=token,
+        expires_in=JWT_TTL_SEC,
+        user={
+            "id": account.get("$id") or user_id,
+            "email": account.get("email"),
+            "name": account.get("name"),
+        },
+    )
+
+
+@router.post("/auth/register", response_model=AuthTokenOut)
+async def auth_register(payload: AuthRegister):
+    settings = get_settings()
+    import uuid
+
+    user_id = uuid.uuid4().hex
+    await appwrite_create_user(
+        settings,
+        user_id=user_id,
+        email=payload.email,
+        password=payload.password,
+        name=payload.name or "StockSense User",
+    )
+    return await auth_login(AuthLogin(email=payload.email, password=payload.password))
+
+
+@router.post("/auth/refresh", response_model=AuthTokenOut)
+async def auth_refresh(user: AuthUser = Depends(get_current_user)):
+    """Mint a fresh JWT for an already-authenticated user."""
+    settings = get_settings()
+    token = await mint_user_jwt(settings, user.id, duration_sec=JWT_TTL_SEC)
+    return AuthTokenOut(
+        access_token=token,
+        expires_in=JWT_TTL_SEC,
+        user={"id": user.id, "email": user.email, "name": user.name},
+    )
 
 
 @router.get("/me")
