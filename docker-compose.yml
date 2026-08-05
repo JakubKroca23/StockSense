@@ -16,7 +16,6 @@ services:
     networks:
       - stocksense
       - proxy
-      - appwrite
 
   api:
     build:
