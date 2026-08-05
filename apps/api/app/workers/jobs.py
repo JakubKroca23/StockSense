@@ -32,6 +32,29 @@ from app.services.scoring import score_instrument
 logger = logging.getLogger(__name__)
 
 
+def _briefing_excerpt(markdown: str, *, max_chars: int = 900) -> str:
+    """Plain Czech snippet for Home — no second LLM round-trip."""
+    lines: list[str] = []
+    for raw in (markdown or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            continue
+        if line.startswith("```"):
+            continue
+        line = line.lstrip("-*• ").replace("**", "").replace("__", "")
+        if line:
+            lines.append(line)
+    text = " ".join(lines)
+    # Prefer first ~5 sentence-ish chunks
+    parts = [p.strip() for p in text.replace("!", ".").replace("?", ".").split(".") if p.strip()]
+    excerpt = ". ".join(parts[:6])
+    if excerpt and not excerpt.endswith("."):
+        excerpt += "."
+    return (excerpt or text)[:max_chars]
+
+
 async def sync_prices_for_instruments(db: AsyncSession, instruments: list[Instrument]) -> int:
     count = 0
     for inst in instruments:
@@ -221,21 +244,28 @@ async def _run_scoring(
                 )
             db.add(tip)
             await db.flush()
+            tip.instrument = inst  # avoid async lazy-load when alerting
             created.append(tip)
-            await create_alert(
-                db,
-                user_id=user_id,
-                kind="new_tip",
-                title=f"Nový tip: {inst.symbol} → {result.action.value}",
-                body=(
-                    f"Score {result.score}, confidence {result.confidence}. "
-                    f"Horizont {result.horizon.value}. "
-                    f"{(tip.narrative_cs or '')[:240]}"
-                ),
-                payload={"tip_id": tip.id, "symbol": inst.symbol, "action": result.action.value},
-            )
         except Exception as exc:
             logger.warning("Scoring failed for %s: %s", inst.symbol, exc)
+
+    # Alert only for the strongest tips (avoid inbox flood on every scoring run)
+    for tip in sorted(created, key=lambda t: abs(t.score), reverse=True)[:5]:
+        if abs(tip.score) < 35:
+            continue
+        symbol = tip.instrument.symbol if tip.instrument else "?"
+        await create_alert(
+            db,
+            user_id=user_id,
+            kind="new_tip",
+            title=f"Nový tip: {symbol} → {tip.action.value}",
+            body=(
+                f"Score {tip.score}, confidence {tip.confidence}. "
+                f"Horizont {tip.horizon.value}. "
+                f"{(tip.narrative_cs or '')[:240]}"
+            ),
+            payload={"tip_id": tip.id, "symbol": symbol, "action": tip.action.value},
+        )
 
     await db.commit()
     return created
@@ -293,6 +323,7 @@ async def generate_daily_report(db: AsyncSession, user_id: str) -> Report:
         + "\n\nPORTFOLIO:\n"
         + ("\n".join(pos_lines) or "- prázdné")
     )
+    # One LLM call only — second call + Ollama fallback often times out the web request.
     narrative = await llm_complete(
         (
             "Napiš denní Sense briefing v češtině (markdown). "
@@ -303,15 +334,7 @@ async def generate_daily_report(db: AsyncSession, user_id: str) -> Report:
         task=LLMTask.heavy,
         context=context,
     )
-    # Short plain excerpt for Home card
-    briefing = await llm_complete(
-        (
-            "Z následujícího briefingu vytáhni 4–6 vět čistého textu pro Home kartu Sense. "
-            "Bez markdownu, bez nadpisů. Čeština."
-        ),
-        task=LLMTask.light,
-        context=narrative[:2500],
-    )
+    briefing = _briefing_excerpt(narrative)
     title = f"Denní report {datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
     report = Report(
         user_id=user_id,
@@ -321,7 +344,7 @@ async def generate_daily_report(db: AsyncSession, user_id: str) -> Report:
         meta={
             "tip_count": len(tips),
             "position_count": len(positions),
-            "briefing_cs": (briefing or "").strip()[:1200],
+            "briefing_cs": briefing,
             "focus_symbols": [t.instrument.symbol for t in top2],
         },
     )
@@ -451,6 +474,7 @@ async def check_price_alerts(db: AsyncSession, user_id: str) -> int:
         if quote.price is None:
             continue
         price = quote.price
+        # Only stop / target — not entry zone (most tips already sit inside entry → alert flood).
         hit = None
         level_px = None
         if tip.stop and (
@@ -465,9 +489,6 @@ async def check_price_alerts(db: AsyncSession, user_id: str) -> int:
         ):
             hit = "target_1"
             level_px = tip.target_1
-        elif tip.entry_low and tip.entry_high and tip.entry_low <= price <= tip.entry_high:
-            hit = "entry"
-            level_px = price
         if hit:
             kind = f"price_{hit}"
             if await _recent_alert_exists(db, user_id, kind, tip.instrument.symbol):
@@ -533,40 +554,7 @@ async def check_price_alerts(db: AsyncSession, user_id: str) -> int:
         )
         n += 1
 
-    # 3) Portfolio avg_cost proximity (auto, deduped)
-    positions = (
-        await db.execute(
-            select(PortfolioPosition)
-            .where(PortfolioPosition.user_id == user_id)
-            .options(selectinload(PortfolioPosition.instrument))
-        )
-    ).scalars().all()
-    for p in positions:
-        quote = await market_data.fetch_quote(p.instrument.symbol, p.instrument.asset_class)
-        if quote.price is None:
-            continue
-        cost = float(p.avg_cost)
-        if cost <= 0:
-            continue
-        dist = abs(quote.price - cost) / cost
-        if dist <= 0.01:
-            kind = "price_avg_cost"
-            if await _recent_alert_exists(db, user_id, kind, p.instrument.symbol):
-                continue
-            await create_alert(
-                db,
-                user_id=user_id,
-                kind=kind,
-                title=f"{p.instrument.symbol}: u průměrné nákupní ceny",
-                body=f"Cena {quote.price:.4f} je blízko Ø nákupu {cost:.4f} ({dist:.1%}).",
-                payload={
-                    "symbol": p.instrument.symbol,
-                    "price": quote.price,
-                    "level_price": cost,
-                    "kind": "avg_cost",
-                },
-            )
-            n += 1
+    # Avg-cost / entry / now: only via explicit PriceAlertRule (chart buttons) — no auto spam.
 
     await db.commit()
     return n

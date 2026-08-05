@@ -374,17 +374,7 @@ export default function ChatPage() {
   const windowTitle = active?.title || "Nový chat";
 
   return (
-    <div className="flex flex-col gap-4 min-h-[70vh]">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="display text-3xl">Sense</h1>
-          <p className="muted">AI rádce pro analýzu trhů</p>
-        </div>
-        <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void startNewChat()}>
-          Nový chat
-        </button>
-      </div>
-
+    <div className="chat-page">
       <div className="chat-layout">
         <aside className="card chat-sidebar p-3 space-y-3">
           <div className="flex items-center justify-between gap-2">
@@ -434,11 +424,21 @@ export default function ChatPage() {
             </div>
           )}
 
-          <div className="chat-window">
+          <div className={`chat-window ${hasMessages ? "chat-window--tall" : ""}`}>
             <div className="chat-titlebar">
               <div className="chat-titlebar__left min-w-0">
                 <span className="chat-titlebar__title truncate">{windowTitle}</span>
                 {active?.symbol && <span className="badge">{active.symbol}</span>}
+              </div>
+              <div className="chat-titlebar__center">
+                <button
+                  type="button"
+                  className="btn btn-primary chat-titlebar__new"
+                  disabled={busy}
+                  onClick={() => void startNewChat()}
+                >
+                  Nový chat
+                </button>
               </div>
               <div className="chat-titlebar__actions">
                 <button
@@ -464,7 +464,7 @@ export default function ChatPage() {
               </div>
             </div>
 
-            <div className="chat-window__body space-y-4 overflow-y-auto p-4 max-h-[48vh]">
+            <div className="chat-window__body space-y-4 overflow-y-auto p-4">
               {messages.length === 0 && (
                 <p className="muted text-sm">Vyber návrh nebo napiš otázku.</p>
               )}

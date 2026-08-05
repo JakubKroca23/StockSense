@@ -21,11 +21,23 @@ export default function AlertsPage() {
     await load();
   }
 
+  async function markAllRead() {
+    await apiFetch("/alerts/read-all", { method: "POST" });
+    await load();
+  }
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="display text-3xl">Alerty</h1>
-        <p className="muted">Nové tipy, změny úrovní, reporty.</p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="display text-3xl">Alerty</h1>
+          <p className="muted">Stop/target tipů, tvé hlídače z grafu, silné tipy, denní report.</p>
+        </div>
+        {alerts.some((a) => !a.is_read) && (
+          <button className="btn" onClick={() => markAllRead().catch((e) => setError(e.message))}>
+            Označit vše přečtené
+          </button>
+        )}
       </div>
       {error && <div className="card p-4 text-[var(--danger)]">{error}</div>}
       {alerts.length === 0 && <div className="card p-5 muted">Žádné alerty.</div>}

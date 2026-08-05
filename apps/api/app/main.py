@@ -79,9 +79,14 @@ async def _init_db() -> None:
 
 
 async def _user_ids() -> list[str]:
+    """Users with settings + always the primary AUTH_USER_ID (cron must not skip you)."""
     async with AsyncSessionLocal() as db:
         rows = (await db.execute(select(UserSettings.user_id))).scalars().all()
-        return list(rows)
+    ids = list(dict.fromkeys(str(u) for u in rows if u))
+    primary = settings.auth_user_id
+    if primary and primary not in ids:
+        ids.append(primary)
+    return ids
 
 
 async def job_price_poll() -> None:

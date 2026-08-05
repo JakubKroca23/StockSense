@@ -154,11 +154,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               >
                 <p className="nav-flyout__title">Navigace</p>
                 <div className="nav-flyout__grid">
-                  {links.map((l) => (
+                  {links.map((l, i) => (
                     <Link
                       key={l.href}
                       href={l.href}
                       className={`nav-flyout__link ${isActive(pathname, l.href) ? "is-active" : ""}`}
+                      style={{ ["--nav-item-delay" as string]: `${40 + i * 38}ms` }}
                       onClick={() => setMenuOpen(false)}
                     >
                       <NavLabel href={l.href} label={l.label} compact />
@@ -192,14 +193,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      {menuOpen && (
-        <button
-          type="button"
-          className="nav-flyout-scrim"
-          aria-label="Zavřít menu"
-          onClick={() => setMenuOpen(false)}
-        />
-      )}
+      <button
+        type="button"
+        className={`nav-flyout-scrim ${menuOpen ? "nav-flyout-scrim--open" : ""}`}
+        aria-label="Zavřít menu"
+        aria-hidden={!menuOpen}
+        tabIndex={menuOpen ? 0 : -1}
+        onClick={() => setMenuOpen(false)}
+      />
 
       <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
     </div>

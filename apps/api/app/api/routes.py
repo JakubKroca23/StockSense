@@ -1058,6 +1058,20 @@ async def list_alerts(
     return [AlertOut.model_validate(r) for r in rows]
 
 
+@router.post("/alerts/read-all")
+async def mark_all_alerts_read(
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = (
+        await db.execute(select(Alert).where(Alert.user_id == user.id, Alert.is_read.is_(False)))
+    ).scalars().all()
+    for row in rows:
+        row.is_read = True
+    await db.commit()
+    return {"ok": True, "count": len(rows)}
+
+
 @router.post("/alerts/{alert_id}/read")
 async def mark_alert_read(
     alert_id: int,
