@@ -1252,6 +1252,62 @@ textarea {
   height: 100%;
 }
 
+.instrument-chart__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.9rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  padding: 0 0.15rem 0.1rem;
+}
+
+.score-bars {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.score-bars__row {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr 2.5rem;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.score-bars__track {
+  height: 0.4rem;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--line) 70%, transparent);
+  overflow: hidden;
+}
+
+.score-bars__fill {
+  height: 100%;
+  border-radius: 99px;
+  max-width: 100%;
+}
+
+.score-bars__fill.is-pos {
+  background: var(--ok);
+}
+
+.score-bars__fill.is-neg {
+  background: var(--danger);
+}
+
+.macro-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 1rem;
+}
+
+.macro-strip__item {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 4.5rem;
+}
+
 .chart-controls {
   display: flex;
   flex-wrap: wrap;

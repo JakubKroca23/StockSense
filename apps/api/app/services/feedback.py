@@ -57,3 +57,15 @@ async def feedback_stats(db: AsyncSession, user_id: str) -> dict:
 async def feedback_adj_for_scoring(db: AsyncSession, user_id: str) -> float:
     stats = await feedback_stats(db, user_id)
     return float(stats.get("score_adj") or 0.0)
+
+
+async def feedback_adj_for_asset_class(db: AsyncSession, user_id: str, asset_class: str) -> float:
+    """Per-asset-class learning nudge; falls back to global adj."""
+    stats = await feedback_stats(db, user_id)
+    by = stats.get("by_asset_class") or {}
+    bucket = by.get(asset_class) or by.get(asset_class.lower())
+    if not bucket or bucket.get("total", 0) < 3:
+        return float(stats.get("score_adj") or 0.0)
+    total = bucket["total"]
+    hit_rate = (bucket["hit"] + 0.5 * bucket["partial"]) / total
+    return round(max(-0.15, min(0.15, (hit_rate - 0.5) * 0.4)), 3)

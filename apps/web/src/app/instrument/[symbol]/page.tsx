@@ -19,10 +19,69 @@ interface Detail {
   };
   bars: ChartBar[];
   positions?: PortfolioPosition[];
-  filings: { form: string; filing_date: string }[];
+  filings: { form: string; filing_date: string; url?: string | null }[];
+  headlines?: { title: string; publisher?: string; link?: string; published?: string }[];
+  macro?: { series_id: string; name: string; value: number; as_of?: string }[];
+  analysis?: {
+    action: string;
+    horizon: string;
+    score: number;
+    confidence: number;
+    components?: Record<string, number>;
+    features?: Record<string, number | string | null>;
+    notes?: Record<string, string[]>;
+    scenarios?: { bull: string; base: string; bear: string };
+    levels?: Record<string, number | null>;
+  } | null;
   tip: Tip | null;
   interval?: string;
   lookback?: string;
+}
+
+const FUND_LABELS: Record<string, string> = {
+  pe: "P/E",
+  forward_pe: "Fwd P/E",
+  peg: "PEG",
+  pb: "P/B",
+  ps: "P/S",
+  roe: "ROE",
+  profit_margin: "Marže",
+  debt_to_equity: "D/E",
+  revenue_growth: "Růst tržeb",
+  earnings_growth: "Růst EPS",
+  market_cap: "Market cap",
+  sector: "Sektor",
+  industry: "Odvětví",
+  dividend_yield: "Dividenda",
+  earnings_date: "Earnings",
+  eps_surprise_pct: "EPS growth QoQ",
+  eps_ttm: "EPS TTM",
+  target_mean: "Cíl analytici",
+  recommendation: "Konsensus",
+  fifty_two_week_high: "52t high",
+  fifty_two_week_low: "52t low",
+  beta: "Beta",
+  funding_rate: "Funding",
+};
+
+function formatFundValue(key: string, v: number | string | null): string {
+  if (v == null) return "—";
+  if (typeof v === "string") return v;
+  if (key === "market_cap") {
+    if (v >= 1e12) return `${(v / 1e12).toFixed(2)}T`;
+    if (v >= 1e9) return `${(v / 1e9).toFixed(2)}B`;
+    if (v >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
+    return v.toFixed(0);
+  }
+  if (
+    ["roe", "profit_margin", "revenue_growth", "earnings_growth", "dividend_yield", "eps_surprise_pct"].includes(
+      key
+    )
+  ) {
+    return `${(v * (Math.abs(v) <= 1 ? 100 : 1)).toFixed(1)}%`;
+  }
+  if (key === "funding_rate") return v.toFixed(5);
+  return Number.isInteger(v) ? String(v) : v.toFixed(2);
 }
 
 const TIMEFRAMES = [
@@ -225,9 +284,102 @@ export default function InstrumentPage() {
           {chartBusy && <span className="muted text-xs">Načítám…</span>}
         </div>
         <div className="instrument-chart__stage">
-          <PriceChart bars={data.bars} levels={chartLevels} />
+          <PriceChart bars={data.bars} levels={chartLevels} showMa />
         </div>
+        {data.analysis?.features && (
+          <div className="instrument-chart__stats">
+            {data.analysis.features.rsi != null && (
+              <span>RSI {Number(data.analysis.features.rsi).toFixed(0)}</span>
+            )}
+            {data.analysis.features.atr != null && (
+              <span>ATR {Number(data.analysis.features.atr).toFixed(2)}</span>
+            )}
+            {data.analysis.features.rs_vs_bench != null && (
+              <span>
+                RS{" "}
+                {Number(data.analysis.features.rs_vs_bench) >= 0 ? "+" : ""}
+                {(Number(data.analysis.features.rs_vs_bench) * 100).toFixed(1)}%
+              </span>
+            )}
+            {data.analysis.features.vol_ratio != null && (
+              <span>Vol {Number(data.analysis.features.vol_ratio).toFixed(1)}×</span>
+            )}
+            <span className="muted">SMA20 · SMA50</span>
+          </div>
+        )}
       </section>
+
+      {data.analysis && (
+        <section className="card p-4 space-y-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="display text-xl">Analýza</h2>
+            <div className="flex flex-wrap gap-2 text-sm">
+              <span className="badge">{actionLabel[data.analysis.action as Tip["action"]] || data.analysis.action}</span>
+              <span className="badge">
+                {horizonLabel[data.analysis.horizon as Tip["horizon"]] || data.analysis.horizon}
+              </span>
+              <span className="font-semibold tabular-nums">
+                Score {data.analysis.score} · {(data.analysis.confidence * 100).toFixed(0)}%
+              </span>
+            </div>
+          </div>
+          {data.analysis.components && (
+            <div className="score-bars">
+              {Object.entries(data.analysis.components).map(([k, v]) => (
+                <div key={k} className="score-bars__row">
+                  <span className="muted text-xs">{k}</span>
+                  <div className="score-bars__track">
+                    <div
+                      className={`score-bars__fill ${v >= 0 ? "is-pos" : "is-neg"}`}
+                      style={{ width: `${Math.min(100, Math.abs(v) * 100)}%` }}
+                    />
+                  </div>
+                  <span className="tabular-nums text-xs">{v.toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {data.analysis.notes && (
+            <ul className="text-sm space-y-1 muted">
+              {Object.values(data.analysis.notes)
+                .flat()
+                .slice(0, 8)
+                .map((n, i) => (
+                  <li key={`${n}-${i}`}>· {n}</li>
+                ))}
+            </ul>
+          )}
+          {data.analysis.scenarios && (
+            <div className="grid sm:grid-cols-3 gap-2 text-sm">
+              <div className="rounded-xl border border-[var(--line)] p-3">
+                <div className="text-xs text-[var(--ok)] mb-1">Bull</div>
+                {data.analysis.scenarios.bull}
+              </div>
+              <div className="rounded-xl border border-[var(--line)] p-3">
+                <div className="text-xs muted mb-1">Base</div>
+                {data.analysis.scenarios.base}
+              </div>
+              <div className="rounded-xl border border-[var(--line)] p-3">
+                <div className="text-xs text-[var(--danger)] mb-1">Bear</div>
+                {data.analysis.scenarios.bear}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
+      {data.macro && data.macro.length > 0 && (
+        <section className="card p-3">
+          <div className="macro-strip">
+            {data.macro.map((m) => (
+              <div key={m.series_id} className="macro-strip__item">
+                <span className="muted text-xs">{m.series_id}</span>
+                <span className="tabular-nums font-medium">{Number(m.value).toFixed(2)}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {data.tip && (
         <section className="card p-5 space-y-3">
@@ -248,9 +400,20 @@ export default function InstrumentPage() {
             <div className="card p-3">Base: {data.tip.scenario_base}</div>
             <div className="card p-3">Bear: {data.tip.scenario_bear}</div>
           </div>
-          <div className="text-sm muted whitespace-pre-wrap">
-            {JSON.stringify(data.tip.rationale, null, 2)}
-          </div>
+          {data.tip.rationale && typeof data.tip.rationale === "object" && (
+            <div className="text-sm space-y-1">
+              {(["fundament", "money_flow", "technicka", "makro"] as const).map((key) => {
+                const notes = (data.tip!.rationale as Record<string, unknown>)[key];
+                if (!Array.isArray(notes) || !notes.length) return null;
+                return (
+                  <p key={key} className="muted">
+                    <span className="text-[var(--text)]">{key}: </span>
+                    {notes.join(" · ")}
+                  </p>
+                );
+              })}
+            </div>
+          )}
           <p className="text-sm text-[var(--warn)]">{data.tip.risks}</p>
           {(data.tip.entry_notes || data.tip.feedback?.notes) && (
             <div className="text-sm muted space-y-1">
@@ -409,34 +572,64 @@ export default function InstrumentPage() {
         </section>
       )}
 
-      <section className="card p-5">
-        <h2 className="display text-2xl mb-3">Fundament</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-          {Object.entries(data.quote.fundamentals || {}).map(([k, v]) => (
-            <div key={k} className="rounded-xl border border-[var(--line)] p-3">
-              <div className="muted text-xs">{k}</div>
-              <div className="font-medium">
-                {typeof v === "number" ? Number(v).toPrecision(4) : String(v)}
+      <section className="card p-4">
+        <h2 className="display text-xl mb-3">Fundament</h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+          {Object.entries(data.quote.fundamentals || {})
+            .filter(([k]) => k !== "short_name")
+            .map(([k, v]) => (
+              <div key={k} className="rounded-xl border border-[var(--line)] p-2.5">
+                <div className="muted text-xs">{FUND_LABELS[k] || k}</div>
+                <div className="font-medium tabular-nums">{formatFundValue(k, v)}</div>
               </div>
-            </div>
-          ))}
+            ))}
           {Object.keys(data.quote.fundamentals || {}).length === 0 && (
             <p className="muted">Fundamentální data zatím nejsou dostupná.</p>
           )}
         </div>
       </section>
 
+      {data.headlines && data.headlines.length > 0 && (
+        <section className="card p-4">
+          <h2 className="display text-xl mb-3">Headlines</h2>
+          <ul className="space-y-2 text-sm">
+            {data.headlines.map((h, i) => (
+              <li key={`${h.title}-${i}`} className="border-b border-[var(--line)] pb-2">
+                {h.link ? (
+                  <a href={h.link} target="_blank" rel="noreferrer" className="hover:underline">
+                    {h.title}
+                  </a>
+                ) : (
+                  <span>{h.title}</span>
+                )}
+                <div className="muted text-xs mt-0.5">
+                  {[h.publisher, h.published ? h.published.slice(0, 10) : null]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {data.filings?.length > 0 && (
-        <section className="card p-5">
-          <h2 className="display text-2xl mb-3">SEC filings</h2>
+        <section className="card p-4">
+          <h2 className="display text-xl mb-3">SEC filings</h2>
           <ul className="space-y-2 text-sm">
             {data.filings.map((f, i) => (
               <li
                 key={`${f.form}-${f.filing_date}-${i}`}
-                className="flex justify-between border-b border-[var(--line)] py-2"
+                className="flex justify-between gap-3 border-b border-[var(--line)] py-2"
               >
-                <span>{f.form}</span>
-                <span className="muted">{f.filing_date}</span>
+                {f.url ? (
+                  <a href={f.url} target="_blank" rel="noreferrer" className="hover:underline">
+                    {f.form}
+                  </a>
+                ) : (
+                  <span>{f.form}</span>
+                )}
+                <span className="muted shrink-0">{f.filing_date}</span>
               </li>
             ))}
           </ul>

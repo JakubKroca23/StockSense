@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models import (
     Alert,
+    AssetClass,
     FeedbackResult,
     Instrument,
     MacroSnapshot,
@@ -24,8 +25,8 @@ from app.models import (
     Watchlist,
 )
 from app.services.alerts import create_alert
-from app.services.feedback import feedback_adj_for_scoring
-from app.services.fundament_macro import fetch_fred_latest
+from app.services.feedback import feedback_adj_for_asset_class
+from app.services.fundament_macro import fetch_fred_latest, macro_bias_from_snapshots
 from app.services.instruments import ensure_discovery_universe
 from app.services.llm import LLMTask, llm_complete, narrate_tip
 from app.services.market_data import market_data
@@ -123,21 +124,7 @@ async def sync_macro(db: AsyncSession) -> int:
 
 
 def _macro_bias_from_snapshots(snaps: list[MacroSnapshot]) -> float:
-    """Simple heuristic: inverted yield / high VIX = risk-off."""
-    by_id = {s.series_id: s.value for s in snaps}
-    bias = 0.0
-    dgs10 = by_id.get("DGS10")
-    dgs2 = by_id.get("DGS2")
-    if dgs10 is not None and dgs2 is not None:
-        spread = dgs10 - dgs2
-        bias += 0.2 if spread > 0 else -0.25
-    vix = by_id.get("VIXCLS")
-    if vix is not None:
-        if vix > 25:
-            bias -= 0.3
-        elif vix < 15:
-            bias += 0.15
-    return max(-1.0, min(1.0, bias))
+    return macro_bias_from_snapshots(snaps)
 
 
 async def _instruments_for_user(db: AsyncSession, user_id: str) -> list[Instrument]:
@@ -185,10 +172,15 @@ async def _run_scoring(
         select(MacroSnapshot).order_by(MacroSnapshot.as_of.desc()).limit(50)
     )
     macro_bias = _macro_bias_from_snapshots(list(macro_result.scalars().all()))
-    feedback_adj = await feedback_adj_for_scoring(db, user_id)
 
     instruments = await _instruments_for_user(db, user_id)
     await sync_prices_for_instruments(db, instruments)
+
+    # Benchmarks for relative strength (once per run)
+    spy_bars = await market_data.fetch_ohlcv("SPY", AssetClass.etf, interval="1d", lookback="6mo")
+    btc_bars = await market_data.fetch_ohlcv("BTC-USD", AssetClass.crypto, interval="1d", lookback="6mo")
+    if not btc_bars:
+        btc_bars = await market_data.fetch_ohlcv("BTC/USDT", AssetClass.crypto, interval="1d", lookback="6mo")
 
     # deactivate old tips (keep accepted ones the user is following)
     old = await db.execute(
@@ -208,8 +200,23 @@ async def _run_scoring(
         try:
             bars = await market_data.fetch_ohlcv(inst.symbol, inst.asset_class)
             quote = await market_data.fetch_quote(inst.symbol, inst.asset_class)
+            bars_4h = await market_data.fetch_ohlcv(
+                inst.symbol, inst.asset_class, interval="4h", lookback="3mo"
+            )
+            bench = btc_bars if inst.asset_class == AssetClass.crypto else spy_bars
+            fb_adj = await feedback_adj_for_asset_class(
+                db, user_id, inst.asset_class.value
+            )
             result = score_instrument(
-                bars, quote, inst.asset_class, risk, max_pct, macro_bias, feedback_adj
+                bars,
+                quote,
+                inst.asset_class,
+                risk,
+                max_pct,
+                macro_bias,
+                fb_adj,
+                benchmark_bars=bench or None,
+                bars_short=bars_4h or None,
             )
             if not result:
                 continue

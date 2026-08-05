@@ -36,6 +36,8 @@ type Props = {
   height?: number;
   levels?: ChartLevel[];
   className?: string;
+  /** Overlay SMA20 / SMA50 on candles. */
+  showMa?: boolean;
 };
 
 function toUnix(ts: string): Time {
@@ -52,11 +54,29 @@ function hexAlpha(hex: string, alpha: number): string {
   return `#${h}${a}`;
 }
 
-export function PriceChart({ bars, height, levels = [], className }: Props) {
+function smaSeries(
+  closes: { time: Time; value: number }[],
+  period: number
+): { time: Time; value: number }[] {
+  const out: { time: Time; value: number }[] = [];
+  let sum = 0;
+  for (let i = 0; i < closes.length; i++) {
+    sum += closes[i].value;
+    if (i >= period) sum -= closes[i - period].value;
+    if (i >= period - 1) {
+      out.push({ time: closes[i].time, value: sum / period });
+    }
+  }
+  return out;
+}
+
+export function PriceChart({ bars, height, levels = [], className, showMa = true }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const sma20Ref = useRef<ISeriesApi<"Line"> | null>(null);
+  const sma50Ref = useRef<ISeriesApi<"Line"> | null>(null);
   const linesRef = useRef<IPriceLine[]>([]);
   const fill = height == null;
 
@@ -144,9 +164,28 @@ export function PriceChart({ bars, height, levels = [], className }: Props) {
       scaleMargins: { top: 0.82, bottom: 0 },
     });
 
+    const accent2 = styles.getPropertyValue("--accent-2").trim() || "#6ea8ff";
+    const warn = styles.getPropertyValue("--warn").trim() || "#f0c14a";
+    const sma20 = chart.addLineSeries({
+      color: hexAlpha(accent2, 0.85),
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
+    const sma50 = chart.addLineSeries({
+      color: hexAlpha(warn, 0.85),
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
+
     chartRef.current = chart;
     seriesRef.current = candle;
     volumeRef.current = volume;
+    sma20Ref.current = sma20;
+    sma50Ref.current = sma50;
 
     const ro = new ResizeObserver((entries) => {
       if (!containerRef.current || !chartRef.current) return;
@@ -165,6 +204,8 @@ export function PriceChart({ bars, height, levels = [], className }: Props) {
       chartRef.current = null;
       seriesRef.current = null;
       volumeRef.current = null;
+      sma20Ref.current = null;
+      sma50Ref.current = null;
       linesRef.current = [];
     };
   }, [height, fill]);
@@ -174,6 +215,8 @@ export function PriceChart({ bars, height, levels = [], className }: Props) {
     if (!bars.length) {
       seriesRef.current.setData([]);
       volumeRef.current.setData([]);
+      sma20Ref.current?.setData([]);
+      sma50Ref.current?.setData([]);
       return;
     }
 
@@ -222,8 +265,18 @@ export function PriceChart({ bars, height, levels = [], className }: Props) {
 
     seriesRef.current.setData(unique);
     volumeRef.current.setData(uniqueVol);
+
+    if (showMa && sma20Ref.current && sma50Ref.current) {
+      const closes = unique.map((c) => ({ time: c.time, value: c.close }));
+      sma20Ref.current.setData(smaSeries(closes, 20));
+      sma50Ref.current.setData(smaSeries(closes, 50));
+    } else {
+      sma20Ref.current?.setData([]);
+      sma50Ref.current?.setData([]);
+    }
+
     chartRef.current.timeScale().fitContent();
-  }, [bars]);
+  }, [bars, showMa]);
 
   useEffect(() => {
     if (!seriesRef.current) return;

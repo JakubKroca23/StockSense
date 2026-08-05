@@ -41,6 +41,55 @@ class MarketDataProvider(Protocol):
         ...
 
 
+def _fundamentals_from_yf_info(info: dict) -> dict:
+    """Normalize yfinance `.info` into a compact fundamentals dict."""
+    def _ts(val) -> str | None:
+        if val is None:
+            return None
+        try:
+            if isinstance(val, (int, float)) and val > 1e9:
+                return datetime.fromtimestamp(float(val), tz=timezone.utc).date().isoformat()
+            return str(val)[:32]
+        except Exception:
+            return None
+
+    raw = {
+        "pe": info.get("trailingPE"),
+        "forward_pe": info.get("forwardPE"),
+        "peg": info.get("pegRatio"),
+        "pb": info.get("priceToBook"),
+        "ps": info.get("priceToSalesTrailing12Months"),
+        "roe": info.get("returnOnEquity"),
+        "profit_margin": info.get("profitMargins"),
+        "debt_to_equity": info.get("debtToEquity"),
+        "revenue_growth": info.get("revenueGrowth"),
+        "earnings_growth": info.get("earningsGrowth"),
+        "market_cap": info.get("marketCap"),
+        "sector": info.get("sector"),
+        "industry": info.get("industry"),
+        "dividend_yield": info.get("dividendYield"),
+        "eps_ttm": info.get("trailingEps"),
+        "eps_forward": info.get("forwardEps"),
+        "earnings_date": _ts(
+            info.get("earningsTimestamp")
+            or info.get("earningsTimestampStart")
+            or (
+                info.get("earningsDate")[0]
+                if isinstance(info.get("earningsDate"), (list, tuple)) and info.get("earningsDate")
+                else info.get("earningsDate")
+            )
+        ),
+        "eps_surprise_pct": info.get("earningsQuarterlyGrowth"),
+        "target_mean": info.get("targetMeanPrice"),
+        "recommendation": info.get("recommendationKey"),
+        "fifty_two_week_high": info.get("fiftyTwoWeekHigh"),
+        "fifty_two_week_low": info.get("fiftyTwoWeekLow"),
+        "beta": info.get("beta"),
+        "short_name": info.get("shortName") or info.get("longName"),
+    }
+    return {k: v for k, v in raw.items() if v is not None}
+
+
 def _ensure_aware(ts: datetime) -> datetime:
     if ts.tzinfo is None:
         return ts.replace(tzinfo=timezone.utc)
@@ -172,21 +221,7 @@ class YFinanceProvider:
             except Exception:
                 pass
 
-        fundamentals = {
-            "pe": info.get("trailingPE"),
-            "forward_pe": info.get("forwardPE"),
-            "pb": info.get("priceToBook"),
-            "ps": info.get("priceToSalesTrailing12Months"),
-            "roe": info.get("returnOnEquity"),
-            "profit_margin": info.get("profitMargins"),
-            "debt_to_equity": info.get("debtToEquity"),
-            "revenue_growth": info.get("revenueGrowth"),
-            "earnings_growth": info.get("earningsGrowth"),
-            "market_cap": info.get("marketCap"),
-            "sector": info.get("sector"),
-            "industry": info.get("industry"),
-            "dividend_yield": info.get("dividendYield"),
-        }
+        fundamentals = _fundamentals_from_yf_info(info)
         dq = DataQuality.medium if price is not None else DataQuality.unavailable
         if price is not None and not info:
             dq = DataQuality.low
@@ -455,18 +490,55 @@ class CompositeMarketData:
             return bars
         return await self.stooq.fetch_ohlcv(symbol, asset_class, iv, lb)
 
+    async def fetch_fundamentals(self, symbol: str, asset_class: AssetClass) -> dict:
+        """Best-effort fundamentals (stocks/ETFs via yfinance; crypto keeps funding later)."""
+        if asset_class == AssetClass.crypto:
+            return {}
+        try:
+            q = await self.yf.fetch_quote(symbol, asset_class)
+            return dict(q.fundamentals or {})
+        except Exception:
+            return {}
+
     async def fetch_quote(self, symbol: str, asset_class: AssetClass) -> QuoteSnapshot:
         if asset_class == AssetClass.crypto:
             q = await self.ccxt.fetch_quote(symbol, asset_class)
             if q.price is not None:
                 return q
-        q = await self.yahoo_chart.fetch_quote(symbol, asset_class)
-        if q.price is not None:
-            return q
-        q = await self.yf.fetch_quote(symbol, asset_class)
-        if q.price is not None:
-            return q
-        return await self.stooq.fetch_quote(symbol, asset_class)
+
+        price_q: QuoteSnapshot | None = None
+        chart_q = await self.yahoo_chart.fetch_quote(symbol, asset_class)
+        if chart_q.price is not None:
+            price_q = chart_q
+        else:
+            yf_q = await self.yf.fetch_quote(symbol, asset_class)
+            if yf_q.price is not None:
+                # Already has fundamentals
+                return yf_q
+            stooq_q = await self.stooq.fetch_quote(symbol, asset_class)
+            if stooq_q.price is not None:
+                price_q = stooq_q
+            else:
+                return stooq_q
+
+        # Merge yfinance fundamentals onto fast price quote (Yahoo chart has none).
+        fund = await self.fetch_fundamentals(symbol, asset_class)
+        if not fund and price_q.source == "yfinance":
+            return price_q
+        merged_fund = {**(price_q.fundamentals or {}), **fund}
+        dq = price_q.data_quality
+        if merged_fund.get("market_cap") and (merged_fund.get("pe") or merged_fund.get("sector")):
+            if dq in (DataQuality.medium, DataQuality.low, DataQuality.proxy):
+                dq = DataQuality.high if price_q.source in ("yahoo_chart", "yfinance") else dq
+        return QuoteSnapshot(
+            symbol=price_q.symbol,
+            price=price_q.price,
+            change_pct=price_q.change_pct,
+            source=f"{price_q.source}+yf_fund" if fund else price_q.source,
+            data_quality=dq,
+            as_of=price_q.as_of,
+            fundamentals=merged_fund,
+        )
 
 
 market_data = CompositeMarketData()

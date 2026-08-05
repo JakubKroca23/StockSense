@@ -63,11 +63,16 @@ from app.schemas import (
     WatchlistDigestOut,
     WatchlistOut,
 )
-from app.services.feedback import feedback_stats
-from app.services.fundament_macro import fetch_edgar_recent_filings
+from app.services.feedback import feedback_adj_for_asset_class, feedback_stats
+from app.services.fundament_macro import (
+    fetch_edgar_recent_filings,
+    fetch_yahoo_headlines,
+    macro_bias_from_snapshots,
+)
 from app.services.instruments import get_or_create_instrument
 from app.services.llm import LLMTask, generate_chat_title, llm_complete
 from app.services.market_data import market_data
+from app.services.scoring import score_instrument
 from app.workers.jobs import generate_daily_report, run_scoring_for_user, snapshot_portfolio
 
 router = APIRouter()
@@ -1103,7 +1108,7 @@ async def instrument_detail(
     user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    from app.models import AssetClass, Instrument
+    from app.models import AssetClass, Instrument, MacroSnapshot
     from app.services.market_data import clamp_lookback, normalize_interval
 
     allowed_lb = {"5d", "1mo", "3mo", "6mo", "1y", "2y", "5y"}
@@ -1124,12 +1129,29 @@ async def instrument_detail(
 
     quote = await market_data.fetch_quote(inst.symbol, inst.asset_class)
     bars = await market_data.fetch_ohlcv(inst.symbol, inst.asset_class, interval=iv, lookback=lb)
+    bars_1d = bars if iv == "1d" else await market_data.fetch_ohlcv(
+        inst.symbol, inst.asset_class, interval="1d", lookback="6mo"
+    )
+    bars_4h = await market_data.fetch_ohlcv(
+        inst.symbol, inst.asset_class, interval="4h", lookback="3mo"
+    )
+
     filings = []
+    headlines = []
     if inst.asset_class in (AssetClass.stock, AssetClass.etf):
         try:
-            filings = await fetch_edgar_recent_filings(inst.symbol)
+            filings = await fetch_edgar_recent_filings(inst.symbol, count=8)
         except Exception:
             filings = []
+        try:
+            headlines = await fetch_yahoo_headlines(inst.symbol, limit=8)
+        except Exception:
+            headlines = []
+    elif inst.asset_class == AssetClass.crypto:
+        try:
+            headlines = await fetch_yahoo_headlines(inst.symbol.replace("/", "-"), limit=6)
+        except Exception:
+            headlines = []
 
     tip = (
         await db.execute(
@@ -1143,6 +1165,69 @@ async def instrument_detail(
 
     positions = await _portfolio_with_marks(db, user.id)
     own = [p for p in positions if p.instrument.id == inst.id]
+
+    settings = await _ensure_settings(db, user)
+    macro_rows = (
+        await db.execute(select(MacroSnapshot).order_by(MacroSnapshot.as_of.desc()).limit(50))
+    ).scalars().all()
+    macro_bias = macro_bias_from_snapshots(list(macro_rows))
+    seen_m: set[str] = set()
+    macro_strip = []
+    for r in macro_rows:
+        if r.series_id in seen_m:
+            continue
+        seen_m.add(r.series_id)
+        macro_strip.append(
+            {"series_id": r.series_id, "name": r.name, "value": r.value, "as_of": r.as_of}
+        )
+
+    bench = await market_data.fetch_ohlcv(
+        "BTC-USD" if inst.asset_class == AssetClass.crypto else "SPY",
+        AssetClass.crypto if inst.asset_class == AssetClass.crypto else AssetClass.etf,
+        interval="1d",
+        lookback="6mo",
+    )
+    fb_adj = await feedback_adj_for_asset_class(db, user.id, inst.asset_class.value)
+    analysis = None
+    scored = score_instrument(
+        bars_1d,
+        quote,
+        inst.asset_class,
+        settings.risk_profile,
+        float(settings.max_position_pct or 10),
+        macro_bias,
+        fb_adj,
+        benchmark_bars=bench or None,
+        bars_short=bars_4h or None,
+    )
+    if scored:
+        analysis = {
+            "action": scored.action.value,
+            "horizon": scored.horizon.value,
+            "score": scored.score,
+            "confidence": scored.confidence,
+            "components": scored.rationale.get("components"),
+            "features": scored.rationale.get("features"),
+            "notes": {
+                "fundament": scored.rationale.get("fundament"),
+                "makro": scored.rationale.get("makro"),
+                "money_flow": scored.rationale.get("money_flow"),
+                "technicka": scored.rationale.get("technicka"),
+                "feedback": scored.rationale.get("feedback"),
+            },
+            "scenarios": {
+                "bull": scored.scenario_bull,
+                "base": scored.scenario_base,
+                "bear": scored.scenario_bear,
+            },
+            "levels": {
+                "entry_low": scored.entry_low,
+                "entry_high": scored.entry_high,
+                "stop": scored.stop,
+                "target_1": scored.target_1,
+                "target_2": scored.target_2,
+            },
+        }
 
     return {
         "instrument": InstrumentOut.model_validate(inst),
@@ -1172,6 +1257,9 @@ async def instrument_detail(
         ],
         "positions": own,
         "filings": filings,
+        "headlines": headlines,
+        "macro": macro_strip,
+        "analysis": analysis,
         "tip": TipOut.model_validate(tip) if tip else None,
     }
 
@@ -1209,7 +1297,7 @@ async def chat(
 
     context_parts: list[str] = []
     if payload.symbol:
-        from app.models import Instrument
+        from app.models import AssetClass, Instrument, MacroSnapshot
 
         inst = (
             await db.execute(select(Instrument).where(Instrument.symbol == payload.symbol.upper()))
@@ -1254,7 +1342,6 @@ async def chat(
                         for p in own_pos
                     )
                 )
-            # Last few daily bars as crude chart context
             bars = await market_data.fetch_ohlcv(inst.symbol, inst.asset_class, interval="1d", lookback="1mo")
             if bars:
                 last = bars[-8:]
@@ -1265,6 +1352,95 @@ async def chat(
                         for b in last
                     )
                 )
+
+            # Live analysis features for chat precision
+            try:
+                settings = await _ensure_settings(db, user)
+                macro_rows = (
+                    await db.execute(
+                        select(MacroSnapshot).order_by(MacroSnapshot.as_of.desc()).limit(40)
+                    )
+                ).scalars().all()
+                macro_bias = macro_bias_from_snapshots(list(macro_rows))
+                seen = set()
+                macro_lines = []
+                for r in macro_rows:
+                    if r.series_id in seen:
+                        continue
+                    seen.add(r.series_id)
+                    macro_lines.append(f"{r.series_id}={r.value}")
+                if macro_lines:
+                    context_parts.append(f"Makro (FRED): {', '.join(macro_lines)}; bias={macro_bias:+.2f}")
+
+                bench = await market_data.fetch_ohlcv(
+                    "BTC-USD" if inst.asset_class == AssetClass.crypto else "SPY",
+                    AssetClass.crypto if inst.asset_class == AssetClass.crypto else AssetClass.etf,
+                    interval="1d",
+                    lookback="6mo",
+                )
+                bars_4h = await market_data.fetch_ohlcv(
+                    inst.symbol, inst.asset_class, interval="4h", lookback="3mo"
+                )
+                fb_adj = await feedback_adj_for_asset_class(db, user.id, inst.asset_class.value)
+                scored = score_instrument(
+                    bars or [],
+                    quote,
+                    inst.asset_class,
+                    settings.risk_profile,
+                    float(settings.max_position_pct or 10),
+                    macro_bias,
+                    fb_adj,
+                    benchmark_bars=bench or None,
+                    bars_short=bars_4h or None,
+                )
+                if scored:
+                    feats = scored.rationale.get("features") or {}
+                    comps = scored.rationale.get("components") or {}
+                    context_parts.append(
+                        f"Live score: {scored.score} action={scored.action.value} "
+                        f"components={comps} features={feats}"
+                    )
+            except Exception:
+                pass
+
+            if inst.asset_class in (AssetClass.stock, AssetClass.etf):
+                try:
+                    filings = await fetch_edgar_recent_filings(inst.symbol, count=5)
+                    if filings:
+                        context_parts.append(
+                            "SEC filings: "
+                            + "; ".join(
+                                f"{f.get('form')}@{f.get('filing_date')}"
+                                + (f" url={f.get('url')}" if f.get("url") else "")
+                                for f in filings
+                            )
+                        )
+                except Exception:
+                    pass
+                try:
+                    headlines = await fetch_yahoo_headlines(inst.symbol, limit=6)
+                    if headlines:
+                        context_parts.append(
+                            "Headlines: "
+                            + " | ".join(
+                                f"{h.get('title')}"
+                                + (f" ({h.get('published')})" if h.get("published") else "")
+                                for h in headlines
+                            )
+                        )
+                except Exception:
+                    pass
+            elif inst.asset_class == AssetClass.crypto:
+                try:
+                    headlines = await fetch_yahoo_headlines(
+                        inst.symbol.replace("/", "-"), limit=5
+                    )
+                    if headlines:
+                        context_parts.append(
+                            "Headlines: " + " | ".join(h.get("title", "") for h in headlines)
+                        )
+                except Exception:
+                    pass
 
     tips = (
         await db.execute(
