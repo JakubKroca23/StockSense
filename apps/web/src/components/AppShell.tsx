@@ -171,7 +171,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
             <Link
               href={activeLink.href}
-              className="nav-link nav-link--active nav-link--current app-no-drag"
+              className="nav-link nav-link--current app-no-drag"
               aria-current="page"
             >
               <NavLabel href={activeLink.href} label={activeLink.label} />

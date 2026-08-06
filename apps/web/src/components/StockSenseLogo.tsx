@@ -47,10 +47,17 @@ export function StockSenseLogo({
         }}
       >
         <span
+          className="brand-logo__stock"
           style={{
             color: "#fff",
-            fontSize: stockSize,
-            letterSpacing: "0.08em",
+            fontFamily: "var(--font-logo-hand), Caveat Brush, cursive",
+            fontSize: Math.round(stockSize * 1.22),
+            fontWeight: 400,
+            letterSpacing: "0.02em",
+            lineHeight: 0.85,
+            display: "inline-block",
+            transform: "rotate(-2deg)",
+            transformOrigin: "left center",
           }}
         >
           Stock
@@ -61,7 +68,7 @@ export function StockSenseLogo({
             color: SENSE_GREEN,
             fontSize: senseSize,
             fontWeight: 400,
-            letterSpacing: 0,
+            letterSpacing: "0.02em",
             textShadow: `0 0 10px ${SENSE_GREEN}55, 0 0 18px ${SENSE_GREEN}33`,
             // sense: druhé s mírně větší (sdílí „s“ se Stocks)
             marginLeft: "-0.92em",
@@ -70,7 +77,8 @@ export function StockSenseLogo({
             display: "inline-block",
           }}
         >
-          <>sen<span
+          sen
+          <span
             className="brand-logo__sense-s"
             style={{
               fontSize: "1.2em",
@@ -79,12 +87,14 @@ export function StockSenseLogo({
               display: "inline-block",
               lineHeight: 1,
               verticalAlign: "baseline",
-              marginLeft: "-0.22em",
-              marginRight: "-0.06em",
+              margin: "0 -0.06em 0 -0.14em",
               position: "relative",
               top: "-0.12em",
             }}
-          >s</span>e</>
+          >
+            s
+          </span>
+          e
         </span>
       </span>
     </span>
