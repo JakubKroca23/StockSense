@@ -849,3 +849,139 @@ def format_bot_brief(status: dict[str, Any], *, max_chars: int = 3500) -> str:
 
     text = "\n".join(lines)
     return text if len(text) <= max_chars else text[: max_chars - 1] + "…"
+
+
+async def build_external_briefing(db: AsyncSession, *, hours: int = 48) -> dict[str, Any]:
+    """Full briefing package for pasting into an external LLM."""
+    hours = max(6, min(int(hours), 168))
+    status = await get_status(db)
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+    feature_lines: list[str] = []
+    for sym in status.get("symbols") or []:
+        bars = (
+            await db.execute(
+                select(LiqFeatureBar)
+                .where(LiqFeatureBar.symbol == sym, LiqFeatureBar.ts >= since)
+                .order_by(LiqFeatureBar.ts.asc())
+            )
+        ).scalars().all()
+        if not bars:
+            feature_lines.append(f"## {sym}\n(žádné 1m bary za {hours}h)")
+            continue
+        rets = [b.mid_ret_pct for b in bars]
+        imbs = [b.imbalance_avg for b in bars]
+        spreads = [b.spread_bps_avg for b in bars if b.spread_bps_avg is not None]
+        feature_lines.append(
+            f"## {sym}\n"
+            f"- bars={len(bars)}\n"
+            f"- mid {bars[0].mid_open:.6g} → {bars[-1].mid_close:.6g} "
+            f"(sum_ret={sum(rets):.3f}%)\n"
+            f"- imbalance avg={mean(imbs):.3f} max_abs={max(abs(x) for x in imbs):.3f}\n"
+            f"- spread_bps avg={mean(spreads) if spreads else 0:.2f}\n"
+            f"- max wall bid/ask "
+            f"{max(b.wall_bid_size_max for b in bars):.4g} / "
+            f"{max(b.wall_ask_size_max for b in bars):.4g}\n"
+            f"- last: imb={bars[-1].imbalance_avg:.3f} ret={bars[-1].mid_ret_pct:.3f}% "
+            f"spread={bars[-1].spread_bps_avg}"
+        )
+
+    resolved = (
+        await db.execute(
+            select(HypothesisTrial)
+            .where(
+                HypothesisTrial.status == "resolved",
+                HypothesisTrial.triggered_at >= since,
+            )
+            .order_by(HypothesisTrial.triggered_at.desc())
+            .limit(40)
+        )
+    ).scalars().all()
+    trial_lines: list[str] = []
+    for t in resolved:
+        trial_lines.append(
+            f"- hyp_id={t.hypothesis_id} {t.symbol} @ {t.triggered_at.isoformat()} "
+            f"→ move={t.move_pct}% won={t.won} entry={t.entry_mid} exit={t.exit_mid}"
+        )
+
+    hyps = (
+        await db.execute(
+            select(TradingHypothesis).order_by(TradingHypothesis.updated_at.desc()).limit(40)
+        )
+    ).scalars().all()
+    hyp_block = []
+    for h in hyps:
+        wr = (h.wins / h.trials) if h.trials else None
+        hyp_block.append(
+            {
+                "slug": h.slug,
+                "title": h.title,
+                "symbol": h.symbol,
+                "direction": h.direction,
+                "horizon_minutes": h.horizon_minutes,
+                "expected_move_pct": h.expected_move_pct,
+                "conditions": h.conditions,
+                "status": h.status,
+                "trials": h.trials,
+                "wins": h.wins,
+                "winrate": wr,
+                "avg_move_pct": h.avg_move_pct,
+                "notes": h.notes,
+            }
+        )
+
+    analyses = (
+        await db.execute(select(LiqAnalysis).order_by(LiqAnalysis.ts.desc()).limit(8))
+    ).scalars().all()
+
+    prompt = (
+        "Jsi research analytik pro crypto microstructure (spot Binance+Bybit).\n"
+        "Dostaneš data ze StockSense Liquidity Intel (paper hypotézy + 1m features).\n"
+        "Úkol:\n"
+        "1) Shrň stav za poslední okno.\n"
+        "2) Které hypotézy HOLD / RETIRE / UPRAVIT (s důvodem z dat).\n"
+        "3) Navrhni max 5 nových testovatelných hypotéz "
+        "(conditions jen: imbalance_gt/lt, imbalance_abs_gt, spread_bps_lt/gt, "
+        "wall_bid_size_gt, wall_ask_size_gt, bid_ask_vol_ratio_gt, mid_ret_pct_gt/lt).\n"
+        "4) Rizika / overfitting.\n"
+        "Nevymýšlej čísla mimo DATA. Odpověz česky, strukturovaně.\n"
+    )
+
+    data_md = "\n".join(
+        [
+            f"# StockSense Liquidity Intel briefing",
+            f"generated_at: {datetime.now(timezone.utc).isoformat()}",
+            f"window_hours: {hours}",
+            "",
+            "## Runtime status",
+            format_bot_brief(status, max_chars=6000),
+            "",
+            f"## Feature bars ({hours}h)",
+            "\n".join(feature_lines) if feature_lines else "(žádná data)",
+            "",
+            "## Hypotheses (JSON)",
+            json.dumps(hyp_block, ensure_ascii=False, indent=2),
+            "",
+            f"## Recent resolved trials ({hours}h)",
+            "\n".join(trial_lines) if trial_lines else "(žádné)",
+            "",
+            "## Recent internal analyses",
+            "\n".join(
+                f"- {a.ts.isoformat()}: {(a.summary or '')[:500]}\n"
+                f"  insights={(a.findings or {}).get('insights')}\n"
+                f"  lessons={(a.findings or {}).get('lessons')}"
+                for a in analyses
+            )
+            or "(žádné)",
+        ]
+    )
+
+    text = f"{prompt}\n---\nDATA:\n{data_md}\n"
+    return {
+        "hours": hours,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "chars": len(text),
+        "text": text,
+        "prompt": prompt,
+        "status": status,
+    }

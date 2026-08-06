@@ -101,6 +101,25 @@ function LiqIntelPanel() {
     }
   };
 
+  const [copyMsg, setCopyMsg] = useState<string | null>(null);
+
+  const copyBriefing = async () => {
+    setBusy(true);
+    setErr(null);
+    setCopyMsg(null);
+    try {
+      const pack = await apiFetch<{ text: string; chars: number; hours: number }>(
+        "/crypto/liq-intel/briefing?hours=48"
+      );
+      await navigator.clipboard.writeText(pack.text);
+      setCopyMsg(`Zkopírováno (${pack.chars.toLocaleString("cs-CZ")} znaků, ${pack.hours}h)`);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Kopírování selhalo");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="settings-liq mt-3">
       <p className="settings-tables__title muted">Liquidity intel (24/7)</p>
@@ -142,14 +161,26 @@ function LiqIntelPanel() {
               ))}
             </ul>
           )}
-          <button
-            type="button"
-            className="chart-chip chart-chip--soft mt-2"
-            disabled={busy}
-            onClick={() => void runNow()}
-          >
-            {busy ? "Běží…" : "Spustit analýzu teď"}
-          </button>
+          <div className="flex flex-wrap gap-2 mt-2">
+            <button
+              type="button"
+              className="chart-chip chart-chip--soft"
+              disabled={busy}
+              onClick={() => void runNow()}
+            >
+              {busy ? "Běží…" : "Spustit analýzu teď"}
+            </button>
+            <button
+              type="button"
+              className="chart-chip chart-chip--soft"
+              disabled={busy}
+              onClick={() => void copyBriefing()}
+              title="Zkopíruje prompt + data za 48h pro ChatGPT / Claude / Gemini"
+            >
+              Zkopírovat briefing
+            </button>
+          </div>
+          {copyMsg && <p className="muted text-xs mt-1">{copyMsg}</p>}
         </>
       )}
     </div>

@@ -2050,6 +2050,18 @@ async def crypto_liq_intel_status(
     return await get_status(db)
 
 
+@router.get("/crypto/liq-intel/briefing")
+async def crypto_liq_intel_briefing(
+    hours: int = 48,
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Copy-paste briefing for an external LLM (status + features + hypotheses)."""
+    from app.services.liquidity_intel import build_external_briefing
+
+    return await build_external_briefing(db, hours=hours)
+
+
 @router.get("/crypto/liq-intel/hypotheses")
 async def crypto_liq_intel_hypotheses(
     status: str | None = None,
