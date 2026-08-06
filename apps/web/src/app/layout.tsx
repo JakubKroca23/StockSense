@@ -17,7 +17,7 @@ const display = Source_Serif_4({
 
 const brand = Space_Grotesk({
   subsets: ["latin", "latin-ext"],
-  weight: ["500", "600", "700"],
+  weight: ["300", "400", "500", "600", "700"],
   variable: "--font-brand-loaded",
 });
 

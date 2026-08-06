@@ -12,8 +12,8 @@
   <!-- původní tvar oka z brand artwork -->
   <image href="/logo-eye-transparent.png" x="0" y="6" width="72" height="34" preserveAspectRatio="xMidYMid meet"/>
   <text x="78" y="28" font-family="IBM Plex Sans, Segoe UI, sans-serif" font-size="28" font-weight="600" letter-spacing="0.08em" fill="#ffffff">Stock</text>
-  <!-- Sense −10%: sen$e — písmena tyrkys, $ Sense green -->
-  <text x="124" y="42" font-family="IBM Plex Sans, Segoe UI, sans-serif" font-size="18" font-weight="600" letter-spacing="0.06em" fill="#2ec4c8" filter="url(#senseGlow)">sen</text>
-  <text x="164" y="41" font-family="IBM Plex Sans, Segoe UI, sans-serif" font-size="29" font-weight="700" fill="#5dde8a" filter="url(#senseGlow)">$</text>
-  <text x="182" y="42" font-family="IBM Plex Sans, Segoe UI, sans-serif" font-size="18" font-weight="600" fill="#2ec4c8" filter="url(#senseGlow)">e</text>
+  <!-- Sense −10%: sense — Sense green + glow, tenčí písmo -->
+  <text x="124" y="42" font-family="IBM Plex Sans, Segoe UI, sans-serif" font-size="18" font-weight="400" letter-spacing="0.06em" fill="#5dde8a" filter="url(#senseGlow)">sen</text>
+  <text x="164" y="41.5" font-family="IBM Plex Sans, Segoe UI, sans-serif" font-size="22" font-weight="500" fill="#5dde8a" filter="url(#senseGlow)">s</text>
+  <text x="178" y="42" font-family="IBM Plex Sans, Segoe UI, sans-serif" font-size="18" font-weight="400" fill="#5dde8a" filter="url(#senseGlow)">e</text>
 </svg>

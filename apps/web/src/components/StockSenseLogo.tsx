@@ -1,9 +1,7 @@
 import Image from "next/image";
 import { SENSE_GREEN } from "@/components/SenseEye";
 
-const SENSE_TURQUOISE = "#2ec4c8";
-
-/** StockSense wordmark — eye + Stock + sen$e (−10 %, s = výška e, $ = 2. s) */
+/** StockSense wordmark — eye + Stock + sense (−10 %, 2. s mírně větší) */
 export function StockSenseLogo({
   className = "",
   height = 36,
@@ -60,37 +58,33 @@ export function StockSenseLogo({
         <span
           className="brand-logo__sense"
           style={{
-            color: SENSE_TURQUOISE,
+            color: SENSE_GREEN,
             fontSize: senseSize,
-            letterSpacing: "0.06em",
-            textShadow: `0 0 12px ${SENSE_TURQUOISE}66`,
-            // první s (= výška e); druhé s = velké $
+            fontWeight: 400,
+            letterSpacing: 0,
+            textShadow: `0 0 10px ${SENSE_GREEN}55, 0 0 18px ${SENSE_GREEN}33`,
+            // sense: druhé s mírně větší (sdílí „s“ se Stocks)
             marginLeft: "-0.92em",
             position: "relative",
             top: "0.48em",
             display: "inline-block",
           }}
         >
-          sen
-          <span
-            className="brand-logo__sense-dollar"
+          <>sen<span
+            className="brand-logo__sense-s"
             style={{
-              color: SENSE_GREEN,
-              fontSize: "1.65em",
-              fontWeight: 700,
+              fontSize: "1.2em",
+              fontWeight: 500,
               letterSpacing: 0,
               display: "inline-block",
               lineHeight: 1,
               verticalAlign: "baseline",
-              margin: "0 -0.02em",
+              marginLeft: "-0.22em",
+              marginRight: "-0.06em",
               position: "relative",
-              top: "-0.22em",
-              textShadow: `0 0 14px ${SENSE_GREEN}88`,
+              top: "-0.12em",
             }}
-          >
-            $
-          </span>
-          e
+          >s</span>e</>
         </span>
       </span>
     </span>
