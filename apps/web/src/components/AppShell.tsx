@@ -54,12 +54,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="app-shell min-h-screen pb-8">
       <header className="app-header sticky top-0 z-40">
-        <div className="app-header__inner mx-auto flex max-w-6xl items-center gap-2 px-4 py-2 sm:gap-3">
-          <Link href="/" className="brand-logo app-no-drag shrink-0" aria-label="StockSense">
+        <div className="app-header__inner mx-auto grid max-w-6xl items-center gap-2 px-4 py-2">
+          <Link href="/" className="brand-logo app-no-drag shrink-0 justify-self-start" aria-label="StockSense">
             <StockSenseLogo height={36} />
           </Link>
 
-          <nav className="app-nav app-no-drag" aria-label="Hlavní navigace">
+          <nav className="app-nav app-no-drag justify-self-center" aria-label="Hlavní navigace">
             {links.map((l) => {
               const active = isActive(pathname, l.href);
               return (
@@ -76,7 +76,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </nav>
 
           <div
-            className={`user-pill app-no-drag ml-auto ${settingsActive ? "user-pill--active" : ""}`}
+            className={`user-pill app-no-drag justify-self-end ${settingsActive ? "user-pill--active" : ""}`}
           >
             <span className="user-pill__name">{name || "…"}</span>
             <Link

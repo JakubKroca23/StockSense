@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { PriceChart, ChartBar } from "@/components/PriceChart";
 
 type ExchangeQuote = {
   exchange: string;
@@ -36,6 +37,23 @@ type CryptoOverview = {
   quotes: AggregatedQuote[];
 };
 
+type CryptoOhlcv = {
+  symbol: string;
+  interval: string;
+  primary_exchange: string;
+  bars: number;
+  inserted: number;
+  updated: number;
+  ohlcv: ChartBar[];
+};
+
+const TIMEFRAMES = [
+  { id: "15m", label: "15m" },
+  { id: "1h", label: "1H" },
+  { id: "4h", label: "4H" },
+  { id: "1d", label: "1D" },
+] as const;
+
 function fmtPrice(n: number | null | undefined) {
   if (n == null) return "—";
   if (n >= 1000) return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -52,17 +70,17 @@ function fmtPct(n: number | null | undefined) {
 const ROADMAP = [
   {
     title: "Live multi-exchange quotes",
-    status: "now" as const,
-    body: "CCXT public tickery z Binance, Bybit, OKX, Kraken — medián + spread.",
+    status: "done" as const,
+    body: "CCXT tickery z Binance, Bybit, OKX, Kraken — medián + spread.",
   },
   {
-    title: "Canonical OHLCV historie",
-    status: "next" as const,
-    body: "1d / 1h / 4h z primary burzy do DB — základ pro backtest a signály.",
+    title: "Canonical OHLCV + grafy",
+    status: "now" as const,
+    body: "1d / 1h / 4h / 15m z primary burzy, upsert do price_bars, candle chart.",
   },
   {
     title: "Paper trading bot",
-    status: "later" as const,
+    status: "next" as const,
     body: "Signál → paper order → fills log. Execution jen na jedné primary burze.",
   },
   {
@@ -74,15 +92,22 @@ const ROADMAP = [
 
 export default function CryptoSensePage() {
   const [data, setData] = useState<CryptoOverview | null>(null);
+  const [selected, setSelected] = useState("BTC/USDT");
+  const [interval, setIntervalTf] = useState<(typeof TIMEFRAMES)[number]["id"]>("1h");
+  const [ohlcv, setOhlcv] = useState<CryptoOhlcv | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [chartBusy, setChartBusy] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const loadOverview = useCallback(async () => {
     try {
       const res = await apiFetch<CryptoOverview>("/crypto/overview");
       setData(res);
       setError(null);
+      setSelected((prev) =>
+        res.quotes.some((q) => q.symbol === prev) ? prev : res.quotes[0]?.symbol || prev
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Načtení crypto dat selhalo");
     } finally {
@@ -90,11 +115,33 @@ export default function CryptoSensePage() {
     }
   }, []);
 
+  const loadChart = useCallback(async (symbol: string, tf: string) => {
+    setChartBusy(true);
+    try {
+      const res = await apiFetch<CryptoOhlcv>(
+        `/crypto/ohlcv?symbol=${encodeURIComponent(symbol)}&interval=${tf}&limit=220&persist=true`
+      );
+      setOhlcv(res);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Načtení grafu selhalo");
+    } finally {
+      setChartBusy(false);
+    }
+  }, []);
+
   useEffect(() => {
-    void load();
-    const id = window.setInterval(() => void load(), 30_000);
+    void loadOverview();
+    const id = window.setInterval(() => void loadOverview(), 30_000);
     return () => window.clearInterval(id);
-  }, [load]);
+  }, [loadOverview]);
+
+  useEffect(() => {
+    void loadChart(selected, interval);
+  }, [selected, interval, loadChart]);
+
+  const activeQuote = data?.quotes.find((q) => q.symbol === selected) || null;
+  const up = (activeQuote?.change_pct ?? 0) >= 0;
 
   return (
     <div className="cryptosense space-y-6">
@@ -103,16 +150,87 @@ export default function CryptoSensePage() {
           <p className="advisor-card__eyebrow">CryptoSense</p>
           <h1 className="display text-3xl md:text-4xl mt-1">Live crypto desk</h1>
           <p className="muted mt-2 max-w-2xl">
-            Multi-exchange přehled přes CCXT. Primary burza pro budoucí bota — ostatní burzy
-            slouží ke kontrole ceny a spreadu. Historie a trading bot přijdou postupně.
+            Multi-exchange quote + canonical OHLCV z primary burzy. Graf se ukládá do historie
+            pro budoucí backtest a bota.
           </p>
         </div>
-        <button type="button" className="btn text-xs px-2 py-1" onClick={() => void load()} disabled={loading}>
-          {loading ? "Načítám…" : "Obnovit"}
+        <button
+          type="button"
+          className="btn text-xs px-2 py-1"
+          onClick={() => {
+            void loadOverview();
+            void loadChart(selected, interval);
+          }}
+          disabled={loading || chartBusy}
+        >
+          {loading || chartBusy ? "Načítám…" : "Obnovit"}
         </button>
       </section>
 
       {error && <div className="card p-4 text-[var(--danger)]">{error}</div>}
+
+      <section className="card instrument-chart">
+        <div className="instrument-chart__bar">
+          <div className="chart-controls">
+            <div className="chart-controls__group" role="group" aria-label="Symbol">
+              {(data?.quotes || [{ symbol: selected } as AggregatedQuote]).map((q) => (
+                <button
+                  key={q.symbol}
+                  type="button"
+                  className={`chart-chip ${selected === q.symbol ? "is-active" : ""}`}
+                  onClick={() => {
+                    setSelected(q.symbol);
+                    setExpanded(null);
+                  }}
+                >
+                  {q.symbol.split("/")[0]}
+                </button>
+              ))}
+            </div>
+            <div className="chart-controls__group" role="group" aria-label="Timeframe">
+              {TIMEFRAMES.map((tf) => (
+                <button
+                  key={tf.id}
+                  type="button"
+                  className={`chart-chip chart-chip--soft ${interval === tf.id ? "is-active" : ""}`}
+                  disabled={chartBusy}
+                  onClick={() => setIntervalTf(tf.id)}
+                >
+                  {tf.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs muted">
+            {activeQuote && (
+              <>
+                <span className="text-[var(--text)] font-semibold text-sm">
+                  {fmtPrice(activeQuote.primary_price)}
+                </span>
+                <span className={up ? "text-[var(--ok)]" : "text-[var(--danger)]"}>
+                  {fmtPct(activeQuote.change_pct)}
+                </span>
+                <span className="badge">{ohlcv?.primary_exchange || data?.primary_exchange}</span>
+                {ohlcv && (
+                  <span className="badge">
+                    +{ohlcv.inserted}/↻{ohlcv.updated} · {ohlcv.bars} bars
+                  </span>
+                )}
+              </>
+            )}
+            {chartBusy && <span>Načítám graf…</span>}
+          </div>
+        </div>
+        <div className="instrument-chart__stage crypto-chart-stage">
+          {ohlcv?.ohlcv?.length ? (
+            <PriceChart bars={ohlcv.ohlcv} showMa />
+          ) : (
+            <div className="muted p-6 text-sm">
+              {chartBusy ? "Připravuji svíčky…" : "Žádná OHLCV data."}
+            </div>
+          )}
+        </div>
+      </section>
 
       <section className="card p-4 sm:p-5 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -127,10 +245,7 @@ export default function CryptoSensePage() {
         </div>
         <div className="flex flex-wrap gap-2">
           {(data?.exchanges || ["binance", "bybit", "okx", "kraken"]).map((ex) => (
-            <span
-              key={ex}
-              className={`badge ${ex === data?.primary_exchange ? "long" : ""}`}
-            >
+            <span key={ex} className={`badge ${ex === data?.primary_exchange ? "long" : ""}`}>
               {ex}
               {ex === data?.primary_exchange ? " · primary" : ""}
             </span>
@@ -143,14 +258,22 @@ export default function CryptoSensePage() {
         {loading && !data && <div className="card p-5 muted">Tahám tickery z burz…</div>}
         <div className="crypto-board">
           {(data?.quotes || []).map((q) => {
-            const up = (q.change_pct ?? 0) >= 0;
+            const qUp = (q.change_pct ?? 0) >= 0;
             const open = expanded === q.symbol;
             return (
-              <article key={q.symbol} className="card crypto-board__card p-4 rise">
+              <article
+                key={q.symbol}
+                className={`card crypto-board__card p-4 rise ${
+                  selected === q.symbol ? "crypto-board__card--active" : ""
+                }`}
+              >
                 <button
                   type="button"
                   className="crypto-board__head"
-                  onClick={() => setExpanded(open ? null : q.symbol)}
+                  onClick={() => {
+                    setSelected(q.symbol);
+                    setExpanded(open && selected === q.symbol ? null : q.symbol);
+                  }}
                 >
                   <div>
                     <h3 className="font-semibold text-lg">{q.symbol}</h3>
@@ -160,7 +283,7 @@ export default function CryptoSensePage() {
                   </div>
                   <div className="text-right">
                     <div className="text-xl font-semibold">{fmtPrice(q.primary_price)}</div>
-                    <div className={up ? "text-[var(--ok)] text-sm" : "text-[var(--danger)] text-sm"}>
+                    <div className={qUp ? "text-[var(--ok)] text-sm" : "text-[var(--danger)] text-sm"}>
                       {fmtPct(q.change_pct)}
                     </div>
                   </div>
@@ -194,7 +317,11 @@ export default function CryptoSensePage() {
                             <td>{fmtPrice(e.price)}</td>
                             <td>{fmtPrice(e.bid)}</td>
                             <td>{fmtPrice(e.ask)}</td>
-                            <td className={(e.change_pct ?? 0) >= 0 ? "text-[var(--ok)]" : "text-[var(--danger)]"}>
+                            <td
+                              className={
+                                (e.change_pct ?? 0) >= 0 ? "text-[var(--ok)]" : "text-[var(--danger)]"
+                              }
+                            >
                               {e.ok ? fmtPct(e.change_pct) : e.error || "err"}
                             </td>
                           </tr>
@@ -217,10 +344,22 @@ export default function CryptoSensePage() {
               <div className="flex items-center gap-2 mb-2">
                 <span
                   className={`badge ${
-                    item.status === "now" ? "long" : item.status === "next" ? "hold" : ""
+                    item.status === "now"
+                      ? "long"
+                      : item.status === "done"
+                        ? "hold"
+                        : item.status === "next"
+                          ? "sell"
+                          : ""
                   }`}
                 >
-                  {item.status === "now" ? "teď" : item.status === "next" ? "další" : "později"}
+                  {item.status === "done"
+                    ? "hotovo"
+                    : item.status === "now"
+                      ? "teď"
+                      : item.status === "next"
+                        ? "další"
+                        : "později"}
                 </span>
                 <h3 className="font-semibold">{item.title}</h3>
               </div>

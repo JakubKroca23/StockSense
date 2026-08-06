@@ -66,6 +66,8 @@ body {
   position: relative;
   min-height: 2.75rem;
   overflow: visible;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  column-gap: 0.75rem;
 }
 
 .app-no-drag {
@@ -2396,4 +2398,13 @@ textarea {
   display: grid;
   gap: 0.75rem;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.crypto-chart-stage {
+  min-height: 360px;
+}
+
+.crypto-board__card--active {
+  border-color: color-mix(in srgb, var(--sense) 45%, var(--line));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--sense) 18%, transparent);
 }

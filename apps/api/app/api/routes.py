@@ -1885,3 +1885,49 @@ async def crypto_quote(
     agg = await get_crypto_market().fetch_aggregated_quote(symbol)
     return get_crypto_market()._agg_to_dict(agg)
 
+
+@router.get("/crypto/ohlcv")
+async def crypto_ohlcv(
+    symbol: str = "BTC/USDT",
+    interval: str = "1h",
+    limit: int = 200,
+    persist: bool = True,
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Canonical OHLCV from primary CCXT exchange; optionally upsert into price_bars."""
+    from app.services.crypto_market import get_crypto_market, persist_crypto_ohlcv
+
+    iv = interval if interval in {"15m", "1h", "4h", "1d", "1wk"} else "1h"
+    lim = max(20, min(limit, 500))
+    if persist:
+        return await persist_crypto_ohlcv(db, symbol=symbol, interval=iv, limit=lim)
+
+    market = get_crypto_market()
+    bars = await market.fetch_ohlcv(symbol, interval=iv)
+    if lim and len(bars) > lim:
+        bars = bars[-lim:]
+    return {
+        "symbol": symbol.upper().replace("-", "/"),
+        "interval": iv,
+        "primary_exchange": market.primary,
+        "bars": len(bars),
+        "inserted": 0,
+        "updated": 0,
+        "ohlcv": [
+            {
+                "ts": b.ts.isoformat(),
+                "open": b.open,
+                "high": b.high,
+                "low": b.low,
+                "close": b.close,
+                "volume": b.volume,
+                "source": b.source,
+                "data_quality": b.data_quality.value
+                if hasattr(b.data_quality, "value")
+                else str(b.data_quality),
+            }
+            for b in bars
+        ],
+    }
+

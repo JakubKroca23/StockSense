@@ -479,6 +479,14 @@ class CompositeMarketData:
         iv = normalize_interval(interval)
         lb = clamp_lookback(iv, lookback)
         if asset_class == AssetClass.crypto:
+            try:
+                from app.services.crypto_market import get_crypto_market
+
+                bars = await get_crypto_market().fetch_ohlcv(symbol, interval=iv)
+                if bars:
+                    return bars
+            except Exception:
+                pass
             bars = await self.ccxt.fetch_ohlcv(symbol, asset_class, iv, lb)
             if bars:
                 return bars

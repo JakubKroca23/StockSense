@@ -292,3 +292,101 @@ def get_crypto_market() -> MultiExchangeCcxt:
     if _crypto_market is None:
         _crypto_market = MultiExchangeCcxt()
     return _crypto_market
+
+
+async def persist_crypto_ohlcv(
+    db,
+    *,
+    symbol: str,
+    interval: str = "1d",
+    limit: int = 180,
+) -> dict:
+    """Fetch OHLCV from primary exchange and upsert into price_bars."""
+    from sqlalchemy import select
+
+    from app.models import AssetClass, PriceBar
+    from app.services.instruments import get_or_create_instrument
+
+    market = get_crypto_market()
+    sym = _normalize_market(symbol)
+    bars = await market.fetch_ohlcv(sym, interval=interval, lookback="6mo")
+    if limit and len(bars) > limit:
+        bars = bars[-limit:]
+
+    base = sym.split("/")[0]
+    inst = await get_or_create_instrument(
+        db,
+        symbol=sym,
+        name=base,
+        asset_class=AssetClass.crypto,
+        exchange=market.primary,
+        currency=sym.split("/")[-1] if "/" in sym else "USDT",
+        is_discovery=True,
+    )
+
+    inserted = 0
+    updated = 0
+    now = datetime.now(timezone.utc)
+    for bar in bars:
+        existing = (
+            await db.execute(
+                select(PriceBar).where(
+                    PriceBar.instrument_id == inst.id,
+                    PriceBar.interval == interval,
+                    PriceBar.ts == bar.ts,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing:
+            existing.open = bar.open
+            existing.high = bar.high
+            existing.low = bar.low
+            existing.close = bar.close
+            existing.volume = bar.volume
+            existing.source = bar.source
+            existing.data_quality = bar.data_quality
+            existing.as_of = now
+            updated += 1
+        else:
+            db.add(
+                PriceBar(
+                    instrument_id=inst.id,
+                    interval=interval,
+                    ts=bar.ts,
+                    open=bar.open,
+                    high=bar.high,
+                    low=bar.low,
+                    close=bar.close,
+                    volume=bar.volume,
+                    source=bar.source,
+                    data_quality=bar.data_quality,
+                    as_of=now,
+                )
+            )
+            inserted += 1
+    await db.commit()
+
+    return {
+        "symbol": sym,
+        "instrument_id": inst.id,
+        "interval": interval,
+        "primary_exchange": market.primary,
+        "bars": len(bars),
+        "inserted": inserted,
+        "updated": updated,
+        "ohlcv": [
+            {
+                "ts": b.ts.isoformat(),
+                "open": b.open,
+                "high": b.high,
+                "low": b.low,
+                "close": b.close,
+                "volume": b.volume,
+                "source": b.source,
+                "data_quality": b.data_quality.value
+                if hasattr(b.data_quality, "value")
+                else str(b.data_quality),
+            }
+            for b in bars
+        ],
+    }
