@@ -30,6 +30,12 @@ export type ChartLevel = {
   style?: "solid" | "dashed" | "dotted";
 };
 
+/** One order-book snapshot column for Bookmap-style heatmap overlay. */
+export type HeatmapColumn = {
+  ts: number;
+  levels: { price: number; bid: number; ask: number }[];
+};
+
 type Props = {
   bars: ChartBar[];
   /** Fixed px height, or omit to fill parent (`.price-chart--fill`). */
@@ -42,6 +48,9 @@ type Props = {
   realtime?: boolean;
   /** Show seconds on time axis (1s / 1m charts). */
   secondsVisible?: boolean;
+  /** Bookmap-style liquidity heatmap columns (newest last). */
+  heatmap?: HeatmapColumn[];
+  showHeatmap?: boolean;
 };
 
 type Theme = {
@@ -73,8 +82,8 @@ function readTheme(): Theme {
     sense: g("--sense", "#5dde8a"),
     up: g("--chart-up", "#5dde8a"),
     upDim: g("--chart-up-dim", "#3a9f62"),
-    down: g("--chart-down", "#b388ff"),
-    downDim: g("--chart-down-dim", "#7c5cbf"),
+    down: g("--chart-down", "#e05a8a"),
+    downDim: g("--chart-down-dim", "#a83d68"),
     grid: g("--chart-grid", "rgba(158,182,255,0.08)"),
     cross: g("--chart-cross", "#5dde8a"),
     maFast: g("--chart-ma-fast", "#7eb6ff"),
@@ -137,8 +146,12 @@ export function PriceChart({
   showMa = true,
   realtime = false,
   secondsVisible = false,
+  heatmap = [],
+  showHeatmap = false,
 }: Props) {
+  const wrapRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const heatRef = useRef<HTMLCanvasElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
@@ -147,7 +160,70 @@ export function PriceChart({
   const linesRef = useRef<IPriceLine[]>([]);
   const themeRef = useRef<Theme | null>(null);
   const prevSigRef = useRef<string>("");
+  const heatmapRef = useRef<HeatmapColumn[]>(heatmap);
+  const showHeatRef = useRef(showHeatmap);
   const fill = height == null;
+
+  heatmapRef.current = heatmap;
+  showHeatRef.current = showHeatmap;
+
+  const drawHeatmap = () => {
+    const canvas = heatRef.current;
+    const series = seriesRef.current;
+    const chart = chartRef.current;
+    const wrap = wrapRef.current;
+    if (!canvas || !series || !chart || !wrap) return;
+
+    const w = wrap.clientWidth;
+    const h = wrap.clientHeight;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
+      canvas.width = Math.floor(w * dpr);
+      canvas.height = Math.floor(h * dpr);
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+    }
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    if (!showHeatRef.current) return;
+    const cols = heatmapRef.current;
+    if (!cols.length) return;
+
+    const theme = themeRef.current || readTheme();
+    const colW = 5;
+    const maxCols = Math.max(8, Math.min(cols.length, Math.floor((w * 0.42) / colW)));
+    const visible = cols.slice(-maxCols);
+    let maxSize = 0;
+    for (const col of visible) {
+      for (const lvl of col.levels) {
+        maxSize = Math.max(maxSize, lvl.bid, lvl.ask);
+      }
+    }
+    if (maxSize <= 0) return;
+
+    const rightPad = 8;
+    visible.forEach((col, i) => {
+      const x = w - rightPad - (visible.length - i) * colW;
+      for (const lvl of col.levels) {
+        const y = series.priceToCoordinate(lvl.price);
+        if (y == null) continue;
+        const bidA = Math.min(0.72, (lvl.bid / maxSize) * 0.72);
+        const askA = Math.min(0.72, (lvl.ask / maxSize) * 0.72);
+        const cellH = Math.max(2, Math.min(8, h * 0.012));
+        if (bidA > 0.04) {
+          ctx.fillStyle = hexAlpha(theme.up, bidA);
+          ctx.fillRect(x, y - cellH / 2, colW - 1, cellH);
+        }
+        if (askA > 0.04) {
+          ctx.fillStyle = hexAlpha(theme.down, askA);
+          ctx.fillRect(x, y - cellH / 2, colW - 1, cellH);
+        }
+      }
+    });
+  };
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -197,7 +273,7 @@ export function PriceChart({
         borderVisible: false,
         timeVisible: true,
         secondsVisible,
-        rightOffset: 6,
+        rightOffset: showHeatmap ? 18 : 6,
         barSpacing: 9,
         minBarSpacing: 3,
         fixLeftEdge: false,
@@ -215,12 +291,12 @@ export function PriceChart({
       handleScale: {
         axisPressedMouseMove: true,
         mouseWheel: true,
-        pinch: false,
+        pinch: true,
         axisDoubleClickReset: true,
       },
     });
 
-    // Bull = Sense green, bear = platform purple
+    // Bull = Sense green, bear = red-purple
     const candle = chart.addCandlestickSeries({
       upColor: theme.up,
       downColor: theme.down,
@@ -278,10 +354,17 @@ export function PriceChart({
         ? Math.max(entry?.contentRect.height ?? containerRef.current.clientHeight, 240)
         : height!;
       chartRef.current.applyOptions({ width: w, height: h });
+      drawHeatmap();
     });
     ro.observe(containerRef.current);
 
+    const onVisible = () => drawHeatmap();
+    chart.timeScale().subscribeVisibleLogicalRangeChange(onVisible);
+    chart.subscribeCrosshairMove(onVisible);
+
     return () => {
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(onVisible);
+      chart.unsubscribeCrosshairMove(onVisible);
       ro.disconnect();
       chart.remove();
       chartRef.current = null;
@@ -292,7 +375,11 @@ export function PriceChart({
       linesRef.current = [];
       themeRef.current = null;
     };
-  }, [height, fill, secondsVisible]);
+  }, [height, fill, secondsVisible, showHeatmap]);
+
+  useEffect(() => {
+    drawHeatmap();
+  }, [heatmap, showHeatmap, bars]);
 
   useEffect(() => {
     if (!seriesRef.current || !volumeRef.current || !chartRef.current) return;
@@ -427,11 +514,19 @@ export function PriceChart({
   }
 
   return (
-    <div className={`price-chart${fill ? " price-chart--fill" : ""}${className ? ` ${className}` : ""}`}>
+    <div
+      ref={wrapRef}
+      className={`price-chart${fill ? " price-chart--fill" : ""}${className ? ` ${className}` : ""}`}
+    >
       <div
         ref={containerRef}
         className="price-chart__canvas"
         style={fill ? undefined : { height }}
+      />
+      <canvas
+        ref={heatRef}
+        className={`price-chart__heat ${showHeatmap ? "is-on" : ""}`}
+        aria-hidden
       />
     </div>
   );

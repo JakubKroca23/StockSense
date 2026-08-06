@@ -21,6 +21,7 @@ export function SenseBot() {
   const [busy, setBusy] = useState(false);
   const [booting, setBooting] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   const loadBotSession = useCallback(async () => {
     setBooting(true);
@@ -54,6 +55,19 @@ export function SenseBot() {
   useEffect(() => {
     if (open) void loadBotSession();
   }, [open, loadBotSession]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const root = rootRef.current;
+      if (!root) return;
+      if (e.target instanceof Node && !root.contains(e.target)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -140,7 +154,7 @@ export function SenseBot() {
   }
 
   return (
-    <div className={`sense-bot ${open ? "is-open" : ""}`}>
+    <div ref={rootRef} className={`sense-bot ${open ? "is-open" : ""}`}>
       {open && (
         <div className="sense-bot__panel card" role="dialog" aria-label="Sense bot">
           <header className="sense-bot__head">

@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch, apiWsUrl } from "@/lib/api";
-import { PriceChart, ChartBar } from "@/components/PriceChart";
+import { PriceChart, ChartBar, HeatmapColumn } from "@/components/PriceChart";
+import { OrderBookPanel, OrderBookData } from "@/components/OrderBookPanel";
 import { useScreenContext } from "@/components/ScreenContext";
 
 type AggregatedQuote = {
@@ -144,6 +145,10 @@ export default function CryptoSensePage() {
   const [loading, setLoading] = useState(true);
   const [chartBusy, setChartBusy] = useState(false);
   const [live, setLive] = useState(false);
+  const [orderBook, setOrderBook] = useState<OrderBookData | null>(null);
+  const [showHeatmap, setShowHeatmap] = useState(false);
+  const [heatmap, setHeatmap] = useState<HeatmapColumn[]>([]);
+  const heatSymRef = useRef(selected);
 
   const loadOverview = useCallback(async () => {
     try {
@@ -197,11 +202,60 @@ export default function CryptoSensePage() {
     }
   }, []);
 
+  const loadOrderBook = useCallback(async (symbol: string, accumulateHeat: boolean) => {
+    try {
+      const res = await apiFetch<OrderBookData>(
+        `/crypto/orderbook?symbol=${encodeURIComponent(symbol)}&limit=40`
+      );
+      setOrderBook(res);
+      if (!accumulateHeat) return;
+
+      const priceMap = new Map<number, { bid: number; ask: number }>();
+      for (const lvl of res.bids.slice(0, 28)) {
+        priceMap.set(lvl.price, { bid: lvl.amount, ask: 0 });
+      }
+      for (const lvl of res.asks.slice(0, 28)) {
+        const cur = priceMap.get(lvl.price) || { bid: 0, ask: 0 };
+        cur.ask = lvl.amount;
+        priceMap.set(lvl.price, cur);
+      }
+      const levels = [...priceMap.entries()].map(([price, v]) => ({
+        price,
+        bid: v.bid,
+        ask: v.ask,
+      }));
+      const col: HeatmapColumn = { ts: Date.now(), levels };
+      setHeatmap((prev) => {
+        const sameSym = heatSymRef.current === symbol;
+        const base = sameSym ? prev : [];
+        heatSymRef.current = symbol;
+        const next = [...base, col];
+        return next.length > 90 ? next.slice(next.length - 90) : next;
+      });
+    } catch {
+      /* keep last book */
+    }
+  }, []);
+
   useEffect(() => {
     void loadOverview();
     const id = window.setInterval(() => void loadOverview(), 30_000);
     return () => window.clearInterval(id);
   }, [loadOverview]);
+
+  useEffect(() => {
+    setHeatmap([]);
+    heatSymRef.current = selected;
+  }, [selected]);
+
+  useEffect(() => {
+    void loadOrderBook(selected, showHeatmap);
+    const id = window.setInterval(
+      () => void loadOrderBook(selected, showHeatmap),
+      showHeatmap ? 1500 : 2500
+    );
+    return () => window.clearInterval(id);
+  }, [selected, showHeatmap, loadOrderBook]);
 
   useEffect(() => {
     const symbols = (data?.quotes || []).map((q) => q.symbol);
@@ -278,6 +332,10 @@ export default function CryptoSensePage() {
   const activeQuote = data?.quotes.find((q) => q.symbol === selected) || null;
   const up = (activeQuote?.change_pct ?? 0) >= 0;
   const quotes = data?.quotes || [];
+  const exchanges = data?.exchanges?.length
+    ? data.exchanges
+    : orderBook?.exchanges || ["binance", "bybit"];
+  const execution = data?.execution_exchange || orderBook?.execution_exchange || "bybit";
 
   useEffect(() => {
     const last = ohlcv?.ohlcv?.[ohlcv.ohlcv.length - 1];
@@ -285,14 +343,20 @@ export default function CryptoSensePage() {
     const detail = [
       `Timeframe grafu: ${interval}`,
       live ? "Stream: LIVE (agregace Binance+Bybit)" : "Stream: offline",
+      `Burzy grafu: ${exchanges.join(" + ")}`,
+      `Execution: ${execution}`,
       activeQuote?.primary_price != null
         ? `Cena (agg): ${activeQuote.primary_price}`
         : null,
       activeQuote?.change_pct != null ? `Denní změna: ${activeQuote.change_pct.toFixed(2)}%` : null,
+      orderBook?.spread_pct != null
+        ? `Spread: ${orderBook.spread_pct.toFixed(4)}%`
+        : null,
       last
         ? `Poslední svíčka: o=${last.open} h=${last.high} l=${last.low} c=${last.close}`
         : null,
       `Dostupné coiny: ${coinList || "—"}`,
+      showHeatmap ? "Heatmapa order book: zapnuto" : null,
     ]
       .filter(Boolean)
       .join("\n");
@@ -311,6 +375,10 @@ export default function CryptoSensePage() {
     activeQuote?.change_pct,
     ohlcv,
     data?.quotes,
+    exchanges,
+    execution,
+    orderBook?.spread_pct,
+    showHeatmap,
     setScreen,
   ]);
 
@@ -318,89 +386,112 @@ export default function CryptoSensePage() {
     <div className="cryptosense">
       {error && <div className="card p-4 text-[var(--danger)] mb-3">{error}</div>}
 
-      <section className="card instrument-chart cryptosense__chart">
-        <div className="cryptosense__toolbar">
-          <div className="crypto-coin-row" role="group" aria-label="Kryptoměny">
-            {quotes.map((q) => {
-              const closes = sparks[q.symbol] || [];
-              const sparkUp =
-                closes.length >= 2 ? closes[closes.length - 1] >= closes[0] : (q.change_pct ?? 0) >= 0;
-              const base = q.symbol.split("/")[0];
-              const active = selected === q.symbol;
-              return (
-                <button
-                  key={q.symbol}
-                  type="button"
-                  className={`crypto-coin-chip ${active ? "is-active" : ""} ${sparkUp ? "is-up" : "is-down"}`}
-                  onClick={() => setSelected(q.symbol)}
-                  title={q.symbol}
-                >
-                  <span className="crypto-coin-chip__sym">{base}</span>
-                  <Sparkline closes={closes} up={sparkUp} width={56} height={18} />
-                  <span className="crypto-coin-chip__pct">{fmtPct(q.change_pct)}</span>
-                </button>
-              );
-            })}
-            {!quotes.length && loading && <span className="muted text-xs px-2">Načítám…</span>}
-          </div>
-          <div className="cryptosense__tf chart-controls__group" role="group" aria-label="Timeframe">
-            {TIMEFRAMES.map((tf) => (
-              <button
-                key={tf.id}
-                type="button"
-                className={`chart-chip chart-chip--soft ${interval === tf.id ? "is-active" : ""}`}
-                disabled={chartBusy}
-                onClick={() => setIntervalTf(tf.id)}
-              >
-                {tf.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="instrument-chart__bar cryptosense__meta">
-          <div className="flex flex-wrap items-center gap-2 text-xs muted">
-            {activeQuote && (
-              <>
-                <span className="text-[var(--text)] font-semibold text-sm">
-                  {fmtPrice(activeQuote.primary_price)}
-                </span>
-                <span className={up ? "text-[var(--chart-up)]" : "text-[var(--chart-down)]"}>
-                  {fmtPct(activeQuote.change_pct)}
-                </span>
-                <span className={`badge ${live ? "long" : ""}`}>{live ? "LIVE" : "offline"}</span>
-              </>
-            )}
-            <button
-              type="button"
-              className="chart-chip chart-chip--soft"
-              onClick={() => {
-                void loadOverview();
-                void loadChart(selected, interval);
-                if (quotes.length) void loadSparks(quotes.map((q) => q.symbol));
-              }}
-              disabled={loading || chartBusy}
-            >
-              {loading || chartBusy ? "…" : "↻"}
-            </button>
-          </div>
-        </div>
-
-        <div className="instrument-chart__stage crypto-chart-stage">
-          {ohlcv?.ohlcv?.length ? (
-            <PriceChart
-              bars={ohlcv.ohlcv}
-              showMa={!["1s", "1m"].includes(interval)}
-              realtime
-              secondsVisible={interval === "1s" || interval === "1m"}
-            />
-          ) : (
-            <div className="muted p-6 text-sm">
-              {chartBusy ? "Připravuji svíčky…" : "Žádná OHLCV data."}
+      <div className="cryptosense__desk">
+        <section className="card instrument-chart cryptosense__chart">
+          <div className="cryptosense__toolbar">
+            <div className="crypto-coin-row" role="group" aria-label="Kryptoměny">
+              {quotes.map((q) => {
+                const closes = sparks[q.symbol] || [];
+                const sparkUp =
+                  closes.length >= 2
+                    ? closes[closes.length - 1] >= closes[0]
+                    : (q.change_pct ?? 0) >= 0;
+                const base = q.symbol.split("/")[0];
+                const active = selected === q.symbol;
+                return (
+                  <button
+                    key={q.symbol}
+                    type="button"
+                    className={`crypto-coin-chip ${active ? "is-active" : ""} ${sparkUp ? "is-up" : "is-down"}`}
+                    onClick={() => setSelected(q.symbol)}
+                    title={q.symbol}
+                  >
+                    <span className="crypto-coin-chip__sym">{base}</span>
+                    <Sparkline closes={closes} up={sparkUp} width={56} height={18} />
+                    <span className="crypto-coin-chip__pct">{fmtPct(q.change_pct)}</span>
+                  </button>
+                );
+              })}
+              {!quotes.length && loading && <span className="muted text-xs px-2">Načítám…</span>}
             </div>
-          )}
-        </div>
-      </section>
+            <div className="cryptosense__tf chart-controls__group" role="group" aria-label="Timeframe">
+              {TIMEFRAMES.map((tf) => (
+                <button
+                  key={tf.id}
+                  type="button"
+                  className={`chart-chip chart-chip--soft ${interval === tf.id ? "is-active" : ""}`}
+                  disabled={chartBusy}
+                  onClick={() => setIntervalTf(tf.id)}
+                >
+                  {tf.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="instrument-chart__bar cryptosense__meta">
+            <div className="flex flex-wrap items-center gap-2 text-xs muted">
+              {activeQuote && (
+                <>
+                  <span className="text-[var(--text)] font-semibold text-sm">
+                    {fmtPrice(activeQuote.primary_price)}
+                  </span>
+                  <span className={up ? "text-[var(--chart-up)]" : "text-[var(--chart-down)]"}>
+                    {fmtPct(activeQuote.change_pct)}
+                  </span>
+                  <span className={`badge ${live ? "long" : ""}`}>{live ? "LIVE" : "offline"}</span>
+                  <span className="badge">{exchanges.join(" + ")}</span>
+                  <span className="badge">agg OHLCV</span>
+                  <span className="badge">exec {execution}</span>
+                  {orderBook?.spread_pct != null && (
+                    <span className="badge">spread {orderBook.spread_pct.toFixed(3)}%</span>
+                  )}
+                </>
+              )}
+              <button
+                type="button"
+                className={`chart-chip chart-chip--soft ${showHeatmap ? "is-active" : ""}`}
+                onClick={() => setShowHeatmap((v) => !v)}
+                title="Bookmap-stylová heatmapa likvidity z order booku"
+              >
+                Heatmap
+              </button>
+              <button
+                type="button"
+                className="chart-chip chart-chip--soft"
+                onClick={() => {
+                  void loadOverview();
+                  void loadChart(selected, interval);
+                  void loadOrderBook(selected, showHeatmap);
+                  if (quotes.length) void loadSparks(quotes.map((q) => q.symbol));
+                }}
+                disabled={loading || chartBusy}
+              >
+                {loading || chartBusy ? "…" : "↻"}
+              </button>
+            </div>
+          </div>
+
+          <div className="instrument-chart__stage crypto-chart-stage">
+            {ohlcv?.ohlcv?.length ? (
+              <PriceChart
+                bars={ohlcv.ohlcv}
+                showMa={!["1s", "1m"].includes(interval)}
+                realtime
+                secondsVisible={interval === "1s" || interval === "1m"}
+                heatmap={heatmap}
+                showHeatmap={showHeatmap}
+              />
+            ) : (
+              <div className="muted p-6 text-sm">
+                {chartBusy ? "Připravuji svíčky…" : "Žádná OHLCV data."}
+              </div>
+            )}
+          </div>
+        </section>
+
+        <OrderBookPanel book={orderBook} />
+      </div>
     </div>
   );
 }

@@ -189,6 +189,17 @@ async def health():
     return {"status": "ok", "service": "stocksense-api"}
 
 
+@router.get("/system/stats")
+async def system_stats(
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """DB storage + process memory stats for the settings panel."""
+    from app.services.system_stats import collect_system_stats
+
+    return await collect_system_stats(db)
+
+
 @router.get("/me")
 async def me(user: AuthUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     settings = await _ensure_settings(db, user)
@@ -1911,6 +1922,20 @@ async def crypto_quote(
         raise HTTPException(400, "Chybí symbol")
     agg = await get_crypto_market().fetch_aggregated_quote(symbol)
     return get_crypto_market()._agg_to_dict(agg)
+
+
+@router.get("/crypto/orderbook")
+async def crypto_orderbook(
+    symbol: str = "BTC/USDT",
+    limit: int = 40,
+    user: AuthUser = Depends(get_current_user),
+):
+    """Aggregated L2 order book (Binance + Bybit) for depth + heatmap."""
+    from app.services.crypto_market import get_crypto_market
+
+    if not symbol.strip():
+        raise HTTPException(400, "Chybí symbol")
+    return await get_crypto_market().fetch_aggregated_order_book(symbol, limit=limit)
 
 
 @router.get("/crypto/ohlcv")

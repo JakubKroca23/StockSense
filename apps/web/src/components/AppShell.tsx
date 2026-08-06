@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { StockSenseLogo } from "@/components/StockSenseLogo";
 import { SenseBot } from "@/components/SenseBot";
+import { SettingsPanel } from "@/components/SettingsPanel";
 import { ScreenContextProvider } from "@/components/ScreenContext";
 import {
   IconClose,
@@ -41,11 +42,27 @@ function NavLabel({
 
 function useLockPageZoom() {
   useEffect(() => {
+    const isChartTouch = (target: EventTarget | null) => {
+      if (!(target instanceof Element)) return false;
+      return Boolean(target.closest(".price-chart, .crypto-chart-stage"));
+    };
+
     const preventGesture = (e: Event) => {
+      if (isChartTouch(e.target)) return;
       e.preventDefault();
     };
     const preventMultiTouch = (e: TouchEvent) => {
-      if (e.touches.length > 1) e.preventDefault();
+      if (e.touches.length <= 1) return;
+      if (isChartTouch(e.target)) return;
+      // Multi-touch may start on chart but second finger elsewhere — check any touch
+      for (let i = 0; i < e.touches.length; i++) {
+        const node = document.elementFromPoint(
+          e.touches[i].clientX,
+          e.touches[i].clientY
+        );
+        if (isChartTouch(node)) return;
+      }
+      e.preventDefault();
     };
 
     document.addEventListener("gesturestart", preventGesture, { passive: false });
@@ -64,8 +81,9 @@ function useLockPageZoom() {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const settingsActive = isActive(pathname, "/settings");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
   useLockPageZoom();
 
   const activeLink = links.find((l) => isActive(pathname, l.href)) || links[0];
@@ -119,15 +137,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </nav>
 
             <div className="app-header__actions app-no-drag justify-self-end">
-              <Link
-                href="/settings"
-                className={`settings-gear ${settingsActive ? "settings-gear--active" : ""}`}
+              <button
+                type="button"
+                className={`settings-gear ${settingsOpen ? "settings-gear--active" : ""}`}
                 aria-label="Nastavení"
-                aria-current={settingsActive ? "page" : undefined}
+                aria-expanded={settingsOpen}
                 title="Nastavení"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setSettingsOpen((v) => !v);
+                }}
               >
                 <IconSettings size={22} />
-              </Link>
+              </button>
               <button
                 type="button"
                 className="nav-burger"
@@ -166,17 +188,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     </Link>
                   );
                 })}
-                <Link
-                  href="/settings"
-                  className={`nav-drawer__link ${settingsActive ? "is-active" : ""}`}
-                  aria-current={settingsActive ? "page" : undefined}
-                  onClick={() => setMenuOpen(false)}
+                <button
+                  type="button"
+                  className={`nav-drawer__link ${settingsOpen ? "is-active" : ""}`}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setSettingsOpen(true);
+                  }}
                 >
                   <span className="nav-item">
                     <IconSettings size={NAV_ICON_SIZE} />
                     <span className="nav-item__label">Nastavení</span>
                   </span>
-                </Link>
+                </button>
               </nav>
             </div>
           </div>
@@ -184,6 +208,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
         <SenseBot />
+        <SettingsPanel open={settingsOpen} onClose={closeSettings} />
       </div>
     </ScreenContextProvider>
   );

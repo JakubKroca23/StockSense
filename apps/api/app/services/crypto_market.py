@@ -378,6 +378,119 @@ class MultiExchangeCcxt:
             self._fetch_ohlcv_execution_sync, _normalize_market(symbol), interval, limit
         )
 
+    def _tick_size(self, price: float) -> float:
+        if price >= 10_000:
+            return 1.0
+        if price >= 1_000:
+            return 0.5
+        if price >= 100:
+            return 0.1
+        if price >= 10:
+            return 0.01
+        if price >= 1:
+            return 0.001
+        return 0.0001
+
+    def _fetch_order_book_sync(self, exchange_id: str, symbol: str, limit: int = 50) -> dict:
+        try:
+            client = self._get_client(exchange_id)
+            market = self._resolve_market(client, symbol)
+            raw = client.fetch_order_book(market, limit=limit)
+            bids = [[float(p), float(a)] for p, a in (raw.get("bids") or []) if p and a]
+            asks = [[float(p), float(a)] for p, a in (raw.get("asks") or []) if p and a]
+            return {
+                "exchange": exchange_id,
+                "market": market,
+                "bids": bids,
+                "asks": asks,
+                "ok": bool(bids or asks),
+                "error": None,
+                "as_of": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception as exc:
+            logger.warning("order book %s %s failed: %s", exchange_id, symbol, exc)
+            return {
+                "exchange": exchange_id,
+                "market": _normalize_market(symbol),
+                "bids": [],
+                "asks": [],
+                "ok": False,
+                "error": str(exc)[:180],
+                "as_of": datetime.now(timezone.utc).isoformat(),
+            }
+
+    async def fetch_aggregated_order_book(self, symbol: str, limit: int = 40) -> dict:
+        """Aggregate L2 books from Binance + Bybit into one depth ladder."""
+        sym = _normalize_market(symbol)
+        lim = max(5, min(int(limit), 100))
+        books = await asyncio.gather(
+            *[asyncio.to_thread(self._fetch_order_book_sync, ex, sym, lim) for ex in self.exchange_ids]
+        )
+
+        mid_candidates: list[float] = []
+        for b in books:
+            if b["bids"]:
+                mid_candidates.append(b["bids"][0][0])
+            if b["asks"]:
+                mid_candidates.append(b["asks"][0][0])
+        mid = float(median(mid_candidates)) if mid_candidates else 0.0
+        tick = self._tick_size(mid) if mid > 0 else 0.01
+
+        def bucket(price: float) -> float:
+            return round(round(price / tick) * tick, 10)
+
+        bid_map: dict[float, float] = {}
+        ask_map: dict[float, float] = {}
+        for book in books:
+            if not book.get("ok"):
+                continue
+            for price, amount in book["bids"]:
+                p = bucket(price)
+                bid_map[p] = bid_map.get(p, 0.0) + amount
+            for price, amount in book["asks"]:
+                p = bucket(price)
+                ask_map[p] = ask_map.get(p, 0.0) + amount
+
+        bids = sorted(bid_map.items(), key=lambda x: x[0], reverse=True)[:lim]
+        asks = sorted(ask_map.items(), key=lambda x: x[0])[:lim]
+
+        best_bid = bids[0][0] if bids else None
+        best_ask = asks[0][0] if asks else None
+        spread = None
+        spread_pct = None
+        if best_bid and best_ask and best_bid > 0:
+            spread = best_ask - best_bid
+            spread_pct = (spread / best_bid) * 100
+
+        bid_cum = 0.0
+        bid_levels = []
+        for price, amount in bids:
+            bid_cum += amount
+            bid_levels.append({"price": price, "amount": amount, "total": bid_cum, "side": "bid"})
+
+        ask_cum = 0.0
+        ask_levels = []
+        for price, amount in asks:
+            ask_cum += amount
+            ask_levels.append({"price": price, "amount": amount, "total": ask_cum, "side": "ask"})
+
+        return {
+            "symbol": sym,
+            "tick": tick,
+            "mid": mid or None,
+            "best_bid": best_bid,
+            "best_ask": best_ask,
+            "spread": spread,
+            "spread_pct": spread_pct,
+            "exchanges": self.exchange_ids,
+            "execution_exchange": self.execution,
+            "chart_mode": "aggregated",
+            "books": list(books),
+            "bids": bid_levels,
+            "asks": ask_levels,
+            "as_of": datetime.now(timezone.utc).isoformat(),
+        }
+
     async def overview(self, symbols: list[str] | None = None) -> dict:
         symbols = symbols or list(DEFAULT_CRYPTO_SYMBOLS)
         quotes = await asyncio.gather(*[self.fetch_aggregated_quote(s) for s in symbols])
