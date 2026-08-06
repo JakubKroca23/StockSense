@@ -44,18 +44,61 @@ type Props = {
   secondsVisible?: boolean;
 };
 
-function toUnix(ts: string): Time {
-  const d = new Date(ts);
-  return Math.floor(d.getTime() / 1000) as Time;
+type Theme = {
+  text: string;
+  muted: string;
+  line: string;
+  sense: string;
+  up: string;
+  upDim: string;
+  down: string;
+  downDim: string;
+  grid: string;
+  cross: string;
+  maFast: string;
+  maSlow: string;
+  bgSoft: string;
+  bgElevated: string;
+  font: string;
+};
+
+function readTheme(): Theme {
+  const s = getComputedStyle(document.documentElement);
+  const g = (name: string, fallback: string) => s.getPropertyValue(name).trim() || fallback;
+  return {
+    text: g("--text", "#e8eefc"),
+    muted: g("--muted", "#93a0b8"),
+    line: g("--line", "#243049"),
+    sense: g("--sense", "#5dde8a"),
+    up: g("--chart-up", g("--ok", "#5dde8a")),
+    upDim: g("--chart-up-dim", "#3a9f62"),
+    down: g("--chart-down", g("--danger", "#ff6b7a")),
+    downDim: g("--chart-down-dim", "#c44d5a"),
+    grid: g("--chart-grid", "rgba(158,182,255,0.10)"),
+    cross: g("--chart-cross", "#5dde8a"),
+    maFast: g("--chart-ma-fast", "#7eb6ff"),
+    maSlow: g("--chart-ma-slow", "#e0b35a"),
+    bgSoft: g("--bg-soft", "#182238"),
+    bgElevated: g("--bg-elevated", "#121a2b"),
+    font: g("--font-body", '"IBM Plex Sans", sans-serif'),
+  };
 }
 
 function hexAlpha(hex: string, alpha: number): string {
-  const h = hex.replace("#", "").trim();
-  if (h.length !== 6) return hex;
+  const raw = hex.replace("#", "").trim();
+  if (raw.length !== 6) {
+    // already rgba / color-mix — fall back to solid
+    return hex;
+  }
   const a = Math.round(Math.min(1, Math.max(0, alpha)) * 255)
     .toString(16)
     .padStart(2, "0");
-  return `#${h}${a}`;
+  return `#${raw}${a}`;
+}
+
+function toUnix(ts: string): Time {
+  const d = new Date(ts);
+  return Math.floor(d.getTime() / 1000) as Time;
 }
 
 function smaSeries(
@@ -100,19 +143,15 @@ export function PriceChart({
   const sma20Ref = useRef<ISeriesApi<"Line"> | null>(null);
   const sma50Ref = useRef<ISeriesApi<"Line"> | null>(null);
   const linesRef = useRef<IPriceLine[]>([]);
+  const themeRef = useRef<Theme | null>(null);
   const prevSigRef = useRef<string>("");
   const fill = height == null;
 
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const styles = getComputedStyle(document.documentElement);
-    const muted = styles.getPropertyValue("--muted").trim() || "#93a0b8";
-    const line = styles.getPropertyValue("--line").trim() || "#243049";
-    const ok = styles.getPropertyValue("--ok").trim() || "#5dde8a";
-    const danger = styles.getPropertyValue("--danger").trim() || "#ff6b7a";
-    const sense = styles.getPropertyValue("--sense").trim() || "#5dde8a";
-    const bgSoft = styles.getPropertyValue("--bg-soft").trim() || "#182238";
+    const theme = readTheme();
+    themeRef.current = theme;
 
     const initialH = fill
       ? Math.max(containerRef.current.clientHeight || 480, 240)
@@ -123,38 +162,47 @@ export function PriceChart({
       height: initialH,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: muted,
+        textColor: theme.muted,
+        fontFamily: theme.font,
+        fontSize: 11,
       },
       grid: {
-        vertLines: { color: hexAlpha(line, 0.55) },
-        horzLines: { color: hexAlpha(line, 0.55) },
+        vertLines: { color: theme.grid, style: LineStyle.Dotted },
+        horzLines: { color: theme.grid, style: LineStyle.Dotted },
       },
       crosshair: {
         mode: CrosshairMode.Normal,
         vertLine: {
-          color: hexAlpha(sense, 0.55),
+          color: hexAlpha(theme.sense, 0.45),
           width: 1,
           style: LineStyle.Dashed,
-          labelBackgroundColor: bgSoft,
+          labelBackgroundColor: theme.bgElevated,
         },
         horzLine: {
-          color: hexAlpha(sense, 0.55),
+          color: hexAlpha(theme.sense, 0.45),
           width: 1,
           style: LineStyle.Dashed,
-          labelBackgroundColor: bgSoft,
+          labelBackgroundColor: theme.bgElevated,
         },
       },
       rightPriceScale: {
-        borderColor: line,
-        scaleMargins: { top: 0.08, bottom: 0.22 },
+        borderVisible: false,
+        scaleMargins: { top: 0.06, bottom: 0.2 },
+        entireTextOnly: true,
       },
+      leftPriceScale: { visible: false },
       timeScale: {
-        borderColor: line,
+        borderVisible: false,
         timeVisible: true,
         secondsVisible,
-        rightOffset: 4,
-        barSpacing: 8,
-        minBarSpacing: 2,
+        rightOffset: 6,
+        barSpacing: 9,
+        minBarSpacing: 3,
+        fixLeftEdge: false,
+        lockVisibleTimeRangeOnResize: true,
+      },
+      localization: {
+        locale: "cs-CZ",
       },
       handleScroll: {
         mouseWheel: true,
@@ -165,40 +213,49 @@ export function PriceChart({
       handleScale: {
         axisPressedMouseMove: true,
         mouseWheel: true,
-        pinch: true,
+        pinch: false,
         axisDoubleClickReset: true,
       },
     });
 
+    // Up = Sense green (filled), down = soft coral — matches StockSense signals
     const candle = chart.addCandlestickSeries({
-      upColor: ok,
-      downColor: danger,
-      borderUpColor: ok,
-      borderDownColor: danger,
-      wickUpColor: hexAlpha(ok, 0.85),
-      wickDownColor: hexAlpha(danger, 0.85),
+      upColor: hexAlpha(theme.up, 0.88),
+      downColor: hexAlpha(theme.down, 0.82),
+      borderUpColor: theme.up,
+      borderDownColor: theme.down,
+      wickUpColor: theme.up,
+      wickDownColor: hexAlpha(theme.down, 0.9),
+      borderVisible: true,
+      priceLineVisible: true,
+      priceLineColor: hexAlpha(theme.sense, 0.55),
+      priceLineWidth: 1,
+      priceLineStyle: LineStyle.Dashed,
+      lastValueVisible: true,
     });
 
     const volume = chart.addHistogramSeries({
       priceFormat: { type: "volume" },
       priceScaleId: "volume",
+      lastValueVisible: false,
+      priceLineVisible: false,
     });
     chart.priceScale("volume").applyOptions({
-      scaleMargins: { top: 0.82, bottom: 0 },
+      scaleMargins: { top: 0.84, bottom: 0 },
+      borderVisible: false,
     });
 
-    const accent2 = styles.getPropertyValue("--accent-2").trim() || "#6ea8ff";
-    const warn = styles.getPropertyValue("--warn").trim() || "#f0c14a";
     const sma20 = chart.addLineSeries({
-      color: hexAlpha(accent2, 0.85),
-      lineWidth: 1,
+      color: hexAlpha(theme.maFast, 0.9),
+      lineWidth: 2,
       priceLineVisible: false,
       lastValueVisible: false,
       crosshairMarkerVisible: false,
     });
     const sma50 = chart.addLineSeries({
-      color: hexAlpha(warn, 0.85),
+      color: hexAlpha(theme.maSlow, 0.75),
       lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
       priceLineVisible: false,
       lastValueVisible: false,
       crosshairMarkerVisible: false,
@@ -231,6 +288,7 @@ export function PriceChart({
       sma20Ref.current = null;
       sma50Ref.current = null;
       linesRef.current = [];
+      themeRef.current = null;
     };
   }, [height, fill, secondsVisible]);
 
@@ -245,6 +303,8 @@ export function PriceChart({
       return;
     }
 
+    const theme = themeRef.current || readTheme();
+
     const candleData: CandlestickData[] = bars
       .filter((b) => b.open != null && b.high != null && b.low != null && b.close != null)
       .map(toCandle)
@@ -258,10 +318,6 @@ export function PriceChart({
       return true;
     });
 
-    const styles = getComputedStyle(document.documentElement);
-    const ok = styles.getPropertyValue("--ok").trim() || "#5dde8a";
-    const danger = styles.getPropertyValue("--danger").trim() || "#ff6b7a";
-
     const last = bars[bars.length - 1];
     const histKey = `${unique.length}:${unique[0] ? Number(unique[0].time) : 0}:${
       unique.length > 1 ? Number(unique[unique.length - 2].time) : 0
@@ -273,14 +329,17 @@ export function PriceChart({
     const prevHist = prev.split("|")[0] || "";
     const canUpdate = Boolean(realtime && prev && prevHist === histKey && unique.length > 0);
 
+    const volUp = hexAlpha(theme.up, 0.28);
+    const volDown = hexAlpha(theme.down, 0.26);
+
     if (canUpdate) {
       const lastBar = unique[unique.length - 1];
-      const up = lastBar.close >= lastBar.open;
+      const isUp = lastBar.close >= lastBar.open;
       seriesRef.current.update(lastBar);
       volumeRef.current.update({
         time: lastBar.time,
         value: last?.volume ?? 0,
-        color: up ? hexAlpha(ok, 0.35) : hexAlpha(danger, 0.35),
+        color: isUp ? volUp : volDown,
       });
       if (showMa && sma20Ref.current && sma50Ref.current && unique.length >= 20) {
         const closes = unique.map((c) => ({ time: c.time, value: c.close }));
@@ -292,11 +351,11 @@ export function PriceChart({
     } else {
       const volumeData = bars
         .map((b) => {
-          const up = b.close >= b.open;
+          const isUp = b.close >= b.open;
           return {
             time: toUnix(b.ts),
             value: b.volume ?? 0,
-            color: up ? hexAlpha(ok, 0.35) : hexAlpha(danger, 0.35),
+            color: isUp ? volUp : volDown,
           };
         })
         .filter((d) => seen.has(Number(d.time)))
@@ -338,13 +397,8 @@ export function PriceChart({
     }
     linesRef.current = [];
 
-    const styles = getComputedStyle(document.documentElement);
-    const accent2 = styles.getPropertyValue("--accent-2").trim() || "#6ea8ff";
-    const warn = styles.getPropertyValue("--warn").trim() || "#f0c14a";
-    const sense = styles.getPropertyValue("--sense").trim() || "#5dde8a";
-    const danger = styles.getPropertyValue("--danger").trim() || "#ff6b7a";
-
-    const palette = [accent2, warn, sense, danger];
+    const theme = themeRef.current || readTheme();
+    const palette = [theme.sense, theme.maFast, theme.maSlow, theme.down];
 
     levels.forEach((lvl, i) => {
       if (!Number.isFinite(lvl.price) || lvl.price <= 0) return;
@@ -357,7 +411,7 @@ export function PriceChart({
       const pl = seriesRef.current!.createPriceLine({
         price: lvl.price,
         color: lvl.color || palette[i % palette.length],
-        lineWidth: 2,
+        lineWidth: 1,
         lineStyle: style,
         axisLabelVisible: true,
         title: lvl.title,

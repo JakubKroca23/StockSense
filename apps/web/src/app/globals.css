@@ -24,6 +24,15 @@
   --glass-border: color-mix(in srgb, #9eb6ff 14%, var(--line));
   --glass-highlight: color-mix(in srgb, #ffffff 8%, transparent);
   --hover-lift: translateY(-1px);
+  /* Chart — StockSense desk palette */
+  --chart-up: #5dde8a;
+  --chart-up-dim: #3a9f62;
+  --chart-down: #ff6b7a;
+  --chart-down-dim: #c44d5a;
+  --chart-grid: color-mix(in srgb, #9eb6ff 10%, transparent);
+  --chart-cross: color-mix(in srgb, var(--sense) 55%, #ffffff);
+  --chart-ma-fast: #7eb6ff;
+  --chart-ma-slow: #e0b35a;
 }
 
 @theme inline {
@@ -822,6 +831,133 @@ textarea {
   padding-top: 0.75rem;
 }
 
+.app-shell:has(.cryptosense) {
+  padding-bottom: 0;
+}
+
+.app-shell:has(.cryptosense) > main {
+  display: flex;
+  flex-direction: column;
+  max-width: none;
+  width: 100%;
+  padding: 0.5rem 0.65rem 0.65rem;
+  min-height: calc(100dvh - 3.5rem);
+}
+
+.cryptosense {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+}
+
+.cryptosense__chart.instrument-chart {
+  flex: 1 1 auto;
+  min-height: calc(100dvh - 4.75rem);
+  height: calc(100dvh - 4.75rem);
+  max-height: none;
+  border-color: color-mix(in srgb, var(--sense) 16%, var(--glass-border));
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, #ffffff 5%, var(--glass)),
+    color-mix(in srgb, var(--bg-elevated) 78%, transparent)
+  );
+}
+
+.crypto-coin-row {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding: 0.15rem 0.1rem 0.25rem;
+  scrollbar-width: thin;
+  flex-shrink: 0;
+}
+
+.crypto-coin-row::-webkit-scrollbar {
+  height: 4px;
+}
+
+.crypto-coin-chip {
+  display: grid;
+  grid-template-columns: auto;
+  grid-template-rows: auto auto auto;
+  justify-items: center;
+  gap: 0.12rem;
+  min-width: 4.6rem;
+  padding: 0.35rem 0.4rem 0.3rem;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: color-mix(in srgb, var(--glass) 70%, transparent);
+  color: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.crypto-coin-chip__sym {
+  font-family: var(--font-nav);
+  font-size: 0.62rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text);
+  line-height: 1;
+}
+
+.crypto-coin-chip__pct {
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.crypto-coin-chip.is-up .crypto-coin-chip__pct,
+.crypto-spark.is-up {
+  color: var(--ok);
+}
+
+.crypto-coin-chip.is-down .crypto-coin-chip__pct,
+.crypto-spark.is-down {
+  color: var(--danger);
+}
+
+.crypto-coin-chip.is-active {
+  border-color: color-mix(in srgb, var(--sense) 50%, var(--glass-border));
+  background: color-mix(in srgb, var(--sense) 12%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--sense) 18%, transparent);
+}
+
+.crypto-coin-chip:hover {
+  border-color: color-mix(in srgb, var(--sense) 35%, var(--glass-border));
+}
+
+.crypto-spark {
+  display: block;
+}
+
+.crypto-spark--empty {
+  display: block;
+  background: color-mix(in srgb, var(--line) 55%, transparent);
+  border-radius: 2px;
+  opacity: 0.5;
+}
+
+.cryptosense__meta {
+  padding-top: 0.1rem;
+}
+
+.crypto-chart-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  touch-action: pan-x pan-y;
+}
+
 .chat-layout {
   display: grid;
   gap: 0.85rem;
@@ -1088,12 +1224,14 @@ textarea {
   width: 100%;
   border-radius: 12px;
   overflow: hidden;
-  /* Keep chart pans; block browser zoom on the canvas */
   touch-action: pan-x pan-y;
+  background:
+    radial-gradient(900px 420px at 12% 0%, color-mix(in srgb, var(--sense) 7%, transparent), transparent 55%),
+    radial-gradient(700px 380px at 100% 100%, color-mix(in srgb, var(--accent-2) 6%, transparent), transparent 50%),
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-soft) 55%, transparent), transparent 40%);
 }
 
-.instrument-chart__stage,
-.crypto-chart-stage {
+.instrument-chart__stage {
   touch-action: pan-x pan-y;
 }
 
@@ -2524,10 +2662,6 @@ textarea {
   display: grid;
   gap: 0.75rem;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-}
-
-.crypto-chart-stage {
-  min-height: 360px;
 }
 
 .crypto-board__card--active {
