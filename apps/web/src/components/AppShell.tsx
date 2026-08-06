@@ -74,19 +74,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             })}
           </nav>
 
-          <div className="app-no-drag ml-auto flex shrink-0 items-center gap-2 sm:gap-3 text-sm">
-            {name ? <span className="muted hidden sm:inline">{name}</span> : null}
+          <div
+            className={`user-pill app-no-drag ml-auto ${settingsActive ? "user-pill--active" : ""}`}
+          >
+            <span className="user-pill__name">{name || "…"}</span>
             <Link
               href="/settings"
-              className={`nav-link nav-link--settings ${settingsActive ? "nav-link--active" : ""}`}
+              className="user-pill__settings"
               aria-label="Nastavení"
               aria-current={settingsActive ? "page" : undefined}
               title="Nastavení"
             >
-              <span className="nav-item">
-                <IconSettings size={NAV_ICON_SIZE} />
-                <span className="nav-item__label hidden sm:inline">Nastavení</span>
-              </span>
+              <IconSettings size={16} />
             </Link>
           </div>
         </div>
