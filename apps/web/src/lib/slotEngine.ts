@@ -40,6 +40,15 @@ export const LINES_5X3_10: Payline[] = [
   [0, 1, 1, 1, 0],
 ];
 
+/** Classic 3-reel Kris Kros / Joker lines */
+export const LINES_3X3_5: Payline[] = [
+  [1, 1, 1],
+  [0, 0, 0],
+  [2, 2, 2],
+  [0, 1, 2],
+  [2, 1, 0],
+];
+
 /** Build a weighted strip for one reel */
 export function makeStrip(weights: Record<string, number>, length = 32): string[] {
   const bag: string[] = [];
@@ -124,12 +133,14 @@ export function evalPaylines(
       if (c.sym === symbol || (wild && c.sym === wild)) count += 1;
       else break;
     }
-    if (count < 3) return;
+    if (count < 2) return;
 
     const table = paytable[symbol];
     if (!table) return;
-    const mult = table[count] ?? table[count - 1] ?? 0;
+    const mult = table[count] ?? 0;
     if (mult <= 0) return;
+    // Classic: need at least 3 unless 2-of-kind is explicitly paid (e.g. cherry)
+    if (count < 3 && !(table[2] > 0 && count === 2)) return;
 
     wins.push({
       lineIndex,

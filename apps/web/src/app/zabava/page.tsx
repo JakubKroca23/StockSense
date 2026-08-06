@@ -7,8 +7,8 @@ const GAMES = [
   {
     href: "/zabava/sense-me",
     title: "Sense Me",
-    blurb: "Dazzle energie v Sense stylu — gem reels, free spins a rostoucí multiplikátor.",
-    badge: "Dazzle",
+    blurb: "Klasický Joker 27 / Kris Kros — 3 válce, joker wild, kris-kros free spins.",
+    badge: "Joker 27",
     tone: "dazzle" as const,
   },
   {

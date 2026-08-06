@@ -8,63 +8,68 @@ import { SlotSymbol } from "@/components/games/SlotSymbols";
 import { awardCredits, spendCredits } from "@/lib/credits";
 import { slotAudio } from "@/lib/slotAudio";
 import {
-  LINES_5X3_10,
+  LINES_3X3_5,
   evaluateSpin,
   makeStrips,
   randomStops,
   type SpinResult,
 } from "@/lib/slotEngine";
 
-const BETS = [10, 20, 50, 100, 250, 500];
-const LINES = 10;
+/** Classic Joker 27 / Kris Kros style — 3 válce, 5 linií */
+const BETS = [10, 20, 50, 100, 200, 500];
+const LINES = 5;
 const ROWS = 3;
+const REELS = 3;
 
 const WEIGHTS: Record<string, number> = {
-  eye: 2,
-  seven: 2,
-  bell: 3,
-  scatter: 2,
-  watermelon: 5,
-  grapes: 6,
-  orange: 7,
-  plum: 7,
-  cherry: 8,
-  lemon: 8,
+  joker: 2,
+  kriskros: 2,
+  seven: 3,
+  bar: 4,
+  bell: 5,
+  watermelon: 6,
+  grapes: 7,
+  orange: 8,
+  plum: 8,
+  cherry: 9,
+  lemon: 9,
 };
 
+/** paytable[symbol][count] × lineBet — classic 3-of-kind (index 3) */
 const PAYTABLE: Record<string, number[]> = {
-  eye: [0, 0, 0, 40, 120, 400],
-  seven: [0, 0, 0, 30, 100, 300],
-  bell: [0, 0, 0, 20, 60, 160],
-  watermelon: [0, 0, 0, 15, 40, 100],
-  grapes: [0, 0, 0, 12, 35, 80],
-  orange: [0, 0, 0, 10, 25, 60],
-  plum: [0, 0, 0, 10, 25, 60],
-  cherry: [0, 0, 0, 8, 20, 50],
-  lemon: [0, 0, 0, 8, 20, 50],
+  joker: [0, 0, 0, 100],
+  seven: [0, 0, 0, 80],
+  bar: [0, 0, 0, 40],
+  bell: [0, 0, 0, 30],
+  watermelon: [0, 0, 0, 24],
+  grapes: [0, 0, 0, 20],
+  orange: [0, 0, 0, 16],
+  plum: [0, 0, 0, 16],
+  cherry: [0, 0, 8, 12], // 2× cherry also pays
+  lemon: [0, 0, 0, 12],
 };
 
-const SCATTER_PAYS: Record<number, number> = { 3: 2, 4: 10, 5: 50 };
+/** 3× Kris Kros anywhere → free spins / scatter pay (× total bet) */
+const SCATTER_PAYS: Record<number, number> = { 3: 5 };
 
-type Meta = { wasFs: boolean; mult: number; fsLeft: number };
+type Meta = { wasFs: boolean; fsLeft: number };
 
 export function SenseMeGame() {
   const { balance } = useCredits();
   const [bet, setBet] = useState(50);
-  const strips = useMemo(() => makeStrips(WEIGHTS, 5, 36), []);
+  const strips = useMemo(() => makeStrips(WEIGHTS, REELS, 24), []);
   const [stops, setStops] = useState(() => randomStops(strips));
   const [targetStops, setTargetStops] = useState<number[] | null>(null);
   const [spinning, setSpinning] = useState(false);
   const [highlight, setHighlight] = useState<boolean[][] | undefined>();
   const [lastWin, setLastWin] = useState(0);
-  const [msg, setMsg] = useState("Sense Me — roztoč válce");
+  const [msg, setMsg] = useState("Sense Me — Joker 27 / Kris Kros");
   const [freeSpins, setFreeSpins] = useState(0);
-  const [fsMult, setFsMult] = useState(1);
   const [muted, setMuted] = useState(false);
   const [flash, setFlash] = useState(false);
 
   const pendingRef = useRef<SpinResult | null>(null);
-  const metaRef = useRef<Meta>({ wasFs: false, mult: 1, fsLeft: 0 });
+  const metaRef = useRef<Meta>({ wasFs: false, fsLeft: 0 });
 
   useEffect(() => {
     slotAudio.setMuted(muted);
@@ -81,15 +86,10 @@ export function SenseMeGame() {
       setLastWin(result.totalWin);
 
       let nextFs = meta.wasFs ? meta.fsLeft - 1 : 0;
-      let nextMult = meta.mult;
 
       if (result.scatterCount >= 3) {
-        const add = result.scatterCount === 3 ? 10 : result.scatterCount === 4 ? 15 : 20;
-        nextFs = (meta.wasFs ? meta.fsLeft - 1 : 0) + add;
-        nextMult = meta.wasFs ? Math.min(meta.mult + 1, 5) : 1;
-        setMsg(
-          `Scatter ×${result.scatterCount} → +${add} FS${meta.wasFs ? ` · multi ×${nextMult}` : ""}`
-        );
+        nextFs = (meta.wasFs ? meta.fsLeft - 1 : 0) + 7;
+        setMsg(`KRIS KROS ×3 → +7 free spins!`);
         slotAudio.freeSpin();
         setFlash(true);
         setTimeout(() => setFlash(false), 700);
@@ -104,11 +104,10 @@ export function SenseMeGame() {
         if (result.scatterCount < 3) {
           setMsg(
             `Výhra ${result.totalWin.toLocaleString("cs-CZ")} SC` +
-              (linesDesc ? ` · ${linesDesc}` : "") +
-              (result.scatterWin ? ` · scatter ${result.scatterWin}` : "")
+              (linesDesc ? ` · ${linesDesc}` : "")
           );
         }
-        if (result.totalWin >= bet * 8) slotAudio.winBig();
+        if (result.totalWin >= bet * 10) slotAudio.winBig();
         else slotAudio.winSmall();
         setFlash(true);
         setTimeout(() => setFlash(false), 450);
@@ -118,7 +117,6 @@ export function SenseMeGame() {
       }
 
       setFreeSpins(nextFs);
-      setFsMult(nextFs > 0 ? nextMult : 1);
       pendingRef.current = null;
       setSpinning(false);
     },
@@ -135,34 +133,32 @@ export function SenseMeGame() {
     }
 
     const nextStops = randomStops(strips);
-    const mult = wasFs ? fsMult : 1;
     const result = evaluateSpin({
       strips,
       stops: nextStops,
       rows: ROWS,
-      lines: LINES_5X3_10,
+      lines: LINES_3X3_5,
       paytable: PAYTABLE,
       lineBet,
       totalBet: bet,
-      wild: "eye",
-      scatter: "scatter",
+      wild: "joker",
+      scatter: "kriskros",
       scatterPays: SCATTER_PAYS,
-      winMultiplier: mult,
     });
 
-    metaRef.current = { wasFs, mult, fsLeft: freeSpins };
+    metaRef.current = { wasFs, fsLeft: freeSpins };
     pendingRef.current = result;
     setHighlight(undefined);
     setLastWin(0);
     setTargetStops(nextStops);
     setSpinning(true);
-    setMsg(wasFs ? `Free spin · ×${mult}` : "Točí se…");
+    setMsg(wasFs ? `Free spin (${freeSpins})` : "Točí se…");
     slotAudio.spinStart();
-  }, [spinning, freeSpins, bet, strips, fsMult, lineBet]);
+  }, [spinning, freeSpins, bet, strips, lineBet]);
 
   const onReelStop = useCallback((i: number) => {
-    if (i === 0) slotAudio.reelStop();
-    else slotAudio.reelTick();
+    slotAudio.reelStop();
+    if (i > 0) slotAudio.reelTick();
   }, []);
 
   const onAllStopped = useCallback(() => {
@@ -174,7 +170,7 @@ export function SenseMeGame() {
   const betIdx = BETS.indexOf(bet);
 
   return (
-    <div className={`sense-me ${flash ? "is-flash" : ""}`}>
+    <div className={`sense-me sense-me--joker ${flash ? "is-flash" : ""}`}>
       <div className="game-topbar">
         <Link href="/zabava" className="btn text-xs">
           ← Zábava
@@ -182,22 +178,25 @@ export function SenseMeGame() {
         <h1 className="game-title game-title--dazzle">Sense Me</h1>
         <CreditsBar compact />
       </div>
-      <p className="game-tagline">5 válců · 10 linií · Wild oko · Scatter hvězda</p>
+      <p className="game-tagline">Klasika Joker 27 · Kris Kros · 3 válce · 5 linií</p>
 
-      <div className="slot-cabinet slot-cabinet--dazzle">
+      <div className="slot-cabinet slot-cabinet--dazzle slot-cabinet--joker">
         <div className="slot-cabinet__glow" aria-hidden />
+        <div className="joker-badge" aria-hidden>
+          JOKER 27
+        </div>
         <SlotReels
           strips={strips}
           stops={stops}
           targetStops={targetStops}
           spinning={spinning}
           highlight={highlight}
-          theme="dazzle"
+          theme="joker"
           onReelStop={onReelStop}
           onAllStopped={onAllStopped}
         />
         <div className="slot-payline-hint muted text-xs">
-          Výhra zleva doprava po linii · zvýrazněné = výherní symboly
+          Joker = wild · 3× Kris Kros = free spins · výhra zleva po linii
         </div>
       </div>
 
@@ -210,11 +209,7 @@ export function SenseMeGame() {
           <span>
             Výhra <strong className="tabular-nums text-[var(--sense)]">{lastWin}</strong>
           </span>
-          {freeSpins > 0 && (
-            <span className="slot-hud__fs">
-              FS {freeSpins} · ×{fsMult}
-            </span>
-          )}
+          {freeSpins > 0 && <span className="slot-hud__fs">FS {freeSpins}</span>}
           <span className="muted tabular-nums">{balance.toLocaleString("cs-CZ")} SC</span>
         </div>
         <div className="slot-controls">
@@ -257,7 +252,7 @@ export function SenseMeGame() {
       </div>
 
       <details className="slot-paytable card p-3 text-sm">
-        <summary className="cursor-pointer">Paytable (násobek line bet = sázka/10)</summary>
+        <summary className="cursor-pointer">Paytable (× line bet = sázka/5)</summary>
         <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
           {Object.entries(PAYTABLE).map(([k, v]) => (
             <div key={k} className="flex items-center gap-2 muted">
@@ -265,10 +260,16 @@ export function SenseMeGame() {
                 <SlotSymbol id={k} />
               </span>
               <span>
-                3×{v[3]} · 4×{v[4]} · 5×{v[5]}
+                {v[2] ? `2×${v[2]} · ` : ""}3×{v[3]}
               </span>
             </div>
           ))}
+          <div className="flex items-center gap-2 muted col-span-2">
+            <span className="slot-sym slot-sym--mini">
+              <SlotSymbol id="kriskros" />
+            </span>
+            <span>3× kdekoli = 5× sázka + 7 free spins</span>
+          </div>
         </div>
       </details>
     </div>

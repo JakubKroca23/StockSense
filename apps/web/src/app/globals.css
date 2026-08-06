@@ -2266,6 +2266,28 @@ textarea {
     0 22px 50px rgba(0, 0, 0, 0.45);
 }
 
+.slot-cabinet--joker {
+  max-width: 28rem;
+  margin-inline: auto;
+}
+
+.joker-badge {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  font-family: var(--font-brand);
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  font-size: 0.72rem;
+  color: #ffd54f;
+  margin-bottom: 0.4rem;
+  text-shadow: 0 0 12px rgba(255, 213, 79, 0.45);
+}
+
+.slot-reels--joker .slot-reels__frame {
+  background: #060d1a;
+}
+
 .slot-cabinet--book {
   background:
     radial-gradient(70% 50% at 50% 0%, rgba(240, 193, 74, 0.14), transparent 55%),
@@ -2353,7 +2375,11 @@ textarea {
 }
 
 .slot-reel__window.is-spinning {
-  filter: blur(1.4px) brightness(1.08) saturate(1.1);
+  filter: brightness(1.06) saturate(1.08);
+}
+
+.slot-reel__window.is-spinning .slot-sym {
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.35));
 }
 
 .slot-reel__strip {

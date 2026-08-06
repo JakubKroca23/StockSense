@@ -329,6 +329,106 @@ export function SymExplorer() {
   );
 }
 
+export function SymBar() {
+  const id = useId().replace(/:/g, "");
+  return (
+    <Frame>
+      <defs>
+        <linearGradient id={`${id}-g`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#eceff1" />
+          <stop offset="45%" stopColor="#90a4ae" />
+          <stop offset="100%" stopColor="#455a64" />
+        </linearGradient>
+      </defs>
+      <rect x="8" y="20" width="48" height="24" rx="4" fill={`url(#${id}-g)`} stroke="#fff" strokeWidth="2.2" />
+      <text
+        x="32"
+        y="38"
+        textAnchor="middle"
+        fontFamily="Space Grotesk, sans-serif"
+        fontWeight="800"
+        fontSize="16"
+        fill="#fff"
+        letterSpacing="1"
+      >
+        BAR
+      </text>
+    </Frame>
+  );
+}
+
+export function SymJoker() {
+  const id = useId().replace(/:/g, "");
+  return (
+    <Frame>
+      <defs>
+        <radialGradient id={`${id}-g`} cx="35%" cy="30%" r="65%">
+          <stop offset="0%" stopColor="#ffe082" />
+          <stop offset="50%" stopColor="#ff5252" />
+          <stop offset="100%" stopColor="#b71c1c" />
+        </radialGradient>
+      </defs>
+      <circle cx="32" cy="32" r="24" fill={`url(#${id}-g)`} stroke="#fff" strokeWidth="2.4" />
+      <circle cx="32" cy="28" r="10" fill="#fff3e0" stroke="#fff" strokeWidth="1.5" />
+      <circle cx="28" cy="26" r="1.8" fill="#212121" />
+      <circle cx="36" cy="26" r="1.8" fill="#212121" />
+      <path d="M26 32 Q32 38 38 32" stroke="#c62828" strokeWidth="2" fill="none" strokeLinecap="round" />
+      <path d="M18 14 Q22 8 28 12" stroke="#fff" strokeWidth="2.2" fill="none" strokeLinecap="round" />
+      <path d="M46 14 Q42 8 36 12" stroke="#fff" strokeWidth="2.2" fill="none" strokeLinecap="round" />
+      <text
+        x="32"
+        y="52"
+        textAnchor="middle"
+        fontFamily="Space Grotesk, sans-serif"
+        fontWeight="800"
+        fontSize="9"
+        fill="#fff"
+      >
+        JOKER
+      </text>
+    </Frame>
+  );
+}
+
+export function SymKrisKros() {
+  const id = useId().replace(/:/g, "");
+  return (
+    <Frame>
+      <defs>
+        <linearGradient id={`${id}-g`} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#b9ffd6" />
+          <stop offset="50%" stopColor="#5dde8a" />
+          <stop offset="100%" stopColor="#1b7a45" />
+        </linearGradient>
+      </defs>
+      <rect x="6" y="6" width="52" height="52" rx="12" fill={`url(#${id}-g)`} stroke="#fff" strokeWidth="2.4" />
+      <path
+        d="M18 18 L46 46 M46 18 L18 46"
+        stroke="#fff"
+        strokeWidth="5"
+        strokeLinecap="round"
+      />
+      <path
+        d="M18 18 L46 46 M46 18 L18 46"
+        stroke="#0a3d22"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+      />
+      <text
+        x="32"
+        y="36"
+        textAnchor="middle"
+        fontFamily="Space Grotesk, sans-serif"
+        fontWeight="800"
+        fontSize="8"
+        fill="#04140a"
+      >
+        KRIS
+      </text>
+    </Frame>
+  );
+}
+
 export function SymRoyal({ letter }: { letter: string }) {
   const id = useId().replace(/:/g, "");
   const colors: Record<string, [string, string]> = {
@@ -374,6 +474,9 @@ const MAP: Record<string, () => ReactNode> = {
   grapes: () => <SymGrapes />,
   seven: () => <SymSeven />,
   bell: () => <SymBell />,
+  bar: () => <SymBar />,
+  joker: () => <SymJoker />,
+  kriskros: () => <SymKrisKros />,
   eye: () => <SymSenseEye />,
   scatter: () => <SymStarScatter />,
   book: () => <SymBook />,
