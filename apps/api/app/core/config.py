@@ -48,8 +48,11 @@ class Settings(BaseSettings):
     enable_tip_scoring: bool = False
 
     # CryptoSense / CCXT — public market data (no API keys required for quotes)
-    ccxt_exchanges: str = "binance,bybit,okx,kraken"
-    ccxt_primary: str = "binance"
+    # Charts/quotes: aggregate across ccxt_exchanges. Bot/execution: ccxt_execution.
+    ccxt_exchanges: str = "binance,bybit"
+    ccxt_execution: str = "bybit"
+    # Legacy alias — same as execution venue for bots / primary quote fallback.
+    ccxt_primary: str = "bybit"
 
     @property
     def cors_origin_list(self) -> list[str]:

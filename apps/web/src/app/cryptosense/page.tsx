@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, apiWsUrl } from "@/lib/api";
 import { PriceChart, ChartBar } from "@/components/PriceChart";
 
 type ExchangeQuote = {
@@ -32,6 +32,8 @@ type AggregatedQuote = {
 
 type CryptoOverview = {
   primary_exchange: string;
+  execution_exchange?: string;
+  chart_mode?: string;
   exchanges: string[];
   as_of: string;
   quotes: AggregatedQuote[];
@@ -41,10 +43,24 @@ type CryptoOhlcv = {
   symbol: string;
   interval: string;
   primary_exchange: string;
+  execution_exchange?: string;
+  chart_mode?: string;
   bars: number;
   inserted: number;
   updated: number;
   ohlcv: ChartBar[];
+};
+
+type LiveKline = {
+  type?: string;
+  ts: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
+  is_closed?: boolean;
+  detail?: string;
 };
 
 const TIMEFRAMES = [
@@ -73,24 +89,24 @@ function fmtPct(n: number | null | undefined) {
 
 const ROADMAP = [
   {
-    title: "Live multi-exchange quotes",
+    title: "Binance + Bybit data",
     status: "done" as const,
-    body: "CCXT tickery z Binance, Bybit, OKX, Kraken — medián + spread.",
+    body: "Tickery a grafy agregované z Binance + Bybit. Bot/execution = Bybit.",
   },
   {
-    title: "Canonical OHLCV + grafy",
+    title: "Realtime graf (WS)",
     status: "now" as const,
-    body: "1s–1d z primary burzy (1s z klines nebo tradů), candle chart.",
+    body: "Agregované živé svíčky z Binance + Bybit websocketů.",
   },
   {
     title: "Paper trading bot",
     status: "next" as const,
-    body: "Signál → paper order → fills log. Execution jen na jedné primary burze.",
+    body: "Signál → paper order na Bybit → fills log.",
   },
   {
     title: "Live bot + risk",
     status: "later" as const,
-    body: "Websocket user stream, kill-switch, reconciliation balances/orders.",
+    body: "Bybit user stream, kill-switch, reconciliation balances/orders.",
   },
 ];
 
@@ -101,11 +117,24 @@ function chartLimit(tf: string) {
   return 220;
 }
 
-function chartPollMs(tf: string) {
-  if (tf === "1s") return 3_000;
-  if (tf === "1m") return 15_000;
-  if (tf === "5m") return 30_000;
-  return 60_000;
+function mergeLiveBar(bars: ChartBar[], live: LiveKline): ChartBar[] {
+  const next: ChartBar = {
+    ts: live.ts,
+    open: live.open,
+    high: live.high,
+    low: live.low,
+    close: live.close,
+    volume: live.volume,
+  };
+  if (!bars.length) return [next];
+  const last = bars[bars.length - 1];
+  const sameBucket = new Date(last.ts).getTime() === new Date(live.ts).getTime();
+  if (sameBucket) {
+    return [...bars.slice(0, -1), next];
+  }
+  const merged = [...bars, next];
+  const cap = 500;
+  return merged.length > cap ? merged.slice(merged.length - cap) : merged;
 }
 
 export default function CryptoSensePage() {
@@ -117,6 +146,7 @@ export default function CryptoSensePage() {
   const [loading, setLoading] = useState(true);
   const [chartBusy, setChartBusy] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [live, setLive] = useState(false);
 
   const loadOverview = useCallback(async () => {
     try {
@@ -133,8 +163,8 @@ export default function CryptoSensePage() {
     }
   }, []);
 
-  const loadChart = useCallback(async (symbol: string, tf: string, quiet = false) => {
-    if (!quiet) setChartBusy(true);
+  const loadChart = useCallback(async (symbol: string, tf: string) => {
+    setChartBusy(true);
     try {
       const persist = !["1s", "1m", "5m", "30m"].includes(tf);
       const res = await apiFetch<CryptoOhlcv>(
@@ -145,7 +175,7 @@ export default function CryptoSensePage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Načtení grafu selhalo");
     } finally {
-      if (!quiet) setChartBusy(false);
+      setChartBusy(false);
     }
   }, []);
 
@@ -156,13 +186,68 @@ export default function CryptoSensePage() {
   }, [loadOverview]);
 
   useEffect(() => {
-    void loadChart(selected, interval, false);
-    const id = window.setInterval(
-      () => void loadChart(selected, interval, true),
-      chartPollMs(interval)
-    );
-    return () => window.clearInterval(id);
+    void loadChart(selected, interval);
   }, [selected, interval, loadChart]);
+
+  useEffect(() => {
+    let ws: WebSocket | null = null;
+    let closed = false;
+    let retry: number | null = null;
+
+    const connect = () => {
+      if (closed) return;
+      const url = apiWsUrl(
+        `/crypto/ws/ohlcv?symbol=${encodeURIComponent(selected)}&interval=${encodeURIComponent(interval)}`
+      );
+      ws = new WebSocket(url);
+      ws.onopen = () => setLive(true);
+      ws.onclose = () => {
+        setLive(false);
+        if (!closed) retry = window.setTimeout(connect, 2000);
+      };
+      ws.onerror = () => {
+        setLive(false);
+        try {
+          ws?.close();
+        } catch {
+          /* ignore */
+        }
+      };
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data as string) as LiveKline;
+          if (msg.type === "hello") {
+            setLive(true);
+            return;
+          }
+          if (msg.type === "error") {
+            setLive(false);
+            return;
+          }
+          if (msg.ts == null || msg.close == null) return;
+          setOhlcv((prev) => {
+            if (!prev) return prev;
+            const ohlcvBars = mergeLiveBar(prev.ohlcv, msg);
+            return { ...prev, bars: ohlcvBars.length, ohlcv: ohlcvBars };
+          });
+        } catch {
+          /* ignore */
+        }
+      };
+    };
+
+    connect();
+    return () => {
+      closed = true;
+      if (retry) window.clearTimeout(retry);
+      setLive(false);
+      try {
+        ws?.close();
+      } catch {
+        /* ignore */
+      }
+    };
+  }, [selected, interval]);
 
   const activeQuote = data?.quotes.find((q) => q.symbol === selected) || null;
   const up = (activeQuote?.change_pct ?? 0) >= 0;
@@ -223,12 +308,12 @@ export default function CryptoSensePage() {
                 <span className={up ? "text-[var(--ok)]" : "text-[var(--danger)]"}>
                   {fmtPct(activeQuote.change_pct)}
                 </span>
-                <span className="badge">{ohlcv?.primary_exchange || data?.primary_exchange}</span>
-                {ohlcv && (
-                  <span className="badge">
-                    +{ohlcv.inserted}/↻{ohlcv.updated} · {ohlcv.bars} bars
-                  </span>
-                )}
+                <span className={`badge ${live ? "long" : ""}`}>{live ? "LIVE" : "offline"}</span>
+                <span className="badge">agg binance+bybit</span>
+                <span className="badge">
+                  bot {(ohlcv?.execution_exchange || data?.execution_exchange || "bybit")}
+                </span>
+                {ohlcv && <span className="badge">{ohlcv.bars} bars</span>}
               </>
             )}
             {chartBusy && <span>Načítám graf…</span>}
@@ -236,7 +321,12 @@ export default function CryptoSensePage() {
         </div>
         <div className="instrument-chart__stage crypto-chart-stage">
           {ohlcv?.ohlcv?.length ? (
-            <PriceChart bars={ohlcv.ohlcv} showMa={!["1s", "1m"].includes(interval)} />
+            <PriceChart
+              bars={ohlcv.ohlcv}
+              showMa={!["1s", "1m"].includes(interval)}
+              realtime
+              secondsVisible={interval === "1s" || interval === "1m"}
+            />
           ) : (
             <div className="muted p-6 text-sm">
               {chartBusy ? "Připravuji svíčky…" : "Žádná OHLCV data."}
@@ -250,17 +340,19 @@ export default function CryptoSensePage() {
           <h2 className="home-chart-title">Burzy</h2>
           {data && (
             <p className="muted text-xs">
-              primary <span className="text-[var(--sense)]">{data.primary_exchange}</span>
+              chart <span className="text-[var(--sense)]">agg</span>
+              {" · "}
+              bot/exec <span className="text-[var(--sense)]">{data.execution_exchange || "bybit"}</span>
               {" · "}
               {new Date(data.as_of).toLocaleTimeString("cs-CZ")}
             </p>
           )}
         </div>
         <div className="flex flex-wrap gap-2">
-          {(data?.exchanges || ["binance", "bybit", "okx", "kraken"]).map((ex) => (
-            <span key={ex} className={`badge ${ex === data?.primary_exchange ? "long" : ""}`}>
+          {(data?.exchanges || ["binance", "bybit"]).map((ex) => (
+            <span key={ex} className={`badge ${ex === (data?.execution_exchange || "bybit") ? "long" : ""}`}>
               {ex}
-              {ex === data?.primary_exchange ? " · primary" : ""}
+              {ex === (data?.execution_exchange || "bybit") ? " · bot" : ""}
             </span>
           ))}
         </div>
@@ -291,7 +383,8 @@ export default function CryptoSensePage() {
                   <div>
                     <h3 className="font-semibold text-lg">{q.symbol}</h3>
                     <p className="muted text-xs">
-                      {q.primary_exchange} · medián {fmtPrice(q.median_price)}
+                      medián {fmtPrice(q.median_price)}
+                      {q.primary_exchange ? ` · bot ${q.primary_exchange}` : ""}
                     </p>
                   </div>
                   <div className="text-right">

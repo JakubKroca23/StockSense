@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -1903,7 +1903,7 @@ async def crypto_ohlcv(
     user: AuthUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Canonical OHLCV from primary CCXT exchange; optionally upsert into price_bars."""
+    """Aggregated OHLCV (Binance + Bybit); optionally upsert into price_bars."""
     from app.services.crypto_market import get_crypto_market, persist_crypto_ohlcv
 
     allowed = {"1s", "1m", "5m", "15m", "30m", "1h", "4h", "1d", "1wk"}
@@ -1922,6 +1922,8 @@ async def crypto_ohlcv(
         "symbol": symbol.upper().replace("-", "/"),
         "interval": iv,
         "primary_exchange": market.primary,
+        "execution_exchange": market.execution,
+        "chart_mode": "aggregated",
         "bars": len(bars),
         "inserted": 0,
         "updated": 0,
@@ -1941,4 +1943,42 @@ async def crypto_ohlcv(
             for b in bars
         ],
     }
+
+
+@router.websocket("/crypto/ws/ohlcv")
+async def crypto_ws_ohlcv(websocket: WebSocket, symbol: str = "BTC/USDT", interval: str = "1m"):
+    """Realtime aggregated candles (Binance + Bybit public kline streams)."""
+    from app.services.crypto_stream import SUPPORTED_INTERVALS, iter_aggregated_klines
+
+    await websocket.accept()
+    iv = interval if interval in SUPPORTED_INTERVALS else "1m"
+    sym = (symbol or "BTC/USDT").strip()
+    await websocket.send_json(
+        {
+            "type": "hello",
+            "symbol": sym,
+            "interval": iv,
+            "source": "agg:binance+bybit:ws",
+            "execution_exchange": "bybit",
+            "chart_mode": "aggregated",
+        }
+    )
+    try:
+        while True:
+            try:
+                async for bar in iter_aggregated_klines(sym, iv):
+                    if bar.get("type") == "heartbeat":
+                        continue
+                    await websocket.send_json(bar)
+            except WebSocketDisconnect:
+                raise
+            except Exception as exc:
+                try:
+                    await websocket.send_json({"type": "error", "detail": str(exc)[:200]})
+                except Exception:
+                    break
+                await asyncio.sleep(1.5)
+    except WebSocketDisconnect:
+        return
+
 

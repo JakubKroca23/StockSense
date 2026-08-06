@@ -64,15 +64,30 @@ def _normalize_market(symbol: str, quote: str = "USDT") -> str:
 
 
 class MultiExchangeCcxt:
-    """Public-market CCXT pool. Live quotes from N exchanges; OHLCV from primary."""
+    """Public-market CCXT pool.
+
+    Quotes + chart OHLCV: aggregate across ``exchange_ids`` (Binance + Bybit).
+    Bot / execution quotes: ``execution`` exchange (Bybit).
+    """
 
     def __init__(self) -> None:
         settings = get_settings()
         raw = [x.strip().lower() for x in settings.ccxt_exchanges.split(",") if x.strip()]
-        self.exchange_ids = raw or ["binance"]
-        self.primary = (settings.ccxt_primary or self.exchange_ids[0]).strip().lower()
-        if self.primary not in self.exchange_ids:
-            self.exchange_ids.insert(0, self.primary)
+        # Hard-limit to the two venues we care about
+        allowed = {"binance", "bybit"}
+        self.exchange_ids = [x for x in raw if x in allowed] or ["binance", "bybit"]
+        for must in ("binance", "bybit"):
+            if must not in self.exchange_ids:
+                self.exchange_ids.append(must)
+        self.execution = (
+            settings.ccxt_execution or settings.ccxt_primary or "bybit"
+        ).strip().lower()
+        if self.execution not in allowed:
+            self.execution = "bybit"
+        if self.execution not in self.exchange_ids:
+            self.exchange_ids.append(self.execution)
+        # primary == execution (bot venue); charts use aggregate helpers
+        self.primary = self.execution
         self._clients: dict[str, object] = {}
 
     def _get_client(self, exchange_id: str):
@@ -95,11 +110,9 @@ class MultiExchangeCcxt:
             markets = client.markets or {}
             if market in markets:
                 return market
-            # try USD quote for coinbase/kraken style
             alt = market.replace("/USDT", "/USD")
             if alt in markets:
                 return alt
-            # base only search
             base = market.split("/")[0]
             for m in markets:
                 if m.startswith(f"{base}/") and markets[m].get("active", True):
@@ -160,9 +173,9 @@ class MultiExchangeCcxt:
         ok_prices = [r.price for r in rows if r.ok and r.price is not None]
         bids = [r.bid for r in rows if r.bid is not None]
         asks = [r.ask for r in rows if r.ask is not None]
-        primary = next((r for r in rows if r.exchange == self.primary and r.ok), None)
-        if primary is None:
-            primary = next((r for r in rows if r.ok), None)
+        execution = next((r for r in rows if r.exchange == self.execution and r.ok), None)
+        if execution is None:
+            execution = next((r for r in rows if r.ok), None)
 
         best_bid = max(bids) if bids else None
         best_ask = min(asks) if asks else None
@@ -170,15 +183,13 @@ class MultiExchangeCcxt:
         if best_bid and best_ask and best_bid > 0:
             spread = ((best_ask - best_bid) / best_bid) * 100
 
-        change = primary.change_pct if primary else None
-        if change is None:
-            changes = [r.change_pct for r in rows if r.change_pct is not None]
-            change = median(changes) if changes else None
+        changes = [r.change_pct for r in rows if r.change_pct is not None]
+        change = float(median(changes)) if changes else (execution.change_pct if execution else None)
 
         return AggregatedCryptoQuote(
             symbol=symbol,
-            primary_exchange=self.primary,
-            primary_price=primary.price if primary else None,
+            primary_exchange=self.execution,
+            primary_price=execution.price if execution else None,
             median_price=float(median(ok_prices)) if ok_prices else None,
             best_bid=best_bid,
             best_ask=best_ask,
@@ -188,10 +199,10 @@ class MultiExchangeCcxt:
             as_of=datetime.now(timezone.utc),
         )
 
-    def _fetch_ohlcv_sync(
-        self, symbol: str, interval: str = "1d", limit: int = 180
+    def _fetch_ohlcv_exchange_sync(
+        self, exchange_id: str, symbol: str, interval: str = "1d", limit: int = 180
     ) -> list[OhlcvBar]:
-        client = self._get_client(self.primary)
+        client = self._get_client(exchange_id)
         market = self._resolve_market(client, symbol)
         tf_map = {
             "1s": "1s",
@@ -209,11 +220,12 @@ class MultiExchangeCcxt:
             raw = client.fetch_ohlcv(market, timeframe=timeframe, limit=limit)
         except Exception as exc:
             if interval == "1s":
-                logger.info("1s OHLCV unavailable on %s (%s) — building from trades", self.primary, exc)
-                return self._ohlcv_from_trades_sync(client, market, limit=limit)
-            raise
+                logger.info("1s OHLCV unavailable on %s (%s) — building from trades", exchange_id, exc)
+                return self._ohlcv_from_trades_sync(client, market, limit=limit, exchange_id=exchange_id)
+            logger.warning("OHLCV %s %s %s failed: %s", exchange_id, symbol, interval, exc)
+            return []
         if not raw and interval == "1s":
-            return self._ohlcv_from_trades_sync(client, market, limit=limit)
+            return self._ohlcv_from_trades_sync(client, market, limit=limit, exchange_id=exchange_id)
         bars: list[OhlcvBar] = []
         for row in raw:
             bars.append(
@@ -224,13 +236,15 @@ class MultiExchangeCcxt:
                     low=float(row[3]),
                     close=float(row[4]),
                     volume=float(row[5]),
-                    source=f"ccxt:{self.primary}",
+                    source=f"ccxt:{exchange_id}",
                     data_quality=DataQuality.high,
                 )
             )
         return bars
 
-    def _ohlcv_from_trades_sync(self, client, market: str, limit: int = 300) -> list[OhlcvBar]:
+    def _ohlcv_from_trades_sync(
+        self, client, market: str, limit: int = 300, exchange_id: str = "unknown"
+    ) -> list[OhlcvBar]:
         """Synthesize 1s candles from recent trades when exchange has no 1s klines."""
         trades = client.fetch_trades(market, limit=min(1000, max(limit * 3, 200)))
         buckets: dict[int, list] = {}
@@ -257,7 +271,7 @@ class MultiExchangeCcxt:
                     low=min(prices),
                     close=prices[-1],
                     volume=vol,
-                    source=f"ccxt:{self.primary}:trades1s",
+                    source=f"ccxt:{exchange_id}:trades1s",
                     data_quality=DataQuality.medium,
                 )
             )
@@ -265,9 +279,69 @@ class MultiExchangeCcxt:
             bars = bars[-limit:]
         return bars
 
+    @staticmethod
+    def _aggregate_ohlcv_series(series: list[list[OhlcvBar]]) -> list[OhlcvBar]:
+        """Merge same-timestamp candles: median OHLC, sum volume."""
+        by_ts: dict[datetime, list[OhlcvBar]] = {}
+        for bars in series:
+            for b in bars:
+                by_ts.setdefault(b.ts, []).append(b)
+        out: list[OhlcvBar] = []
+        for ts in sorted(by_ts.keys()):
+            group = by_ts[ts]
+            opens = [g.open for g in group]
+            highs = [g.high for g in group]
+            lows = [g.low for g in group]
+            closes = [g.close for g in group]
+            vols = [g.volume for g in group]
+            sources = sorted({(g.source or "").split(":")[1] for g in group if g.source})
+            src = "agg:" + "+".join(sources) if sources else "agg:binance+bybit"
+            out.append(
+                OhlcvBar(
+                    ts=ts,
+                    open=float(median(opens)),
+                    high=max(highs),
+                    low=min(lows),
+                    close=float(median(closes)),
+                    volume=float(sum(vols)),
+                    source=src,
+                    data_quality=DataQuality.high if len(group) >= 2 else DataQuality.medium,
+                )
+            )
+        return out
+
+    def _fetch_ohlcv_sync(
+        self, symbol: str, interval: str = "1d", limit: int = 180
+    ) -> list[OhlcvBar]:
+        """Aggregated OHLCV across Binance + Bybit (chart data)."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=len(self.exchange_ids) or 2) as pool:
+            futures = [
+                pool.submit(self._fetch_ohlcv_exchange_sync, ex, symbol, interval, limit)
+                for ex in self.exchange_ids
+            ]
+            series = [f.result() for f in futures]
+        series = [s for s in series if s]
+        if not series:
+            return []
+        if len(series) == 1:
+            return series[0][-limit:] if limit else series[0]
+        agg = self._aggregate_ohlcv_series(series)
+        return agg[-limit:] if limit else agg
+
+    def _fetch_ohlcv_execution_sync(
+        self, symbol: str, interval: str = "1d", limit: int = 180
+    ) -> list[OhlcvBar]:
+        """Single-venue OHLCV for the bot (Bybit)."""
+        return self._fetch_ohlcv_exchange_sync(
+            self.execution, symbol, interval=interval, limit=limit
+        )
+
     async def fetch_ohlcv(
         self, symbol: str, interval: str = "1d", lookback: str = "6mo"
     ) -> list[OhlcvBar]:
+        """Chart OHLCV — aggregated Binance + Bybit."""
         limit_map = {
             "1s": 300,
             "1m": 240,
@@ -280,13 +354,37 @@ class MultiExchangeCcxt:
             "1wk": 260,
         }
         limit = limit_map.get(interval, 180)
-        return await asyncio.to_thread(self._fetch_ohlcv_sync, _normalize_market(symbol), interval, limit)
+        return await asyncio.to_thread(
+            self._fetch_ohlcv_sync, _normalize_market(symbol), interval, limit
+        )
+
+    async def fetch_ohlcv_execution(
+        self, symbol: str, interval: str = "1d", lookback: str = "6mo"
+    ) -> list[OhlcvBar]:
+        """Bot OHLCV — Bybit only."""
+        limit_map = {
+            "1s": 300,
+            "1m": 240,
+            "5m": 288,
+            "15m": 288,
+            "30m": 240,
+            "1h": 336,
+            "4h": 180,
+            "1d": 365,
+            "1wk": 260,
+        }
+        limit = limit_map.get(interval, 180)
+        return await asyncio.to_thread(
+            self._fetch_ohlcv_execution_sync, _normalize_market(symbol), interval, limit
+        )
 
     async def overview(self, symbols: list[str] | None = None) -> dict:
         symbols = symbols or list(DEFAULT_CRYPTO_SYMBOLS)
         quotes = await asyncio.gather(*[self.fetch_aggregated_quote(s) for s in symbols])
         return {
             "primary_exchange": self.primary,
+            "execution_exchange": self.execution,
+            "chart_mode": "aggregated",
             "exchanges": self.exchange_ids,
             "as_of": datetime.now(timezone.utc).isoformat(),
             "quotes": [self._agg_to_dict(q) for q in quotes],
@@ -295,6 +393,8 @@ class MultiExchangeCcxt:
     def health(self) -> dict:
         return {
             "primary_exchange": self.primary,
+            "execution_exchange": self.execution,
+            "chart_mode": "aggregated",
             "exchanges": self.exchange_ids,
             "default_symbols": list(DEFAULT_CRYPTO_SYMBOLS),
         }
@@ -304,7 +404,8 @@ class MultiExchangeCcxt:
         return {
             "symbol": q.symbol,
             "primary_exchange": q.primary_exchange,
-            "primary_price": q.primary_price,
+            "execution_price": q.primary_price,
+            "primary_price": q.median_price if q.median_price is not None else q.primary_price,
             "median_price": q.median_price,
             "best_bid": q.best_bid,
             "best_ask": q.best_ask,
@@ -329,16 +430,19 @@ class MultiExchangeCcxt:
         }
 
     def as_quote_snapshot(self, q: AggregatedCryptoQuote) -> QuoteSnapshot:
-        price = q.primary_price if q.primary_price is not None else q.median_price
+        # Prefer aggregated median for analytics; bot should call execution venue explicitly.
+        price = q.median_price if q.median_price is not None else q.primary_price
         return QuoteSnapshot(
             symbol=q.symbol,
             price=price,
             change_pct=q.change_pct,
-            source=f"ccxt:{q.primary_exchange}+multi",
+            source="ccxt:agg:binance+bybit",
             data_quality=DataQuality.high if price is not None else DataQuality.unavailable,
             as_of=q.as_of,
             fundamentals={
                 "median_price": q.median_price,
+                "execution_exchange": self.execution,
+                "execution_price": q.primary_price,
                 "best_bid": q.best_bid,
                 "best_ask": q.best_ask,
                 "spread_pct": q.spread_pct,
@@ -364,7 +468,7 @@ async def persist_crypto_ohlcv(
     interval: str = "1d",
     limit: int = 180,
 ) -> dict:
-    """Fetch OHLCV from primary exchange and upsert into price_bars."""
+    """Fetch aggregated OHLCV (Binance + Bybit) and upsert into price_bars."""
     from sqlalchemy import select
 
     from app.models import AssetClass, PriceBar
@@ -382,7 +486,7 @@ async def persist_crypto_ohlcv(
         symbol=sym,
         name=base,
         asset_class=AssetClass.crypto,
-        exchange=market.primary,
+        exchange=market.execution,
         currency=sym.split("/")[-1] if "/" in sym else "USDT",
         is_discovery=True,
     )
@@ -434,6 +538,8 @@ async def persist_crypto_ohlcv(
         "instrument_id": inst.id,
         "interval": interval,
         "primary_exchange": market.primary,
+        "execution_exchange": market.execution,
+        "chart_mode": "aggregated",
         "bars": len(bars),
         "inserted": inserted,
         "updated": updated,

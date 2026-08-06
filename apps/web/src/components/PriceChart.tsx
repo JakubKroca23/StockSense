@@ -38,6 +38,10 @@ type Props = {
   className?: string;
   /** Overlay SMA20 / SMA50 on candles. */
   showMa?: boolean;
+  /** Incremental updates (live WS) — avoid fitContent thrash. */
+  realtime?: boolean;
+  /** Show seconds on time axis (1s / 1m charts). */
+  secondsVisible?: boolean;
 };
 
 function toUnix(ts: string): Time {
@@ -70,7 +74,25 @@ function smaSeries(
   return out;
 }
 
-export function PriceChart({ bars, height, levels = [], className, showMa = true }: Props) {
+function toCandle(b: ChartBar): CandlestickData {
+  return {
+    time: toUnix(b.ts),
+    open: b.open,
+    high: b.high,
+    low: b.low,
+    close: b.close,
+  };
+}
+
+export function PriceChart({
+  bars,
+  height,
+  levels = [],
+  className,
+  showMa = true,
+  realtime = false,
+  secondsVisible = false,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -78,6 +100,7 @@ export function PriceChart({ bars, height, levels = [], className, showMa = true
   const sma20Ref = useRef<ISeriesApi<"Line"> | null>(null);
   const sma50Ref = useRef<ISeriesApi<"Line"> | null>(null);
   const linesRef = useRef<IPriceLine[]>([]);
+  const prevSigRef = useRef<string>("");
   const fill = height == null;
 
   useEffect(() => {
@@ -128,7 +151,7 @@ export function PriceChart({ bars, height, levels = [], className, showMa = true
       timeScale: {
         borderColor: line,
         timeVisible: true,
-        secondsVisible: false,
+        secondsVisible,
         rightOffset: 4,
         barSpacing: 8,
         minBarSpacing: 2,
@@ -186,6 +209,7 @@ export function PriceChart({ bars, height, levels = [], className, showMa = true
     volumeRef.current = volume;
     sma20Ref.current = sma20;
     sma50Ref.current = sma50;
+    prevSigRef.current = "";
 
     const ro = new ResizeObserver((entries) => {
       if (!containerRef.current || !chartRef.current) return;
@@ -208,7 +232,7 @@ export function PriceChart({ bars, height, levels = [], className, showMa = true
       sma50Ref.current = null;
       linesRef.current = [];
     };
-  }, [height, fill]);
+  }, [height, fill, secondsVisible]);
 
   useEffect(() => {
     if (!seriesRef.current || !volumeRef.current || !chartRef.current) return;
@@ -217,18 +241,13 @@ export function PriceChart({ bars, height, levels = [], className, showMa = true
       volumeRef.current.setData([]);
       sma20Ref.current?.setData([]);
       sma50Ref.current?.setData([]);
+      prevSigRef.current = "";
       return;
     }
 
     const candleData: CandlestickData[] = bars
       .filter((b) => b.open != null && b.high != null && b.low != null && b.close != null)
-      .map((b) => ({
-        time: toUnix(b.ts),
-        open: b.open,
-        high: b.high,
-        low: b.low,
-        close: b.close,
-      }))
+      .map(toCandle)
       .sort((a, b) => Number(a.time) - Number(b.time));
 
     const seen = new Set<number>();
@@ -243,40 +262,73 @@ export function PriceChart({ bars, height, levels = [], className, showMa = true
     const ok = styles.getPropertyValue("--ok").trim() || "#5dde8a";
     const danger = styles.getPropertyValue("--danger").trim() || "#ff6b7a";
 
-    const volumeData = bars
-      .map((b) => {
-        const up = b.close >= b.open;
-        return {
-          time: toUnix(b.ts),
-          value: b.volume ?? 0,
-          color: up ? hexAlpha(ok, 0.35) : hexAlpha(danger, 0.35),
-        };
-      })
-      .filter((d) => seen.has(Number(d.time)))
-      .sort((a, b) => Number(a.time) - Number(b.time));
+    const last = bars[bars.length - 1];
+    const histKey = `${unique.length}:${unique[0] ? Number(unique[0].time) : 0}:${
+      unique.length > 1 ? Number(unique[unique.length - 2].time) : 0
+    }`;
+    const lastSig = last
+      ? `${toUnix(last.ts)}:${last.open}:${last.high}:${last.low}:${last.close}:${last.volume ?? 0}`
+      : "";
+    const prev = prevSigRef.current;
+    const prevHist = prev.split("|")[0] || "";
+    const canUpdate = Boolean(realtime && prev && prevHist === histKey && unique.length > 0);
 
-    const vSeen = new Set<number>();
-    const uniqueVol = volumeData.filter((d) => {
-      const t = Number(d.time);
-      if (vSeen.has(t)) return false;
-      vSeen.add(t);
-      return true;
-    });
-
-    seriesRef.current.setData(unique);
-    volumeRef.current.setData(uniqueVol);
-
-    if (showMa && sma20Ref.current && sma50Ref.current) {
-      const closes = unique.map((c) => ({ time: c.time, value: c.close }));
-      sma20Ref.current.setData(smaSeries(closes, 20));
-      sma50Ref.current.setData(smaSeries(closes, 50));
+    if (canUpdate) {
+      const lastBar = unique[unique.length - 1];
+      const up = lastBar.close >= lastBar.open;
+      seriesRef.current.update(lastBar);
+      volumeRef.current.update({
+        time: lastBar.time,
+        value: last?.volume ?? 0,
+        color: up ? hexAlpha(ok, 0.35) : hexAlpha(danger, 0.35),
+      });
+      if (showMa && sma20Ref.current && sma50Ref.current && unique.length >= 20) {
+        const closes = unique.map((c) => ({ time: c.time, value: c.close }));
+        const s20 = smaSeries(closes, 20);
+        const s50 = smaSeries(closes, 50);
+        if (s20.length) sma20Ref.current.update(s20[s20.length - 1]);
+        if (s50.length) sma50Ref.current.update(s50[s50.length - 1]);
+      }
     } else {
-      sma20Ref.current?.setData([]);
-      sma50Ref.current?.setData([]);
+      const volumeData = bars
+        .map((b) => {
+          const up = b.close >= b.open;
+          return {
+            time: toUnix(b.ts),
+            value: b.volume ?? 0,
+            color: up ? hexAlpha(ok, 0.35) : hexAlpha(danger, 0.35),
+          };
+        })
+        .filter((d) => seen.has(Number(d.time)))
+        .sort((a, b) => Number(a.time) - Number(b.time));
+
+      const vSeen = new Set<number>();
+      const uniqueVol = volumeData.filter((d) => {
+        const t = Number(d.time);
+        if (vSeen.has(t)) return false;
+        vSeen.add(t);
+        return true;
+      });
+
+      seriesRef.current.setData(unique);
+      volumeRef.current.setData(uniqueVol);
+
+      if (showMa && sma20Ref.current && sma50Ref.current) {
+        const closes = unique.map((c) => ({ time: c.time, value: c.close }));
+        sma20Ref.current.setData(smaSeries(closes, 20));
+        sma50Ref.current.setData(smaSeries(closes, 50));
+      } else {
+        sma20Ref.current?.setData([]);
+        sma50Ref.current?.setData([]);
+      }
+
+      if (!realtime || !prev) {
+        chartRef.current.timeScale().fitContent();
+      }
     }
 
-    chartRef.current.timeScale().fitContent();
-  }, [bars, showMa]);
+    prevSigRef.current = `${histKey}|${lastSig}`;
+  }, [bars, showMa, realtime]);
 
   useEffect(() => {
     if (!seriesRef.current) return;
