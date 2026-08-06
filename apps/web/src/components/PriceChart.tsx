@@ -210,9 +210,12 @@ export function PriceChart({
 
     const theme = themeRef.current || readTheme();
     const opacityMul = heatOpacityRef.current;
-    const leftPad = 4;
+    const leftPad = 2;
     const rightPad = 52;
     const usableW = Math.max(40, w - leftPad - rightPad);
+    // Ordinary liquidity lives in a thin strip left of the price scale
+    const stripW = Math.max(36, Math.min(usableW * 0.2, 88));
+    const stripX = leftPad + usableW - stripW;
 
     const sizes: number[] = [];
     for (const lvl of raw) {
@@ -221,11 +224,14 @@ export function PriceChart({
     }
     if (!sizes.length) return;
     sizes.sort((a, b) => a - b);
+    const pct = (p: number) =>
+      sizes[Math.min(sizes.length - 1, Math.floor(sizes.length * p))] || sizes[sizes.length - 1];
     const maxSize = sizes[sizes.length - 1];
-    // Drop noisy small levels — keep roughly top half / meaningful liquidity
-    const noiseFloor = sizes[Math.floor(sizes.length * 0.62)] || maxSize * 0.15;
-    const wallCut = sizes[Math.floor(sizes.length * 0.9)] || maxSize * 0.55;
-    const strongCut = sizes[Math.floor(sizes.length * 0.97)] || maxSize * 0.8;
+    // Aggressive noise cut so mid levels don't blur into one mass
+    const noiseFloor = pct(0.7) || maxSize * 0.12;
+    const midCut = pct(0.82);
+    const wallCut = pct(0.93);
+    const srCut = pct(0.98);
 
     const levels = raw.filter((l) => l.bid >= noiseFloor || l.ask >= noiseFloor);
     if (!levels.length) return;
@@ -239,47 +245,59 @@ export function PriceChart({
       return ((topP - price) / (topP - botP)) * h;
     };
 
-    // Discrete intensity steps — less visual noise than continuous log
-    const stepped = (size: number): number => {
-      const t = size / maxSize;
-      if (t >= 0.85) return 0.9;
-      if (t >= 0.55) return 0.62;
-      if (t >= 0.3) return 0.38;
-      return 0.18;
+    // Hard steps — neighboring sizes stay visually distinct
+    const tier = (size: number): 0 | 1 | 2 | 3 | 4 => {
+      if (size >= srCut) return 4;
+      if (size >= wallCut) return 3;
+      if (size >= midCut) return 2;
+      if (size >= noiseFloor) return 1;
+      return 0;
     };
 
-    let cellH = Math.max(2, Math.min(9, h * 0.009));
+    let gapH = 1.2;
     if (levels.length >= 2) {
       const sorted = [...levels].map((l) => l.price).sort((a, b) => a - b);
       const midIdx = Math.floor(sorted.length / 2);
       const y0 = priceToY(sorted[midIdx]);
       const y1 = priceToY(sorted[Math.min(midIdx + 1, sorted.length - 1)]);
       if (y0 != null && y1 != null) {
-        cellH = Math.max(1.5, Math.min(11, Math.abs(y1 - y0) * 0.92));
+        gapH = Math.max(0.9, Math.min(3.2, Math.abs(y1 - y0) * 0.55));
       }
     }
 
-    // Live snapshot only: horizontal bands across the full chart (no scrolling history)
+    const drawThinLine = (y: number, x0: number, x1: number, color: string, a: number, th: number) => {
+      ctx.fillStyle = hexAlpha(color, a);
+      ctx.fillRect(x0, y - th / 2, Math.max(0, x1 - x0), th);
+    };
+
     for (const lvl of levels) {
       const y = priceToY(lvl.price);
       if (y == null || y < -4 || y > h + 4) continue;
 
       const drawSide = (size: number, color: string) => {
         if (size < noiseFloor) return;
-        const step = stepped(size);
-        const isWall = size >= wallCut;
-        const isStrong = size >= strongCut;
-        // Band width grows with size from the right (depth feel) but always spans meaningfully
-        const widthFrac = isStrong ? 1 : isWall ? 0.78 : 0.28 + step * 0.45;
-        const bandW = usableW * widthFrac;
-        const x = leftPad + (usableW - bandW);
-        const a = Math.min(0.95, step * opacityMul * (isStrong ? 1.15 : isWall ? 1.05 : 0.85));
-        const hh = isStrong ? cellH + 2.2 : isWall ? cellH + 1.1 : cellH;
-        ctx.fillStyle = hexAlpha(color, a);
-        ctx.fillRect(x, y - hh / 2, bandW, hh);
-        if (isWall) {
-          ctx.fillStyle = hexAlpha(color, Math.min(0.95, 0.5 * opacityMul + 0.15));
-          ctx.fillRect(leftPad, y - 0.7, usableW, 1.4);
+        const t = tier(size);
+        if (t === 0) return;
+
+        // Right-strip depth blob (all visible levels)
+        const stripFrac = t === 1 ? 0.35 : t === 2 ? 0.62 : t === 3 ? 0.88 : 1;
+        const bandW = stripW * stripFrac;
+        const bandA =
+          (t === 1 ? 0.22 : t === 2 ? 0.4 : t === 3 ? 0.58 : 0.78) * opacityMul;
+        const bandH = t >= 3 ? Math.min(2.4, gapH * 0.9) : Math.min(2, gapH * 0.75);
+        ctx.fillStyle = hexAlpha(color, Math.min(0.92, bandA));
+        ctx.fillRect(stripX + (stripW - bandW), y - bandH / 2, bandW, bandH);
+
+        // Truly large walls / S-R: thin line across the whole plot
+        if (t >= 3) {
+          const lineA =
+            (t === 4 ? 0.72 : 0.42) * opacityMul + (t === 4 ? 0.12 : 0.06);
+          const lineTh = t === 4 ? 0.85 : 0.55;
+          drawThinLine(y, leftPad, leftPad + usableW, color, Math.min(0.95, lineA), lineTh);
+          // Soft accent tip at the price scale so the level stays readable
+          if (t === 4) {
+            drawThinLine(y, stripX, leftPad + usableW, color, Math.min(0.95, 0.55 * opacityMul + 0.2), 1.15);
+          }
         }
       };
 
