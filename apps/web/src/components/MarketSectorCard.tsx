@@ -18,13 +18,7 @@ function fmtPct(n: number | null | undefined): string {
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
 }
 
-export function MarketSectorCard({
-  sector,
-  aiPending = false,
-}: {
-  sector: MarketSector;
-  aiPending?: boolean;
-}) {
+export function MarketSectorCard({ sector }: { sector: MarketSector }) {
   const biasClass = BIAS_CLASS[sector.bias] || "";
   const avgClass =
     sector.avg_change_pct != null && sector.avg_change_pct >= 0
@@ -50,12 +44,6 @@ export function MarketSectorCard({
         </div>
       </div>
       <p className="market-sector__summary">{sector.summary}</p>
-      {aiPending && (
-        <p className="market-sector__ai-pending">Generuji AI souhrn…</p>
-      )}
-      {sector.summary_source === "llm" && !aiPending && (
-        <p className="market-sector__ai-tag">AI · Gemini</p>
-      )}
 
       <div className="market-sector__chart">
         <div className="home-chart-title mb-2">{sector.chart_symbol} · denní</div>
