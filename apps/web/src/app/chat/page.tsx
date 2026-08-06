@@ -66,7 +66,6 @@ function ChatPageInner() {
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [hint, setHint] = useState<string | null>(null);
-  const [showSaved, setShowSaved] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const active = useMemo(
@@ -188,7 +187,6 @@ function ChatPageInner() {
       body: JSON.stringify({ status: saved ? "open" : "saved" }),
     });
     setSessions((prev) => sortSessions(prev.map((s) => (s.id === activeId ? updated : s))));
-    if (!saved) setShowSaved(true);
   }
 
   async function closeActive() {
@@ -265,125 +263,112 @@ function ChatPageInner() {
 
   return (
     <div className="chat-page">
-      <div className="chat-stack space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="advisor-card__eyebrow">Analýzy</p>
-          <button
-            type="button"
-            className={`btn text-xs px-2 py-1 ${showSaved ? "btn-primary" : ""}`}
-            onClick={() => setShowSaved((v) => !v)}
-          >
-            Uložené{savedSessions.length ? ` (${savedSessions.length})` : ""}
-          </button>
-        </div>
-
-        {showSaved && (
-          <section className="card chat-saved-panel p-3 space-y-2">
-            <p className="text-xs muted uppercase tracking-wide">Uložené</p>
-            {loading && <p className="muted text-sm">Načítám…</p>}
-            {!loading && savedSessions.length === 0 && (
-              <p className="muted text-sm">Zatím žádné uložené analýzy. Ulož chat diskétou.</p>
-            )}
-            <div className="chat-saved-grid">
-              {savedSessions.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  className={`chat-session-item ${
-                    activeId === s.id ? "chat-session-item--active" : ""
-                  }`}
-                  onClick={() => void loadSession(s)}
-                >
-                  <span className="chat-session-item__title">{s.title}</span>
-                  {s.symbol && <span className="chat-session-item__meta">{s.symbol}</span>}
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {hint && <p className="text-sm text-[var(--warn)]">{hint}</p>}
-
-        <div className={`chat-window ${messages.length > 0 ? "chat-window--tall" : ""}`}>
-          <div className="chat-titlebar">
-            <div className="chat-titlebar__left min-w-0">
-              <span className="chat-titlebar__title truncate">{windowTitle}</span>
-              {active?.symbol && <span className="badge">{active.symbol}</span>}
-            </div>
-            <div className="chat-titlebar__center">
-              <button
-                type="button"
-                className="btn btn-primary chat-titlebar__new"
-                disabled={busy}
-                onClick={() => void startNewChat()}
-              >
-                Nový chat
-              </button>
-            </div>
-            <div className="chat-titlebar__actions">
-              <button
-                type="button"
-                className={`chat-icon-btn chat-icon-btn--save ${saved ? "is-active" : ""}`}
-                disabled={busy || !activeId}
-                title={saved ? "Odebrat z uložených" : "Uložit"}
-                aria-label={saved ? "Odebrat z uložených" : "Uložit"}
-                onClick={() => void saveActive()}
-              >
-                <SaveIcon filled={saved} />
-              </button>
-              <button
-                type="button"
-                className="chat-icon-btn chat-icon-btn--close"
-                disabled={busy || !activeId}
-                title="Zavřít a smazat"
-                aria-label="Zavřít a smazat"
-                onClick={() => void closeActive()}
-              >
-                <CloseIcon />
-              </button>
-            </div>
-          </div>
-
-          <div className="chat-window__body space-y-4 overflow-y-auto p-4">
-            {messages.length === 0 && (
-              <p className="muted text-sm">Napiš otázku k analýze.</p>
-            )}
-
-            {messages.map((m) =>
-              m.role === "user" ? (
-                <div key={m.id} className="chat-user-bubble rise">
-                  {m.content}
-                </div>
-              ) : (
-                <AdvisorReplyCard
-                  key={m.id}
-                  content={m.content}
-                  symbol={symbol || active?.symbol || undefined}
-                  createdAt={m.created_at}
-                />
-              )
-            )}
-
-            {busy && <div className="advisor-card p-4 muted text-sm">Připravuji analýzu…</div>}
-            <div ref={bottomRef} />
-          </div>
-
-          <form
-            onSubmit={onSubmit}
-            className="chat-window__composer grid gap-2 sm:grid-cols-[180px_1fr_auto] p-3"
-          >
-            <SymbolAutocomplete value={symbol} onChange={setSymbol} placeholder="Symbol" />
-            <input
-              className="input"
-              placeholder="Napiš otázku…"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              required
-            />
-            <button className="btn btn-primary" disabled={busy}>
-              {busy ? "…" : "Odeslat"}
+      <div className="chat-layout">
+        <aside className="card chat-sidebar p-3 space-y-2">
+          <p className="advisor-card__eyebrow">Uložené</p>
+          {loading && <p className="muted text-sm">Načítám…</p>}
+          {!loading && savedSessions.length === 0 && (
+            <p className="muted text-sm">Zatím žádné uložené analýzy. Ulož chat diskétou.</p>
+          )}
+          {savedSessions.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className={`chat-session-item ${
+                activeId === s.id ? "chat-session-item--active" : ""
+              }`}
+              onClick={() => void loadSession(s)}
+            >
+              <span className="chat-session-item__title">{s.title}</span>
+              {s.symbol && <span className="chat-session-item__meta">{s.symbol}</span>}
             </button>
-          </form>
+          ))}
+        </aside>
+
+        <div className="chat-main space-y-3 min-w-0">
+          {hint && <p className="text-sm text-[var(--warn)]">{hint}</p>}
+
+          <div className={`chat-window ${messages.length > 0 ? "chat-window--tall" : ""}`}>
+            <div className="chat-titlebar">
+              <div className="chat-titlebar__left min-w-0">
+                <span className="chat-titlebar__title truncate">{windowTitle}</span>
+                {active?.symbol && <span className="badge">{active.symbol}</span>}
+              </div>
+              <div className="chat-titlebar__center">
+                <button
+                  type="button"
+                  className="btn btn-primary chat-titlebar__new"
+                  disabled={busy}
+                  onClick={() => void startNewChat()}
+                >
+                  Nový chat
+                </button>
+              </div>
+              <div className="chat-titlebar__actions">
+                <button
+                  type="button"
+                  className={`chat-icon-btn chat-icon-btn--save ${saved ? "is-active" : ""}`}
+                  disabled={busy || !activeId}
+                  title={saved ? "Odebrat z uložených" : "Uložit"}
+                  aria-label={saved ? "Odebrat z uložených" : "Uložit"}
+                  onClick={() => void saveActive()}
+                >
+                  <SaveIcon filled={saved} />
+                </button>
+                <button
+                  type="button"
+                  className="chat-icon-btn chat-icon-btn--close"
+                  disabled={busy || !activeId}
+                  title="Zavřít a smazat"
+                  aria-label="Zavřít a smazat"
+                  onClick={() => void closeActive()}
+                >
+                  <CloseIcon />
+                </button>
+              </div>
+            </div>
+
+            <div className="chat-window__body space-y-4 overflow-y-auto p-4">
+              {messages.length === 0 && (
+                <p className="muted text-sm">Napiš otázku k analýze.</p>
+              )}
+
+              {messages.map((m) =>
+                m.role === "user" ? (
+                  <div key={m.id} className="chat-user-bubble rise">
+                    {m.content}
+                  </div>
+                ) : (
+                  <AdvisorReplyCard
+                    key={m.id}
+                    content={m.content}
+                    symbol={symbol || active?.symbol || undefined}
+                    createdAt={m.created_at}
+                  />
+                )
+              )}
+
+              {busy && <div className="advisor-card p-4 muted text-sm">Připravuji analýzu…</div>}
+              <div ref={bottomRef} />
+            </div>
+
+            <form
+              onSubmit={onSubmit}
+              className="chat-window__composer grid gap-2 sm:grid-cols-[180px_1fr_auto] p-3"
+            >
+              <SymbolAutocomplete value={symbol} onChange={setSymbol} placeholder="Symbol" />
+              <input
+                className="input"
+                placeholder="Napiš otázku…"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                required
+              />
+              <button className="btn btn-primary" disabled={busy}>
+                {busy ? "…" : "Odeslat"}
+              </button>
+            </form>
+          </div>
         </div>
       </div>
     </div>

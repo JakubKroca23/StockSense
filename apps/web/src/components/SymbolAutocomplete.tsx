@@ -20,6 +20,8 @@ type Props = {
   required?: boolean;
   className?: string;
   id?: string;
+  /** Kde otevřít nápovědu — default nahoru (nad pole) */
+  placement?: "top" | "bottom";
 };
 
 export function SymbolAutocomplete({
@@ -29,6 +31,7 @@ export function SymbolAutocomplete({
   required,
   className = "input",
   id,
+  placement = "top",
 }: Props) {
   const listId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -87,7 +90,7 @@ export function SymbolAutocomplete({
   }
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className="symbol-autocomplete relative">
       <input
         id={id}
         className={className}
@@ -120,7 +123,9 @@ export function SymbolAutocomplete({
         <ul
           id={listId}
           role="listbox"
-          className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-xl border border-[var(--line)] bg-[var(--bg-elevated)] shadow-lg"
+          className={`symbol-autocomplete__list absolute z-[80] max-h-64 w-full overflow-auto rounded-xl border border-[var(--line)] bg-[var(--bg-elevated)] shadow-lg ${
+            placement === "top" ? "symbol-autocomplete__list--top" : "symbol-autocomplete__list--bottom"
+          }`}
         >
           {items.map((item, idx) => (
             <li key={`${item.symbol}-${item.source || "x"}`}>
