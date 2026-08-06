@@ -96,6 +96,19 @@ export function IconAlerts(p: IconProps) {
   );
 }
 
+/** Zábava — hry */
+export function IconFun(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect x="4" y="5" width="16" height="14" rx="2.5" />
+      <circle cx="9" cy="11" r="1.4" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="11" r="1.4" fill="currentColor" stroke="none" />
+      <path d="M8 15.2c.9.9 2.1 1.3 4 1.3s3.1-.4 4-1.3" />
+      <path d="M12 5V3.5" />
+    </Svg>
+  );
+}
+
 /** Nastavení */
 export function IconSettings(p: IconProps) {
   return (
@@ -113,5 +126,6 @@ export const navIcons = {
   "/chat": IconAnalysis,
   "/reports": IconReports,
   "/alerts": IconAlerts,
+  "/zabava": IconFun,
   "/settings": IconSettings,
 } as const;

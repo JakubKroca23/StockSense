@@ -18,6 +18,7 @@ const links = [
   { href: "/chat", label: "Analýza" },
   { href: "/reports", label: "Reporty" },
   { href: "/alerts", label: "Alerty" },
+  { href: "/zabava", label: "Zábava" },
   { href: "/settings", label: "Nastavení" },
 ] as const;
 
