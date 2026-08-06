@@ -67,6 +67,16 @@ export function IconTips(p: IconProps) {
   );
 }
 
+/** CryptoSense — mince / crypto */
+export function IconCrypto(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="12" cy="12" r="8.2" />
+      <path d="M12 7.2v9.6M9.2 9.2c.7-.55 1.55-.85 2.8-.85 1.7 0 2.85.7 2.85 1.95S13.7 12.2 12 12.2 9.15 12.85 9.15 14.1c0 1.25 1.2 2 2.95 2 1.25 0 2.15-.35 2.8-.95" />
+    </Svg>
+  );
+}
+
 /** Nastavení */
 export function IconSettings(p: IconProps) {
   return (
@@ -81,4 +91,5 @@ export const navIcons = {
   "/": IconHome,
   "/tips": IconTips,
   "/chat": IconAnalysis,
+  "/cryptosense": IconCrypto,
 } as const;

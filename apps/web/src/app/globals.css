@@ -2346,3 +2346,54 @@ textarea {
   }
 }
 
+
+/* —— CryptoSense —— */
+.crypto-board {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+.crypto-board__head {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+}
+
+.crypto-ex-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.crypto-ex-table th,
+.crypto-ex-table td {
+  padding: 0.35rem 0.4rem;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.crypto-ex-table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.crypto-ex-table tr.is-bad td {
+  color: var(--danger);
+  opacity: 0.85;
+}
+
+.crypto-roadmap {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}

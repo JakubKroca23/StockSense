@@ -502,6 +502,15 @@ class CompositeMarketData:
 
     async def fetch_quote(self, symbol: str, asset_class: AssetClass) -> QuoteSnapshot:
         if asset_class == AssetClass.crypto:
+            try:
+                from app.services.crypto_market import get_crypto_market
+
+                agg = await get_crypto_market().fetch_aggregated_quote(symbol)
+                snap = get_crypto_market().as_quote_snapshot(agg)
+                if snap.price is not None:
+                    return snap
+            except Exception:
+                pass
             q = await self.ccxt.fetch_quote(symbol, asset_class)
             if q.price is not None:
                 return q

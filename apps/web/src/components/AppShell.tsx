@@ -11,6 +11,7 @@ const links = [
   { href: "/", label: "Home" },
   { href: "/tips", label: "Tipy" },
   { href: "/chat", label: "Analýza" },
+  { href: "/cryptosense", label: "CryptoSense" },
 ] as const;
 
 function isActive(pathname: string, href: string) {

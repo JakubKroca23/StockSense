@@ -1849,3 +1849,39 @@ async def mark_alert_read(
     row.is_read = True
     await db.commit()
     return {"ok": True}
+
+
+# —— CryptoSense ——
+
+
+@router.get("/crypto/health")
+async def crypto_health(user: AuthUser = Depends(get_current_user)):
+    from app.services.crypto_market import get_crypto_market
+
+    return get_crypto_market().health()
+
+
+@router.get("/crypto/overview")
+async def crypto_overview(
+    symbols: str | None = None,
+    user: AuthUser = Depends(get_current_user),
+):
+    """Live multi-exchange quotes for CryptoSense board."""
+    from app.services.crypto_market import get_crypto_market
+
+    parsed = [s.strip() for s in (symbols or "").split(",") if s.strip()] or None
+    return await get_crypto_market().overview(parsed)
+
+
+@router.get("/crypto/quote")
+async def crypto_quote(
+    symbol: str,
+    user: AuthUser = Depends(get_current_user),
+):
+    from app.services.crypto_market import get_crypto_market
+
+    if not symbol.strip():
+        raise HTTPException(400, "Chybí symbol")
+    agg = await get_crypto_market().fetch_aggregated_quote(symbol)
+    return get_crypto_market()._agg_to_dict(agg)
+
