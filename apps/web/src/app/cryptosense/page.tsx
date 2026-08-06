@@ -148,6 +148,7 @@ export default function CryptoSensePage() {
   const [orderBook, setOrderBook] = useState<OrderBookData | null>(null);
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [heatmap, setHeatmap] = useState<HeatmapColumn[]>([]);
+  const [metaOpen, setMetaOpen] = useState(true);
   const heatSymRef = useRef(selected);
 
   const loadOverview = useCallback(async () => {
@@ -202,40 +203,46 @@ export default function CryptoSensePage() {
     }
   }, []);
 
-  const loadOrderBook = useCallback(async (symbol: string, accumulateHeat: boolean) => {
-    try {
-      const res = await apiFetch<OrderBookData>(
-        `/crypto/orderbook?symbol=${encodeURIComponent(symbol)}&limit=40`
-      );
-      setOrderBook(res);
-      if (!accumulateHeat) return;
-
-      const priceMap = new Map<number, { bid: number; ask: number }>();
-      for (const lvl of res.bids.slice(0, 28)) {
-        priceMap.set(lvl.price, { bid: lvl.amount, ask: 0 });
-      }
-      for (const lvl of res.asks.slice(0, 28)) {
-        const cur = priceMap.get(lvl.price) || { bid: 0, ask: 0 };
-        cur.ask = lvl.amount;
-        priceMap.set(lvl.price, cur);
-      }
-      const levels = [...priceMap.entries()].map(([price, v]) => ({
-        price,
-        bid: v.bid,
-        ask: v.ask,
-      }));
-      const col: HeatmapColumn = { ts: Date.now(), levels };
-      setHeatmap((prev) => {
-        const sameSym = heatSymRef.current === symbol;
-        const base = sameSym ? prev : [];
-        heatSymRef.current = symbol;
-        const next = [...base, col];
-        return next.length > 90 ? next.slice(next.length - 90) : next;
-      });
-    } catch {
-      /* keep last book */
+  const pushHeatColumn = useCallback((res: OrderBookData, symbol: string) => {
+    const priceMap = new Map<number, { bid: number; ask: number }>();
+    for (const lvl of res.bids.slice(0, 36)) {
+      priceMap.set(lvl.price, { bid: lvl.amount, ask: 0 });
     }
+    for (const lvl of res.asks.slice(0, 36)) {
+      const cur = priceMap.get(lvl.price) || { bid: 0, ask: 0 };
+      cur.ask = lvl.amount;
+      priceMap.set(lvl.price, cur);
+    }
+    const levels = [...priceMap.entries()].map(([price, v]) => ({
+      price,
+      bid: v.bid,
+      ask: v.ask,
+    }));
+    if (!levels.length) return;
+    const col: HeatmapColumn = { ts: Date.now(), levels };
+    setHeatmap((prev) => {
+      const sameSym = heatSymRef.current === symbol;
+      const base = sameSym ? prev : [];
+      heatSymRef.current = symbol;
+      const next = [...base, col];
+      return next.length > 120 ? next.slice(next.length - 120) : next;
+    });
   }, []);
+
+  const loadOrderBook = useCallback(
+    async (symbol: string, accumulateHeat: boolean) => {
+      try {
+        const res = await apiFetch<OrderBookData>(
+          `/crypto/orderbook?symbol=${encodeURIComponent(symbol)}&limit=40`
+        );
+        setOrderBook(res);
+        if (accumulateHeat) pushHeatColumn(res, symbol);
+      } catch {
+        /* keep last book */
+      }
+    },
+    [pushHeatColumn]
+  );
 
   useEffect(() => {
     void loadOverview();
@@ -419,24 +426,8 @@ export default function CryptoSensePage() {
 
       <div className="cryptosense__desk">
         <section className="card instrument-chart cryptosense__chart">
-          <div className="cryptosense__toolbar">
-            <div className="cryptosense__tf chart-controls__group" role="group" aria-label="Timeframe">
-              {TIMEFRAMES.map((tf) => (
-                <button
-                  key={tf.id}
-                  type="button"
-                  className={`chart-chip chart-chip--soft ${interval === tf.id ? "is-active" : ""}`}
-                  disabled={chartBusy}
-                  onClick={() => setIntervalTf(tf.id)}
-                >
-                  {tf.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
           <div className="instrument-chart__bar cryptosense__meta">
-            <div className="flex flex-wrap items-center gap-2 text-xs muted">
+            <div className="cryptosense__meta-row">
               {activeQuote && (
                 <>
                   <span className="text-[var(--text)] font-semibold text-sm">
@@ -446,6 +437,18 @@ export default function CryptoSensePage() {
                     {fmtPct(activeQuote.change_pct)}
                   </span>
                   <span className={`badge ${live ? "long" : ""}`}>{live ? "LIVE" : "offline"}</span>
+                </>
+              )}
+              <button
+                type="button"
+                className={`chart-chip chart-chip--soft ${metaOpen ? "is-active" : ""}`}
+                onClick={() => setMetaOpen((v) => !v)}
+                title={metaOpen ? "Sbalit data grafu" : "Rozbalit data grafu"}
+              >
+                {metaOpen ? "Data ▾" : "Data ▸"}
+              </button>
+              {metaOpen && (
+                <>
                   <span className="badge">{exchanges.join(" + ")}</span>
                   <span className="badge">agg OHLCV</span>
                   <span className="badge">exec {execution}</span>
@@ -454,10 +457,29 @@ export default function CryptoSensePage() {
                   )}
                 </>
               )}
+              <div className="cryptosense__tf chart-controls__group" role="group" aria-label="Timeframe">
+                {TIMEFRAMES.map((tf) => (
+                  <button
+                    key={tf.id}
+                    type="button"
+                    className={`chart-chip chart-chip--soft ${interval === tf.id ? "is-active" : ""}`}
+                    disabled={chartBusy}
+                    onClick={() => setIntervalTf(tf.id)}
+                  >
+                    {tf.label}
+                  </button>
+                ))}
+              </div>
               <button
                 type="button"
                 className={`chart-chip chart-chip--soft ${showHeatmap ? "is-active" : ""}`}
-                onClick={() => setShowHeatmap((v) => !v)}
+                onClick={() => {
+                  setShowHeatmap((v) => {
+                    const next = !v;
+                    if (next && orderBook) pushHeatColumn(orderBook, selected);
+                    return next;
+                  });
+                }}
                 title="Bookmap-stylová heatmapa likvidity z order booku"
               >
                 Heatmap

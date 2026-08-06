@@ -281,10 +281,18 @@ async def home(user: AuthUser = Depends(get_current_user), db: AsyncSession = De
 
 @router.get("/markets/overview")
 async def markets_overview_endpoint(user: AuthUser = Depends(get_current_user)):
-    """Sector cards for homepage — crypto / stocks / commodities."""
+    """Sector cards for homepage — crypto / stocks / commodities (fast, no LLM)."""
     from app.services.markets_overview import markets_overview
 
     return await markets_overview()
+
+
+@router.get("/markets/overview/ai")
+async def markets_overview_ai_endpoint(user: AuthUser = Depends(get_current_user)):
+    """Gemini AI summaries for homepage sector cards (slower; call after overview)."""
+    from app.services.markets_overview import markets_overview_ai
+
+    return await markets_overview_ai()
 
 
 @router.get("/settings", response_model=UserSettingsOut)
@@ -1428,13 +1436,16 @@ async def chat(
     if payload.symbol:
         session.symbol = payload.symbol.upper()
 
+    bot_mode = (payload.mode or "").lower() == "bot"
     context_parts: list[str] = []
     if payload.screen_context and payload.screen_context.strip():
         context_parts.append(
             "KONTEXT OBRAZOVKY (to, co uživatel právě vidí):\n"
             + payload.screen_context.strip()[:4000]
         )
-    if payload.symbol:
+
+    # Sense bot: keep it fast — screen context is enough. Full chat still pulls market data.
+    if payload.symbol and not bot_mode:
         from app.models import AssetClass, Instrument, MacroSnapshot
 
         inst = (
@@ -1580,20 +1591,21 @@ async def chat(
                 except Exception:
                     pass
 
-    tips = (
-        await db.execute(
-            select(Tip)
-            .where(Tip.user_id == user.id, Tip.is_active.is_(True))
-            .options(selectinload(Tip.instrument))
-            .order_by(Tip.score.desc())
-            .limit(5)
-        )
-    ).scalars().all()
-    if tips:
-        context_parts.append(
-            "Top tipy: "
-            + "; ".join(f"{t.instrument.symbol}:{t.action.value}:{t.score}" for t in tips)
-        )
+    if not bot_mode:
+        tips = (
+            await db.execute(
+                select(Tip)
+                .where(Tip.user_id == user.id, Tip.is_active.is_(True))
+                .options(selectinload(Tip.instrument))
+                .order_by(Tip.score.desc())
+                .limit(5)
+            )
+        ).scalars().all()
+        if tips:
+            context_parts.append(
+                "Top tipy: "
+                + "; ".join(f"{t.instrument.symbol}:{t.action.value}:{t.score}" for t in tips)
+            )
 
     user_msg = ChatMessage(
         user_id=user.id, session_id=session.id, role="user", content=payload.message
@@ -1605,8 +1617,11 @@ async def chat(
         "Nový chat",
         "Starší konverzace",
     }
+    # Keep Sense bot session titled
+    if bot_mode and (needs_title or "sense bot" not in (session.title or "").lower()):
+        session.title = "Sense bot"
+        needs_title = False
 
-    bot_mode = (payload.mode or "").lower() == "bot"
     if bot_mode:
         user_prompt = (
             f"{payload.message}\n\n"
@@ -1637,6 +1652,9 @@ async def chat(
         session.title = title
     else:
         answer = await answer_coro
+
+    if not (answer or "").strip():
+        answer = "Teď nedokážu odpovědět (Gemini). Zkus to znovu za chvíli."
 
     assistant = ChatMessage(
         user_id=user.id, session_id=session.id, role="assistant", content=answer

@@ -176,6 +176,8 @@ export function PriceChart({
 
     const w = wrap.clientWidth;
     const h = wrap.clientHeight;
+    if (w < 8 || h < 8) return;
+
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
       canvas.width = Math.floor(w * dpr);
@@ -193,8 +195,8 @@ export function PriceChart({
     if (!cols.length) return;
 
     const theme = themeRef.current || readTheme();
-    const colW = 5;
-    const maxCols = Math.max(8, Math.min(cols.length, Math.floor((w * 0.42) / colW)));
+    const colW = Math.max(4, Math.min(7, Math.floor(w * 0.012)));
+    const maxCols = Math.max(12, Math.min(cols.length, Math.floor((w * 0.55) / colW)));
     const visible = cols.slice(-maxCols);
     let maxSize = 0;
     for (const col of visible) {
@@ -204,21 +206,30 @@ export function PriceChart({
     }
     if (maxSize <= 0) return;
 
-    const rightPad = 8;
+    const topP = series.coordinateToPrice(0);
+    const botP = series.coordinateToPrice(h);
+    const priceToY = (price: number): number | null => {
+      const y = series.priceToCoordinate(price);
+      if (y != null) return y;
+      if (topP == null || botP == null || topP === botP) return null;
+      return ((topP - price) / (topP - botP)) * h;
+    };
+
+    const rightPad = 56;
     visible.forEach((col, i) => {
       const x = w - rightPad - (visible.length - i) * colW;
       for (const lvl of col.levels) {
-        const y = series.priceToCoordinate(lvl.price);
-        if (y == null) continue;
-        const bidA = Math.min(0.72, (lvl.bid / maxSize) * 0.72);
-        const askA = Math.min(0.72, (lvl.ask / maxSize) * 0.72);
-        const cellH = Math.max(2, Math.min(8, h * 0.012));
-        if (bidA > 0.04) {
-          ctx.fillStyle = hexAlpha(theme.up, bidA);
+        const y = priceToY(lvl.price);
+        if (y == null || y < -20 || y > h + 20) continue;
+        const bidA = Math.min(0.85, (lvl.bid / maxSize) * 0.9);
+        const askA = Math.min(0.85, (lvl.ask / maxSize) * 0.9);
+        const cellH = Math.max(3, Math.min(14, h * 0.018));
+        if (bidA > 0.03) {
+          ctx.fillStyle = hexAlpha(theme.up, Math.max(0.18, bidA));
           ctx.fillRect(x, y - cellH / 2, colW - 1, cellH);
         }
-        if (askA > 0.04) {
-          ctx.fillStyle = hexAlpha(theme.down, askA);
+        if (askA > 0.03) {
+          ctx.fillStyle = hexAlpha(theme.down, Math.max(0.18, askA));
           ctx.fillRect(x, y - cellH / 2, colW - 1, cellH);
         }
       }
@@ -273,7 +284,7 @@ export function PriceChart({
         borderVisible: false,
         timeVisible: true,
         secondsVisible,
-        rightOffset: showHeatmap ? 18 : 6,
+        rightOffset: 8,
         barSpacing: 9,
         minBarSpacing: 3,
         fixLeftEdge: false,
@@ -375,7 +386,14 @@ export function PriceChart({
       linesRef.current = [];
       themeRef.current = null;
     };
-  }, [height, fill, secondsVisible, showHeatmap]);
+  }, [height, fill, secondsVisible]);
+
+  useEffect(() => {
+    chartRef.current?.timeScale().applyOptions({
+      rightOffset: showHeatmap ? 22 : 8,
+    });
+    drawHeatmap();
+  }, [showHeatmap]);
 
   useEffect(() => {
     drawHeatmap();

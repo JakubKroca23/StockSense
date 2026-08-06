@@ -22,7 +22,7 @@ class Settings(BaseSettings):
 
     ollama_base_url: str = "http://ollama:11434"
     ollama_model: str = "qwen2.5:1.5b"
-    cloud_llm_provider: str = "anthropic"  # anthropic | openai | gemini | none
+    cloud_llm_provider: str = "gemini"  # gemini only
     anthropic_api_key: str = ""
     openai_api_key: str = ""
     gemini_api_key: str = ""

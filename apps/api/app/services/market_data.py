@@ -508,7 +508,9 @@ class CompositeMarketData:
         except Exception:
             return {}
 
-    async def fetch_quote(self, symbol: str, asset_class: AssetClass) -> QuoteSnapshot:
+    async def fetch_quote(
+        self, symbol: str, asset_class: AssetClass, *, fundamentals: bool = True
+    ) -> QuoteSnapshot:
         if asset_class == AssetClass.crypto:
             try:
                 from app.services.crypto_market import get_crypto_market
@@ -537,6 +539,9 @@ class CompositeMarketData:
                 price_q = stooq_q
             else:
                 return stooq_q
+
+        if not fundamentals:
+            return price_q
 
         # Merge yfinance fundamentals onto fast price quote (Yahoo chart has none).
         fund = await self.fetch_fundamentals(symbol, asset_class)

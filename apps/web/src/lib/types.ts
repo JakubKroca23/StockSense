@@ -137,6 +137,7 @@ export interface MarketSector {
   bias: string;
   bias_label: string;
   summary: string;
+  summary_source?: string;
   avg_change_pct: number | null;
   benchmarks: MarketBenchmark[];
   composition: MarketCompositionSlice[];

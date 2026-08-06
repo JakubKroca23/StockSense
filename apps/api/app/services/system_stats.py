@@ -166,8 +166,9 @@ async def collect_system_stats(db: AsyncSession) -> dict:
         },
         "crypto": crypto,
         "llm": {
-            "ollama_model": cfg.ollama_model,
-            "cloud_provider": cfg.cloud_llm_provider,
+            "provider": "gemini",
+            "cloud_provider": "gemini",
+            "ollama_model": None,
             "scheduler": cfg.enable_scheduler,
             "tip_scoring": cfg.enable_tip_scoring,
         },

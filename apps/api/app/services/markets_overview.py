@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 
 from app.models import AssetClass, DataQuality
 from app.services.market_data import market_data
 
 logger = logging.getLogger(__name__)
+
+_CACHE: dict[str, tuple[float, dict]] = {}
+_CACHE_TTL_SEC = 45.0
 
 SECTORS: dict[str, dict] = {
     "crypto": {
@@ -95,7 +99,8 @@ async def _one_benchmark(item: dict) -> dict:
     sym = item["symbol"]
     ac = item["asset_class"]
     try:
-        quote = await market_data.fetch_quote(sym, ac)
+        # Homepage needs price/% only — skip slow yfinance .info fundamentals.
+        quote = await market_data.fetch_quote(sym, ac, fundamentals=False)
         return {
             "symbol": sym,
             "name": item["name"],
@@ -143,7 +148,6 @@ async def build_sector(sector_id: str) -> dict:
     changes = [float(b["change_pct"]) for b in benches if b.get("change_pct") is not None]
     bias_key, bias_label, summary = _bias_from_changes(changes)
 
-    # Donut: relative weight by abs move (fallback equal)
     weights: list[dict] = []
     abs_moves = [abs(float(b["change_pct"])) for b in benches if b.get("change_pct") is not None]
     if abs_moves and sum(abs_moves) > 0:
@@ -196,30 +200,53 @@ async def build_sector(sector_id: str) -> dict:
     }
 
 
-async def _enrich_summary_with_llm(sector: dict) -> dict:
-    from app.services.llm import narrate_market_sector
-
-    try:
-        sector["summary"] = await narrate_market_sector(sector)
-        sector["summary_source"] = "llm"
-    except Exception as exc:
-        logger.warning("LLM sector summary %s failed: %s", sector.get("id"), exc)
-        sector["summary_source"] = "rules"
-    return sector
-
-
 async def markets_overview() -> dict:
-    crypto, stocks, commodities = await asyncio.gather(
+    """Fast sector cards — rule summaries only (AI via /markets/overview/ai)."""
+    now = time.monotonic()
+    hit = _CACHE.get("overview")
+    if hit and now - hit[0] < _CACHE_TTL_SEC:
+        return hit[1]
+
+    sectors = await asyncio.gather(
         build_sector("crypto"),
         build_sector("stocks"),
         build_sector("commodities"),
     )
-    sectors = await asyncio.gather(
-        _enrich_summary_with_llm(crypto),
-        _enrich_summary_with_llm(stocks),
-        _enrich_summary_with_llm(commodities),
+    payload = {
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "sectors": list(sectors),
+    }
+    _CACHE["overview"] = (now, payload)
+    return payload
+
+
+async def _enrich_summary_with_llm(sector: dict) -> dict:
+    from app.services.llm import narrate_market_sector
+
+    out = dict(sector)
+    try:
+        out["summary"] = await narrate_market_sector(out)
+        out["summary_source"] = "llm"
+    except Exception as exc:
+        logger.warning("LLM sector summary %s failed: %s", out.get("id"), exc)
+        out["summary_source"] = "rules"
+    return out
+
+
+async def markets_overview_ai() -> dict:
+    """Gemini AI blurbs for already-built (cached) sector cards."""
+    base = await markets_overview()
+    enriched = await asyncio.gather(
+        *[_enrich_summary_with_llm(dict(s)) for s in base["sectors"]]
     )
     return {
         "as_of": datetime.now(timezone.utc).isoformat(),
-        "sectors": list(sectors),
+        "sectors": [
+            {
+                "id": s["id"],
+                "summary": s["summary"],
+                "summary_source": s.get("summary_source", "llm"),
+            }
+            for s in enriched
+        ],
     }

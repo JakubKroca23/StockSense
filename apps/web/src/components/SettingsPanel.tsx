@@ -37,7 +37,8 @@ type SystemStats = {
     error?: string;
   };
   llm: {
-    ollama_model: string;
+    provider?: string;
+    ollama_model: string | null;
     cloud_provider: string;
     scheduler: boolean;
     tip_scoring: boolean;
@@ -219,9 +220,7 @@ export function SettingsPanel({ open, onClose }: Props) {
                       : ""}
                   </span>
                   <span>·</span>
-                  <span>
-                    LLM {stats.llm.cloud_provider}/{stats.llm.ollama_model}
-                  </span>
+                  <span>LLM Gemini</span>
                 </div>
 
                 {stats.tables.length > 0 && (

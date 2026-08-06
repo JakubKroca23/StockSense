@@ -7,22 +7,63 @@ import { useScreenContext } from "@/components/ScreenContext";
 import { cacheSnapshot, readSnapshot } from "@/lib/offline";
 import { MarketsOverview } from "@/lib/types";
 
+type AiSummaries = {
+  as_of: string;
+  sectors: { id: string; summary: string; summary_source: string }[];
+};
+
 export default function HomePage() {
   const { setScreen } = useScreenContext();
   const [data, setData] = useState<MarketsOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
   const [cachedAt, setCachedAt] = useState<string | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiDone, setAiDone] = useState(false);
 
-  async function load() {
+  async function loadAi(signal?: AbortSignal) {
+    setAiBusy(true);
+    setAiDone(false);
+    try {
+      const ai = await apiFetch<AiSummaries>("/markets/overview/ai");
+      if (signal?.aborted) return;
+      setData((prev) => {
+        if (!prev) return prev;
+        const byId = new Map(ai.sectors.map((s) => [s.id, s]));
+        return {
+          ...prev,
+          sectors: prev.sectors.map((s) => {
+            const hit = byId.get(s.id);
+            if (!hit) return s;
+            return {
+              ...s,
+              summary: hit.summary,
+              summary_source: hit.summary_source || "llm",
+            };
+          }),
+        };
+      });
+      setAiDone(true);
+    } catch {
+      if (!signal?.aborted) setAiDone(false);
+    } finally {
+      if (!signal?.aborted) setAiBusy(false);
+    }
+  }
+
+  async function load(signal?: AbortSignal) {
     try {
       const overview = await apiFetch<MarketsOverview>("/markets/overview");
+      if (signal?.aborted) return;
       setData(overview);
       setError(null);
       setOffline(false);
       setCachedAt(null);
+      setAiDone(false);
       await cacheSnapshot("markets_overview_v1", overview);
+      void loadAi(signal);
     } catch (err) {
+      if (signal?.aborted) return;
       const snap = await readSnapshot<MarketsOverview>("markets_overview_v1");
       if (snap) {
         setData(snap.data);
@@ -36,10 +77,14 @@ export default function HomePage() {
   }
 
   useEffect(() => {
-    void load();
-    const onOnline = () => void load();
+    const ac = new AbortController();
+    void load(ac.signal);
+    const onOnline = () => void load(ac.signal);
     window.addEventListener("online", onOnline);
-    return () => window.removeEventListener("online", onOnline);
+    return () => {
+      ac.abort();
+      window.removeEventListener("online", onOnline);
+    };
   }, []);
 
   useEffect(() => {
@@ -73,6 +118,12 @@ export default function HomePage() {
         <p className="muted text-sm">
           Stručný stav krypta, akcií a komodit podle hlavních benchmarků.
         </p>
+        {aiBusy && (
+          <p className="market-home__ai-status">Generuji AI souhrny (Gemini)…</p>
+        )}
+        {aiDone && !aiBusy && (
+          <p className="market-home__ai-status is-done">AI souhrny připraveny</p>
+        )}
       </div>
 
       {offline && (
@@ -86,7 +137,11 @@ export default function HomePage() {
       {data && (
         <div className="market-sectors-grid">
           {data.sectors.map((sector) => (
-            <MarketSectorCard key={sector.id} sector={sector} />
+            <MarketSectorCard
+              key={sector.id}
+              sector={sector}
+              aiPending={aiBusy && sector.summary_source !== "llm"}
+            />
           ))}
         </div>
       )}

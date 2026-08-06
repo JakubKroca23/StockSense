@@ -66,20 +66,12 @@ def _conf_plain(conf: float) -> str:
 def llm_status_note() -> str:
     """Human-readable why AI narrative may be missing."""
     s = get_settings()
-    parts: list[str] = []
-    has_cloud = bool(s.gemini_api_key or s.anthropic_api_key or s.openai_api_key)
-    if not has_cloud:
-        parts.append("v .env chybí cloudový API klíč (Gemini / Anthropic / OpenAI)")
-    else:
-        parts.append(
-            f"cloud provider „{s.cloud_llm_provider or 'auto'}“ neodpověděl "
-            "(kvóta, neplatný klíč, síť nebo model)"
-        )
-    parts.append(
-        f"lokální Ollama na {s.ollama_base_url} neodpověděla "
-        f"(kontejner vypnutý, nebo model „{s.ollama_model}“ není stažený)"
+    if not s.gemini_api_key:
+        return "v .env chybí GEMINI_API_KEY"
+    return (
+        f"Gemini („{s.cloud_llm_provider or 'gemini'}“) neodpověděl "
+        "(kvóta, neplatný klíč, síť nebo model)"
     )
-    return " · ".join(parts)
 
 
 def _parse_tip_line(line: str) -> dict | None:
@@ -257,160 +249,118 @@ def _fallback_narrative(context: str) -> str:
 
 
 async def _ollama_chat(messages: list[dict], model: str | None = None) -> str:
-    settings = get_settings()
-    payload = {
-        "model": model or settings.ollama_model,
-        "messages": messages,
-        "stream": False,
-    }
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        try:
-            resp = await client.post(f"{settings.ollama_base_url.rstrip('/')}/api/chat", json=payload)
-            if resp.status_code != 200:
-                logger.warning(
-                    "Ollama HTTP %s: %s",
-                    resp.status_code,
-                    (resp.text or "")[:200],
-                )
-                return ""
-            return resp.json().get("message", {}).get("content", "") or ""
-        except Exception as exc:
-            logger.warning("Ollama nedostupné (%s): %s", settings.ollama_base_url, exc)
-            return ""
+    """Deprecated — Ollama disabled; StockSense uses Gemini only."""
+    return ""
 
 
 async def _anthropic_chat(messages: list[dict]) -> str:
-    settings = get_settings()
-    if not settings.anthropic_api_key:
-        return ""
-    system = SYSTEM_CS
-    anth_messages = []
-    for m in messages:
-        if m["role"] == "system":
-            system = m["content"]
-        else:
-            anth_messages.append({"role": m["role"], "content": m["content"]})
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        resp = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": settings.anthropic_api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": "claude-sonnet-4-20250514",
-                "max_tokens": 1200,
-                "system": system,
-                "messages": anth_messages,
-            },
-        )
-        if resp.status_code != 200:
-            logger.warning("Anthropic HTTP %s: %s", resp.status_code, (resp.text or "")[:200])
-            return ""
-        content = resp.json().get("content", [])
-        return "".join(part.get("text", "") for part in content if part.get("type") == "text")
+    return ""
 
 
 async def _openai_chat(messages: list[dict]) -> str:
-    settings = get_settings()
-    if not settings.openai_api_key:
-        return ""
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        resp = await client.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {settings.openai_api_key}"},
-            json={"model": "gpt-4o-mini", "messages": messages, "temperature": 0.3},
-        )
-        if resp.status_code != 200:
-            logger.warning("OpenAI HTTP %s: %s", resp.status_code, (resp.text or "")[:200])
-            return ""
-        return resp.json()["choices"][0]["message"]["content"]
+    return ""
 
 
 async def _gemini_chat(messages: list[dict]) -> str:
     settings = get_settings()
     if not settings.gemini_api_key:
+        logger.warning("Gemini: chybí GEMINI_API_KEY")
         return ""
-    prompt = "\n\n".join(f"{m['role'].upper()}: {m['content']}" for m in messages)
+    # Prefer 2.5 — free-tier quota on 2.0 / flash-latest is often exhausted (429).
     models = (
-        "gemini-flash-latest",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
         "gemini-2.0-flash",
         "gemini-2.0-flash-lite",
-        "gemini-1.5-flash-latest",
+        "gemini-flash-latest",
     )
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    system_bits: list[str] = []
+    user_bits: list[str] = []
+    for m in messages:
+        role = (m.get("role") or "user").lower()
+        content = (m.get("content") or "").strip()
+        if not content:
+            continue
+        if role == "system":
+            system_bits.append(content)
+        else:
+            user_bits.append(f"{role.upper()}: {content}" if role != "user" else content)
+    prompt = "\n\n".join(user_bits) if user_bits else "Ahoj"
+    body: dict = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.4,
+            "maxOutputTokens": 2048,
+        },
+    }
+    if system_bits:
+        body["systemInstruction"] = {"parts": [{"text": "\n\n".join(system_bits)}]}
+
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        last_err = ""
         for model in models:
             url = (
                 "https://generativelanguage.googleapis.com/v1beta/models/"
                 f"{model}:generateContent?key={settings.gemini_api_key}"
             )
-            resp = await client.post(url, json={"contents": [{"parts": [{"text": prompt}]}]})
+            try:
+                resp = await client.post(url, json=body)
+            except Exception as exc:
+                last_err = str(exc)[:180]
+                logger.warning("Gemini %s request failed: %s", model, last_err)
+                continue
             if resp.status_code != 200:
-                logger.warning(
-                    "Gemini %s HTTP %s: %s", model, resp.status_code, (resp.text or "")[:180]
-                )
+                last_err = (resp.text or "")[:180]
+                logger.warning("Gemini %s HTTP %s: %s", model, resp.status_code, last_err)
                 continue
-            candidates = resp.json().get("candidates", [])
+            data = resp.json()
+            candidates = data.get("candidates") or []
             if not candidates:
+                # Often blocked by safety / empty — try next model
+                last_err = str(data.get("promptFeedback") or data)[:180]
+                logger.warning("Gemini %s no candidates: %s", model, last_err)
                 continue
-            parts = candidates[0].get("content", {}).get("parts", [])
-            text = "".join(p.get("text", "") for p in parts)
+            parts = (candidates[0].get("content") or {}).get("parts") or []
+            text = "".join(p.get("text", "") for p in parts if isinstance(p, dict)).strip()
             if text:
                 return text
+            last_err = f"empty parts finish={candidates[0].get('finishReason')}"
+            logger.warning("Gemini %s empty text: %s", model, last_err)
+    logger.warning("Gemini all models failed: %s", last_err[:200] if last_err else "unknown")
     return ""
 
 
 async def _cloud_chat(messages: list[dict]) -> str:
-    settings = get_settings()
-    provider = (settings.cloud_llm_provider or "none").lower()
-
-    order: list = []
-    if provider == "anthropic" and settings.anthropic_api_key:
-        order.append(_anthropic_chat)
-    elif provider == "openai" and settings.openai_api_key:
-        order.append(_openai_chat)
-    elif provider == "gemini" and settings.gemini_api_key:
-        order.append(_gemini_chat)
-
-    for fn, key in (
-        (_gemini_chat, settings.gemini_api_key),
-        (_anthropic_chat, settings.anthropic_api_key),
-        (_openai_chat, settings.openai_api_key),
-    ):
-        if key and fn not in order:
-            order.append(fn)
-
-    for fn in order:
-        text = await fn(messages)
-        if text:
-            return text
-    return ""
+    """Gemini only."""
+    return await _gemini_chat(messages)
 
 
 async def llm_complete(user_prompt: str, *, task: LLMTask = LLMTask.light, context: str = "") -> str:
+    system = SYSTEM_CS
+    if task == LLMTask.light:
+        system = (
+            "Jsi Sense / StockSense — stručný tržní rádce. "
+            "Odpovídej česky, věcně, bez zbytečného markdownu. "
+            "Nikdy nevymýšlej čísla: používej jen data z kontextu. "
+            "Finální rozhodnutí dělá uživatel."
+        )
     messages = [
-        {"role": "system", "content": SYSTEM_CS},
+        {"role": "system", "content": system},
         {
             "role": "user",
             "content": f"Kontext (data):\n{context}\n\nÚkol:\n{user_prompt}" if context else user_prompt,
         },
     ]
-    if task == LLMTask.light:
-        text = await _ollama_chat(messages)
-        if text:
-            return text
-        text = await _cloud_chat(messages)
-        if not text:
-            logger.warning("LLM fallback (light): %s", llm_status_note())
-        return text or _fallback_narrative(context or user_prompt)
-
-    text = await _cloud_chat(messages)
-    if text:
-        return text
-    text = await _ollama_chat(messages)
+    text = await _gemini_chat(messages)
     if not text:
-        logger.warning("LLM fallback (heavy): %s", llm_status_note())
+        logger.warning("LLM fallback (%s): %s", task.value, llm_status_note())
+        if task == LLMTask.light and context:
+            note = llm_status_note()
+            return (
+                "Teď nedostávám odpověď od Gemini, takže jdu z pravidel / kontextu obrazovky.\n\n"
+                f"{(context.strip()[:900] + ('…' if len(context.strip()) > 900 else ''))}\n\n"
+                f"_({note})_"
+            )
     return text or _fallback_narrative(context or user_prompt)
 
 
@@ -449,7 +399,7 @@ async def generate_chat_title(message: str, symbol: str | None = None) -> str:
             ),
         },
     ]
-    text = await _ollama_chat(messages)
+    text = await _gemini_chat(messages)
     if not text:
         text = await _cloud_chat(messages)
     title = _sanitize_chat_title(text, symbol)
@@ -558,9 +508,7 @@ async def narrate_market_sector(sector: dict) -> str:
         },
     ]
     try:
-        text = await _ollama_chat(messages)
-        if not text:
-            text = await _cloud_chat(messages)
+        text = await _gemini_chat(messages)
         return _clean_sector_blurb(text, fallback)
     except Exception as exc:
         logger.warning("narrate_market_sector failed: %s", exc)

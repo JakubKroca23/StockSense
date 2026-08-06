@@ -1068,23 +1068,6 @@ textarea {
   );
 }
 
-.cryptosense__toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 0.55rem;
-  flex-shrink: 0;
-  padding: 0.1rem 0.05rem 0.2rem;
-}
-
-.cryptosense__tf {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 0.25rem;
-  flex-shrink: 0;
-}
-
 .crypto-spark {
   display: block;
   flex-shrink: 0;
@@ -1100,6 +1083,23 @@ textarea {
 .cryptosense__meta {
   padding-top: 0.05rem;
   justify-content: flex-start;
+}
+
+.cryptosense__meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.cryptosense__tf {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-left: auto;
 }
 
 .crypto-chart-stage {
@@ -1532,6 +1532,7 @@ textarea {
   opacity: 0;
   transition: opacity 0.2s ease;
   border-radius: 12px;
+  z-index: 4;
 }
 
 .price-chart__heat.is-on {
@@ -2989,6 +2990,18 @@ textarea {
   letter-spacing: -0.02em;
 }
 
+.market-home__ai-status {
+  margin: 0.15rem 0 0;
+  font-size: 0.78rem;
+  color: var(--sense);
+  font-weight: 600;
+}
+
+.market-home__ai-status.is-done {
+  color: var(--muted);
+  font-weight: 500;
+}
+
 .market-sectors-grid {
   display: grid;
   gap: 1rem;
@@ -3066,6 +3079,21 @@ textarea {
   font-size: 0.88rem;
   line-height: 1.45;
   color: var(--muted);
+}
+
+.market-sector__ai-pending {
+  margin: 0.25rem 0 0;
+  font-size: 0.72rem;
+  color: var(--sense);
+  font-weight: 600;
+}
+
+.market-sector__ai-tag {
+  margin: 0.2rem 0 0;
+  font-size: 0.65rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--sense) 75%, var(--muted));
 }
 
 .market-sector__chart {
@@ -3191,7 +3219,15 @@ textarea {
   flex-direction: column;
   padding: 0;
   overflow: hidden;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--bg-elevated) 94%, #ffffff),
+    color-mix(in srgb, #0a101c 96%, var(--bg-elevated))
+  );
+  backdrop-filter: blur(22px) saturate(1.2);
+  -webkit-backdrop-filter: blur(22px) saturate(1.2);
+  border-color: color-mix(in srgb, var(--sense) 18%, var(--glass-border));
 }
 
 .sense-bot__head {
