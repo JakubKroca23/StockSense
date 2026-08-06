@@ -300,9 +300,6 @@ export function HomeOverview({
                 {briefingBusy ? "Generuji…" : "Vygenerovat teď"}
               </button>
             )}
-            <Link href="/reports" className="btn text-xs px-2 py-1">
-              Celý report
-            </Link>
           </div>
         </div>
         {briefingAt && (

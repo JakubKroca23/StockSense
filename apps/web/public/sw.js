@@ -71,7 +71,7 @@ self.addEventListener("fetch", (event) => {
 });
 
 self.addEventListener("push", (event) => {
-  let data = { title: "StockSense", body: "Nový alert", url: "/alerts" };
+  let data = { title: "StockSense", body: "Nový alert", url: "/" };
   try {
     data = { ...data, ...(event.data ? event.data.json() : {}) };
   } catch {
@@ -80,7 +80,7 @@ self.addEventListener("push", (event) => {
   event.waitUntil(
     self.registration.showNotification(data.title || "StockSense", {
       body: data.body || "",
-      data: { url: data.url || "/alerts" },
+      data: { url: data.url || "/" },
       icon: "/icon-192.png",
       badge: "/icon-192.png",
     })
@@ -89,7 +89,7 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const path = (event.notification.data && event.notification.data.url) || "/alerts";
+  const path = (event.notification.data && event.notification.data.url) || "/";
   const target = new URL(path, self.location.origin).href;
   event.waitUntil(
     clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {

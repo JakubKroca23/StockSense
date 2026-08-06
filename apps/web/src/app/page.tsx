@@ -420,27 +420,18 @@ export default function HomePage() {
         <section className="card p-5 rise">
           <div className="flex items-center justify-between mb-3">
             <h2 className="display text-2xl">Portfolio</h2>
-            <Link href="/portfolio" className="btn text-xs px-2 py-1">
-              Spravovat
-            </Link>
           </div>
           <div>
             {(data?.portfolio || []).length === 0 && (
-              <p className="muted text-sm mb-3">
-                Zatím prázdné —{" "}
-                <Link href="/portfolio" className="text-[var(--accent)]">
-                  přidej pozice
-                </Link>
-                .
-              </p>
+              <p className="muted text-sm mb-3">Zatím prázdné.</p>
             )}
             {(data?.portfolio || []).slice(0, 6).map((p) => (
               <PositionRow key={p.id} p={p} />
             ))}
             {(data?.portfolio || []).length > 6 && (
-              <Link href="/portfolio" className="muted text-sm mt-2 inline-block">
-                +{(data?.portfolio.length || 0) - 6} dalších →
-              </Link>
+              <p className="muted text-sm mt-2">
+                +{(data?.portfolio.length || 0) - 6} dalších
+              </p>
             )}
           </div>
         </section>

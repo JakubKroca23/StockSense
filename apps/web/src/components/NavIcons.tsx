@@ -39,27 +39,6 @@ export function IconHome(p: IconProps) {
   );
 }
 
-/** Portfolio — aktiva / držba */
-export function IconPortfolio(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <rect x="3.5" y="7" width="17" height="12.5" rx="2" />
-      <path d="M8.5 7V5.8A2.3 2.3 0 0 1 10.8 3.5h2.4A2.3 2.3 0 0 1 15.5 5.8V7" />
-      <path d="M3.5 12h17" />
-      <circle cx="12" cy="15.8" r="1.35" fill="currentColor" stroke="none" />
-    </Svg>
-  );
-}
-
-/** Watchlist — sledované tickery */
-export function IconWatchlist(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <path d="M12 3.8 13.95 9.1h5.45l-4.4 3.35 1.65 5.35L12 14.7 7.35 17.8l1.65-5.35-4.4-3.35h5.45L12 3.8Z" />
-    </Svg>
-  );
-}
-
 /** Analýza / Sense — oko z loga aplikace */
 export function IconAnalysis({ size = NAV_ICON_SIZE, className = "" }: IconProps) {
   const h = Math.round(size * (108 / 229));
@@ -71,41 +50,6 @@ export function IconAnalysis({ size = NAV_ICON_SIZE, className = "" }: IconProps
       height={Math.max(h, 11)}
       className={`nav-item__icon nav-icon__eye ${className}`}
     />
-  );
-}
-
-/** Reporty — shrnutí / dokument */
-export function IconReports(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <path d="M7 3.5h7.2L19 8.3V20a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 20V5A1.5 1.5 0 0 1 7 3.5Z" />
-      <path d="M14.2 3.5V8.3H19" />
-      <path d="M8.5 12h7M8.5 15.5h7M8.5 19h4.2" />
-    </Svg>
-  );
-}
-
-/** Alerty — upozornění */
-export function IconAlerts(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <path d="M6.2 17.2h11.6" />
-      <path d="M7.4 17.2a4.4 4.4 0 0 1-1-2.7V11a5.6 5.6 0 1 1 11.2 0v3.5c0 .97.34 1.9.96 2.7" />
-      <path d="M10 17.2a2 2 0 0 0 4 0" />
-    </Svg>
-  );
-}
-
-/** Zábava — hry */
-export function IconFun(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <rect x="4" y="5" width="16" height="14" rx="2.5" />
-      <circle cx="9" cy="11" r="1.4" fill="currentColor" stroke="none" />
-      <circle cx="15" cy="11" r="1.4" fill="currentColor" stroke="none" />
-      <path d="M8 15.2c.9.9 2.1 1.3 4 1.3s3.1-.4 4-1.3" />
-      <path d="M12 5V3.5" />
-    </Svg>
   );
 }
 
@@ -135,12 +79,6 @@ export function IconSettings(p: IconProps) {
 
 export const navIcons = {
   "/": IconHome,
-  "/portfolio": IconPortfolio,
-  "/watchlist": IconWatchlist,
   "/tips": IconTips,
   "/chat": IconAnalysis,
-  "/reports": IconReports,
-  "/alerts": IconAlerts,
-  "/zabava": IconFun,
-  "/settings": IconSettings,
 } as const;

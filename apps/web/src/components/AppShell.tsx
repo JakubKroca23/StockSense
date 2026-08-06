@@ -5,18 +5,12 @@ import { usePathname } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import { getCurrentUser } from "@/lib/auth";
 import { StockSenseLogo } from "@/components/StockSenseLogo";
-import { NAV_ICON_SIZE, navIcons } from "@/components/NavIcons";
+import { IconSettings, NAV_ICON_SIZE, navIcons } from "@/components/NavIcons";
 
 const links = [
   { href: "/", label: "Home" },
-  { href: "/portfolio", label: "Portfolio" },
-  { href: "/watchlist", label: "Watchlist" },
   { href: "/tips", label: "Tipy" },
   { href: "/chat", label: "Analýza" },
-  { href: "/reports", label: "Reporty" },
-  { href: "/alerts", label: "Alerty" },
-  { href: "/zabava", label: "Zábava" },
-  { href: "/settings", label: "Nastavení" },
 ] as const;
 
 function isActive(pathname: string, href: string) {
@@ -60,6 +54,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPath, setMenuPath] = useState(pathname);
 
+  const settingsActive = isActive(pathname, "/settings");
   const activeLink = links.find((l) => isActive(pathname, l.href)) ?? links[0];
 
   // Close the panel when the route changes (adjust state during render).
@@ -142,20 +137,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <StockSenseLogo height={36} />
             </Link>
 
-            <Link
-              href={activeLink.href}
-              className="nav-link nav-link--current app-no-drag"
-              aria-current="page"
-            >
-              <NavLabel href={activeLink.href} label={activeLink.label} />
-            </Link>
+            {!settingsActive ? (
+              <Link
+                href={activeLink.href}
+                className="nav-link nav-link--current app-no-drag"
+                aria-current="page"
+              >
+                <NavLabel href={activeLink.href} label={activeLink.label} />
+              </Link>
+            ) : null}
           </div>
 
-          {name ? (
-            <div className="app-no-drag flex shrink-0 items-center gap-2 sm:gap-3 text-sm">
-              <span className="muted hidden sm:inline">{name}</span>
-            </div>
-          ) : null}
+          <div className="app-no-drag flex shrink-0 items-center gap-2 sm:gap-3 text-sm">
+            {name ? <span className="muted hidden sm:inline">{name}</span> : null}
+            <Link
+              href="/settings"
+              className={`nav-link nav-link--settings ${settingsActive ? "nav-link--active" : ""}`}
+              aria-label="Nastavení"
+              aria-current={settingsActive ? "page" : undefined}
+              title="Nastavení"
+            >
+              <span className="nav-item nav-item--compact">
+                <IconSettings size={20} />
+                <span className="nav-item__label hidden sm:inline">Nastavení</span>
+              </span>
+            </Link>
+          </div>
         </div>
       </header>
 
