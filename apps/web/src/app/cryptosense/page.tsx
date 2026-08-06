@@ -386,34 +386,40 @@ export default function CryptoSensePage() {
     <div className="cryptosense">
       {error && <div className="card p-4 text-[var(--danger)] mb-3">{error}</div>}
 
+      <div className="crypto-coin-strip" role="group" aria-label="Kryptoměny">
+        {quotes.map((q) => {
+          const closes = sparks[q.symbol] || [];
+          const sparkUp =
+            closes.length >= 2
+              ? closes[closes.length - 1] >= closes[0]
+              : (q.change_pct ?? 0) >= 0;
+          const base = q.symbol.split("/")[0];
+          const active = selected === q.symbol;
+          return (
+            <button
+              key={q.symbol}
+              type="button"
+              className={`crypto-coin-card ${active ? "is-active" : ""} ${sparkUp ? "is-up" : "is-down"}`}
+              onClick={() => setSelected(q.symbol)}
+              title={q.symbol}
+            >
+              <div className="crypto-coin-card__top">
+                <span className="crypto-coin-card__sym">{base}</span>
+                <span className="crypto-coin-card__pct">{fmtPct(q.change_pct)}</span>
+              </div>
+              <span className="crypto-coin-card__price">{fmtPrice(q.primary_price)}</span>
+              <Sparkline closes={closes} up={sparkUp} width={88} height={22} />
+            </button>
+          );
+        })}
+        {!quotes.length && loading && (
+          <div className="crypto-coin-card crypto-coin-card--ghost muted text-xs">Načítám…</div>
+        )}
+      </div>
+
       <div className="cryptosense__desk">
         <section className="card instrument-chart cryptosense__chart">
           <div className="cryptosense__toolbar">
-            <div className="crypto-coin-row" role="group" aria-label="Kryptoměny">
-              {quotes.map((q) => {
-                const closes = sparks[q.symbol] || [];
-                const sparkUp =
-                  closes.length >= 2
-                    ? closes[closes.length - 1] >= closes[0]
-                    : (q.change_pct ?? 0) >= 0;
-                const base = q.symbol.split("/")[0];
-                const active = selected === q.symbol;
-                return (
-                  <button
-                    key={q.symbol}
-                    type="button"
-                    className={`crypto-coin-chip ${active ? "is-active" : ""} ${sparkUp ? "is-up" : "is-down"}`}
-                    onClick={() => setSelected(q.symbol)}
-                    title={q.symbol}
-                  >
-                    <span className="crypto-coin-chip__sym">{base}</span>
-                    <Sparkline closes={closes} up={sparkUp} width={56} height={18} />
-                    <span className="crypto-coin-chip__pct">{fmtPct(q.change_pct)}</span>
-                  </button>
-                );
-              })}
-              {!quotes.length && loading && <span className="muted text-xs px-2">Načítám…</span>}
-            </div>
             <div className="cryptosense__tf chart-controls__group" role="group" aria-label="Timeframe">
               {TIMEFRAMES.map((tf) => (
                 <button

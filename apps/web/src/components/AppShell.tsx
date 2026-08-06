@@ -54,7 +54,6 @@ function useLockPageZoom() {
     const preventMultiTouch = (e: TouchEvent) => {
       if (e.touches.length <= 1) return;
       if (isChartTouch(e.target)) return;
-      // Multi-touch may start on chart but second finger elsewhere — check any touch
       for (let i = 0; i < e.touches.length; i++) {
         const node = document.elementFromPoint(
           e.touches[i].clientX,
@@ -107,7 +106,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <ScreenContextProvider>
-      <div className="app-shell min-h-screen pb-8">
+      <div className={`app-shell min-h-screen pb-8 ${menuOpen ? "is-menu-open" : ""}`}>
         <header className="app-header sticky top-0 z-40">
           <div className="app-header__inner mx-auto grid max-w-6xl items-center gap-2 px-4 py-2">
             <Link href="/" className="brand-logo app-no-drag shrink-0 justify-self-start" aria-label="StockSense">
@@ -130,11 +129,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               })}
             </nav>
 
-            <nav className="app-nav app-nav--mobile-active app-no-drag justify-self-center" aria-label="Aktivní stránka">
-              <span className="nav-link nav-link--active" aria-current="page">
-                <NavLabel href={activeLink.href} label={activeLink.label} />
-              </span>
-            </nav>
+            <p className="app-page-title app-no-drag" aria-current="page">
+              <NavLabel href={activeLink.href} label={activeLink.label} />
+            </p>
 
             <div className="app-header__actions app-no-drag justify-self-end">
               <button
@@ -150,37 +147,44 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               >
                 <IconSettings size={22} />
               </button>
-              <button
-                type="button"
-                className="nav-burger"
-                aria-label={menuOpen ? "Zavřít menu" : "Otevřít menu"}
-                aria-expanded={menuOpen}
-                onClick={() => setMenuOpen((v) => !v)}
-              >
-                {menuOpen ? <IconClose size={22} /> : <IconMenu size={22} />}
-              </button>
             </div>
           </div>
         </header>
 
+        <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+
+        <div className="mobile-nav-fab">
+          <button
+            type="button"
+            className={`mobile-nav-fab__btn ${menuOpen ? "is-open" : ""}`}
+            aria-label={menuOpen ? "Zavřít menu" : "Otevřít menu"}
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            {menuOpen ? <IconClose size={22} /> : <IconMenu size={22} />}
+            <span className="mobile-nav-fab__label">{menuOpen ? "Zavřít" : "Menu"}</span>
+          </button>
+        </div>
+
         {menuOpen && (
-          <div className="nav-drawer" role="dialog" aria-modal="true" aria-label="Menu">
+          <div className="nav-sheet" role="dialog" aria-modal="true" aria-label="Menu">
             <button
               type="button"
-              className="nav-drawer__backdrop"
+              className="nav-sheet__backdrop"
               aria-label="Zavřít"
               onClick={() => setMenuOpen(false)}
             />
-            <div className="nav-drawer__panel">
-              <p className="nav-drawer__title">Menu</p>
-              <nav className="nav-drawer__nav" aria-label="Mobilní navigace">
+            <div className="nav-sheet__panel">
+              <div className="nav-sheet__handle" aria-hidden />
+              <p className="nav-sheet__title">Menu</p>
+              <nav className="nav-sheet__nav" aria-label="Mobilní navigace">
                 {links.map((l) => {
                   const active = isActive(pathname, l.href);
                   return (
                     <Link
                       key={l.href}
                       href={l.href}
-                      className={`nav-drawer__link ${active ? "is-active" : ""}`}
+                      className={`nav-sheet__link ${active ? "is-active" : ""}`}
                       aria-current={active ? "page" : undefined}
                       onClick={() => setMenuOpen(false)}
                     >
@@ -190,7 +194,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 })}
                 <button
                   type="button"
-                  className={`nav-drawer__link ${settingsOpen ? "is-active" : ""}`}
+                  className={`nav-sheet__link ${settingsOpen ? "is-active" : ""}`}
                   onClick={() => {
                     setMenuOpen(false);
                     setSettingsOpen(true);
@@ -206,7 +210,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         )}
 
-        <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
         <SenseBot />
         <SettingsPanel open={settingsOpen} onClose={closeSettings} />
       </div>

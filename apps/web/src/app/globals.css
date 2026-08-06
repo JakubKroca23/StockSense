@@ -289,8 +289,12 @@ a {
   }
 }
 
-.app-nav--mobile-active {
+.app-page-title {
   display: none;
+  margin: 0;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
 }
 
 .app-header__actions {
@@ -329,92 +333,150 @@ a {
   background: color-mix(in srgb, var(--sense) 12%, transparent);
 }
 
-.nav-burger {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  width: 2.25rem;
-  height: 2.25rem;
-  border-radius: 999px;
-  border: 1px solid var(--glass-border);
-  background: color-mix(in srgb, var(--glass) 80%, transparent);
-  color: var(--nav-idle);
-  padding: 0;
-  cursor: pointer;
-}
-
-.nav-burger:hover {
-  color: var(--sense);
-  border-color: color-mix(in srgb, var(--sense) 35%, var(--glass-border));
-}
-
 @media (max-width: 767px) {
+  .app-header__inner {
+    grid-template-columns: auto 1fr auto;
+  }
+
   .app-nav--desktop {
     display: none;
   }
 
-  .app-nav--mobile-active {
+  .app-page-title {
     display: inline-flex;
-    align-items: center;
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    max-width: min(58vw, 14rem);
+    z-index: 1;
   }
 
-  .app-nav--mobile-active .nav-item__label {
+  .app-page-title .nav-item__label {
     display: inline;
-    font-size: 0.68rem;
-  }
-
-  .app-nav--mobile-active .nav-link {
-    pointer-events: none;
-    padding: 0.35rem 0.5rem;
+    font-family: var(--font-nav);
+    font-size: 0.72rem;
+    font-weight: 650;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
     color: var(--sense);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  .app-nav--mobile-active .nav-item__icon {
+  .app-page-title .nav-item__icon {
     color: var(--sense);
     filter: drop-shadow(0 0 6px var(--sense-glow));
   }
+}
 
-  .nav-burger {
+/* Floating mobile menu FAB (bottom-left; Sense bot stays bottom-right) */
+.mobile-nav-fab {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .mobile-nav-fab {
+    display: block;
+    position: fixed;
+    left: max(0.85rem, env(safe-area-inset-left));
+    bottom: max(0.85rem, env(safe-area-inset-bottom));
+    z-index: 56;
+  }
+
+  .mobile-nav-fab__btn {
     display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.55rem 0.9rem 0.55rem 0.7rem;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--sense) 40%, var(--glass-border));
+    background: linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--sense) 18%, var(--glass-strong)),
+      color-mix(in srgb, var(--bg-elevated) 88%, transparent)
+    );
+    color: var(--sense);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+    cursor: pointer;
+    font: inherit;
+  }
+
+  .mobile-nav-fab__btn.is-open {
+    border-color: color-mix(in srgb, var(--sense) 55%, var(--glass-border));
+    background: color-mix(in srgb, var(--sense) 22%, var(--glass-strong));
+  }
+
+  .mobile-nav-fab__label {
+    font-family: var(--font-nav);
+    font-size: 0.68rem;
+    font-weight: 650;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .app-shell:has(.cryptosense) .mobile-nav-fab {
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
   }
 }
 
-.nav-drawer {
+.nav-sheet {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: 54;
 }
 
-.nav-drawer__backdrop {
+.nav-sheet__backdrop {
   position: absolute;
   inset: 0;
   border: none;
   padding: 0;
-  background: rgba(4, 8, 16, 0.62);
+  background: rgba(4, 8, 16, 0.58);
   backdrop-filter: blur(4px);
   cursor: pointer;
 }
 
-.nav-drawer__panel {
+.nav-sheet__panel {
   position: absolute;
-  top: 0;
+  left: 0;
   right: 0;
   bottom: 0;
-  width: min(18.5rem, 86vw);
-  padding: calc(env(safe-area-inset-top, 0px) + 1.1rem) 1rem 1.5rem;
+  padding: 0.65rem 1rem calc(5.5rem + env(safe-area-inset-bottom, 0px));
+  border-radius: 18px 18px 0 0;
+  border: 1px solid var(--glass-border);
+  border-bottom: none;
   background: linear-gradient(
     165deg,
     color-mix(in srgb, #ffffff 7%, var(--glass-strong)),
-    color-mix(in srgb, var(--bg-elevated) 85%, transparent)
+    color-mix(in srgb, var(--bg-elevated) 88%, transparent)
   );
-  border-left: 1px solid var(--glass-border);
-  box-shadow: -12px 0 40px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 -16px 48px rgba(0, 0, 0, 0.4);
   display: grid;
-  gap: 0.85rem;
-  align-content: start;
+  gap: 0.55rem;
+  animation: nav-sheet-up 0.22s ease-out;
 }
 
-.nav-drawer__title {
+@keyframes nav-sheet-up {
+  from {
+    transform: translateY(110%);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.nav-sheet__handle {
+  width: 2.4rem;
+  height: 0.28rem;
+  margin: 0.1rem auto 0.25rem;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--muted) 45%, transparent);
+}
+
+.nav-sheet__title {
   margin: 0;
   font-family: var(--font-nav);
   font-size: 0.72rem;
@@ -425,17 +487,17 @@ a {
   padding: 0 0.35rem;
 }
 
-.nav-drawer__nav {
+.nav-sheet__nav {
   display: grid;
   gap: 0.25rem;
 }
 
-.nav-drawer__link {
+.nav-sheet__link {
   display: flex;
   align-items: center;
   width: 100%;
-  padding: 0.7rem 0.75rem;
-  border-radius: 10px;
+  padding: 0.75rem 0.8rem;
+  border-radius: 12px;
   color: var(--nav-idle);
   border: 1px solid transparent;
   background: transparent;
@@ -444,29 +506,29 @@ a {
   font: inherit;
 }
 
-.nav-drawer__link .nav-item__label {
+.nav-sheet__link .nav-item__label {
   display: inline;
   font-family: var(--font-nav);
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
-.nav-drawer__link:hover,
-.nav-drawer__link.is-active {
+.nav-sheet__link:hover,
+.nav-sheet__link.is-active {
   color: var(--sense);
   background: color-mix(in srgb, var(--sense) 10%, transparent);
   border-color: color-mix(in srgb, var(--sense) 28%, transparent);
 }
 
-.nav-drawer__link.is-active .nav-item__icon,
-.nav-drawer__link:hover .nav-item__icon {
+.nav-sheet__link.is-active .nav-item__icon,
+.nav-sheet__link:hover .nav-item__icon {
   color: var(--sense);
   filter: drop-shadow(0 0 6px var(--sense-glow));
 }
 
-.nav-drawer__link .nav-icon__gear {
+.nav-sheet__link .nav-icon__gear {
   color: var(--sense);
 }
 
@@ -858,6 +920,124 @@ textarea {
   flex-direction: column;
   min-height: 0;
   width: 100%;
+  gap: 0.5rem;
+}
+
+.crypto-coin-strip {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-shrink: 0;
+  padding: 0.05rem 0.1rem 0.35rem;
+  margin: 0 -0.15rem;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  overscroll-behavior-x: contain;
+}
+
+.crypto-coin-strip::-webkit-scrollbar {
+  height: 3px;
+}
+
+.crypto-coin-strip::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--sense) 35%, transparent);
+  border-radius: 99px;
+}
+
+.crypto-coin-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.28rem;
+  flex: 0 0 auto;
+  width: 7.6rem;
+  min-height: 4.6rem;
+  padding: 0.55rem 0.6rem 0.5rem;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--sense) 12%, var(--glass-border));
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, #ffffff 6%, var(--glass)),
+    color-mix(in srgb, var(--bg-elevated) 82%, transparent)
+  );
+  color: var(--muted);
+  cursor: pointer;
+  text-align: left;
+  scroll-snap-align: start;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.crypto-coin-card--ghost {
+  justify-content: center;
+  align-items: center;
+  cursor: default;
+}
+
+.crypto-coin-card__top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+
+.crypto-coin-card__sym {
+  font-family: var(--font-nav);
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text);
+  line-height: 1;
+}
+
+.crypto-coin-card__pct {
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.crypto-coin-card__price {
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.1;
+}
+
+.crypto-coin-card .crypto-spark {
+  width: 100%;
+  height: 22px;
+}
+
+.crypto-coin-card.is-up .crypto-coin-card__pct,
+.crypto-coin-card.is-up .crypto-spark {
+  color: var(--chart-up);
+}
+
+.crypto-coin-card.is-down .crypto-coin-card__pct,
+.crypto-coin-card.is-down .crypto-spark {
+  color: var(--chart-down);
+}
+
+.crypto-coin-card.is-active {
+  border-color: color-mix(in srgb, var(--sense) 55%, var(--glass-border));
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--sense) 14%, var(--glass)),
+    color-mix(in srgb, var(--bg-elevated) 78%, transparent)
+  );
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--sense) 22%, transparent);
+}
+
+.crypto-coin-card:hover {
+  border-color: color-mix(in srgb, var(--sense) 38%, var(--glass-border));
 }
 
 .cryptosense__desk {
@@ -866,12 +1046,12 @@ textarea {
   grid-template-columns: 1fr;
   gap: 0.55rem;
   min-height: 0;
-  height: calc(100dvh - 4.75rem);
 }
 
 @media (min-width: 1100px) {
   .cryptosense__desk {
     grid-template-columns: minmax(0, 1fr) 260px;
+    height: calc(100dvh - 4.75rem - 5.5rem);
   }
 }
 
@@ -888,24 +1068,10 @@ textarea {
   );
 }
 
-.crypto-coin-row {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 0.4rem;
-  overflow-x: auto;
-  padding: 0;
-  scrollbar-width: thin;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.crypto-coin-row::-webkit-scrollbar {
-  height: 4px;
-}
-
 .cryptosense__toolbar {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.55rem;
   flex-shrink: 0;
   padding: 0.1rem 0.05rem 0.2rem;
@@ -917,65 +1083,6 @@ textarea {
   justify-content: flex-end;
   gap: 0.25rem;
   flex-shrink: 0;
-  margin-left: auto;
-}
-
-.crypto-coin-chip {
-  display: inline-flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 0.4rem;
-  min-width: 0;
-  padding: 0.28rem 0.5rem;
-  border-radius: 999px;
-  border: 1px solid var(--glass-border);
-  background: color-mix(in srgb, var(--glass) 70%, transparent);
-  color: var(--muted);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition:
-    border-color 0.15s ease,
-    background 0.15s ease,
-    color 0.15s ease;
-}
-
-.crypto-coin-chip__sym {
-  font-family: var(--font-nav);
-  font-size: 0.68rem;
-  font-weight: 650;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text);
-  line-height: 1;
-}
-
-.crypto-coin-chip__pct {
-  font-size: 0.68rem;
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  line-height: 1;
-  min-width: 3.2rem;
-  text-align: right;
-}
-
-.crypto-coin-chip.is-up .crypto-coin-chip__pct,
-.crypto-spark.is-up {
-  color: var(--chart-up);
-}
-
-.crypto-coin-chip.is-down .crypto-coin-chip__pct,
-.crypto-spark.is-down {
-  color: var(--chart-down);
-}
-
-.crypto-coin-chip.is-active {
-  border-color: color-mix(in srgb, var(--sense) 50%, var(--glass-border));
-  background: color-mix(in srgb, var(--sense) 12%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--sense) 18%, transparent);
-}
-
-.crypto-coin-chip:hover {
-  border-color: color-mix(in srgb, var(--sense) 35%, var(--glass-border));
 }
 
 .crypto-spark {
@@ -1120,17 +1227,23 @@ textarea {
 @media (max-width: 1099px) {
   .cryptosense__desk {
     height: auto;
-    min-height: calc(100dvh - 4.75rem);
+    min-height: 0;
   }
 
   .cryptosense__chart.instrument-chart {
-    min-height: min(62dvh, 520px);
-    height: min(62dvh, 520px);
+    min-height: min(58dvh, 480px);
+    height: min(58dvh, 480px);
   }
 
   .orderbook {
     height: auto;
     max-height: 420px;
+  }
+
+  .crypto-coin-card {
+    width: 7.1rem;
+    min-height: 4.35rem;
+    padding: 0.48rem 0.52rem 0.42rem;
   }
 }
 
