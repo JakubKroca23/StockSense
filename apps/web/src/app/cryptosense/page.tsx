@@ -152,11 +152,11 @@ export default function CryptoSensePage() {
   const [chartBusy, setChartBusy] = useState(false);
   const [live, setLive] = useState(false);
   const [orderBook, setOrderBook] = useState<OrderBookData | null>(null);
-  const [showHeatmap, setShowHeatmap] = useState(false);
+  const [showHeatmap, setShowHeatmap] = useState(true);
   const [heatmapLevels, setHeatmapLevels] = useState<HeatmapLevel[]>([]);
   const [heatOpacity, setHeatOpacity] = useState(0.55);
   const [metaOpen, setMetaOpen] = useState(true);
-  const [mobilePanel, setMobilePanel] = useState<"chart" | "book">("chart");
+  const [chartExpanded, setChartExpanded] = useState(false);
   const heatSymRef = useRef(selected);
   const chartReqRef = useRef(0);
   const selectedRef = useRef(selected);
@@ -164,6 +164,20 @@ export default function CryptoSensePage() {
 
   selectedRef.current = selected;
   intervalRef.current = interval;
+
+  useEffect(() => {
+    if (!chartExpanded) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setChartExpanded(false);
+    };
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [chartExpanded]);
 
   const loadOverview = useCallback(async () => {
     try {
@@ -443,10 +457,7 @@ export default function CryptoSensePage() {
                 key={q.symbol}
                 type="button"
                 className={`crypto-coin-card ${active ? "is-active" : ""} ${sparkUp ? "is-up" : "is-down"}`}
-                onClick={() => {
-                  setSelected(q.symbol);
-                  setMobilePanel("chart");
-                }}
+                onClick={() => setSelected(q.symbol)}
                 title={q.symbol}
               >
                 <div className="crypto-coin-card__top">
@@ -454,7 +465,7 @@ export default function CryptoSensePage() {
                   <span className="crypto-coin-card__pct">{fmtPct(q.change_pct)}</span>
                 </div>
                 <span className="crypto-coin-card__price">{fmtPrice(q.primary_price)}</span>
-                <Sparkline closes={closes} up={sparkUp} width={88} height={22} />
+                <Sparkline closes={closes} up={sparkUp} width={72} height={16} />
               </button>
             );
           })}
@@ -464,7 +475,7 @@ export default function CryptoSensePage() {
         </div>
 
         <section
-          className={`card instrument-chart cryptosense__chart is-${mobilePanel}`}
+          className={`card instrument-chart cryptosense__chart ${chartExpanded ? "is-expanded" : ""}`}
         >
           <div className="instrument-chart__bar cryptosense__meta">
             <div className="cryptosense__meta-row">
@@ -479,6 +490,15 @@ export default function CryptoSensePage() {
                   <span className={`badge ${live ? "long" : ""}`}>{live ? "LIVE" : "offline"}</span>
                 </>
               )}
+              <button
+                type="button"
+                className={`chart-chip chart-chip--soft cryptosense__expand-btn ${chartExpanded ? "is-active" : ""}`}
+                onClick={() => setChartExpanded((v) => !v)}
+                title={chartExpanded ? "Zmenšit graf" : "Maximalizovat graf"}
+                aria-pressed={chartExpanded}
+              >
+                {chartExpanded ? "Zmenšit" : "Max"}
+              </button>
               <button
                 type="button"
                 className={`chart-chip chart-chip--soft ${metaOpen ? "is-active" : ""}`}
@@ -554,27 +574,6 @@ export default function CryptoSensePage() {
             </div>
           </div>
 
-          <div className="cryptosense__panel-tabs" role="tablist" aria-label="Graf nebo order book">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mobilePanel === "chart"}
-              className={`cryptosense__panel-tab ${mobilePanel === "chart" ? "is-active" : ""}`}
-              onClick={() => setMobilePanel("chart")}
-            >
-              Graf
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mobilePanel === "book"}
-              className={`cryptosense__panel-tab ${mobilePanel === "book" ? "is-active" : ""}`}
-              onClick={() => setMobilePanel("book")}
-            >
-              Order book
-            </button>
-          </div>
-
           <div className="instrument-chart__stage crypto-chart-stage cryptosense__chart-pane">
             {ohlcv?.ohlcv?.length &&
             normalizeSym(ohlcv.symbol) === normalizeSym(selected) &&
@@ -594,10 +593,6 @@ export default function CryptoSensePage() {
                 {chartBusy ? "Připravuji svíčky…" : "Žádná OHLCV data."}
               </div>
             )}
-          </div>
-
-          <div className="cryptosense__ob-in-card">
-            <OrderBookPanel book={orderBook} />
           </div>
         </section>
 
