@@ -1261,8 +1261,146 @@ textarea {
   height: 100%;
 }
 
-.cryptosense__ob-side .orderbook {
+.cryptosense__ob-side .orderbook,
+.cryptosense__ob-side .trades-tape {
   height: 100%;
+}
+
+.trades-tape {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  padding: 0.65rem 0.7rem;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--sense) 14%, var(--glass-border));
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, #ffffff 4%, var(--glass)),
+    color-mix(in srgb, var(--bg-elevated) 82%, transparent)
+  );
+  overflow: hidden;
+}
+
+.trades-tape__head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex-shrink: 0;
+  margin-bottom: 0.4rem;
+}
+
+.trades-tape__title {
+  margin: 0;
+  font-family: var(--font-nav);
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sense);
+}
+
+.trades-tape__flow {
+  display: flex;
+  height: 4px;
+  border-radius: 99px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--line) 50%, transparent);
+  flex-shrink: 0;
+}
+
+.trades-tape__flow-buy {
+  background: color-mix(in srgb, var(--chart-up) 75%, transparent);
+}
+
+.trades-tape__flow-sell {
+  background: color-mix(in srgb, var(--chart-down) 75%, transparent);
+}
+
+.trades-tape__flow-labels {
+  display: flex;
+  justify-content: space-between;
+  margin: 0.25rem 0 0.45rem;
+  flex-shrink: 0;
+}
+
+.trades-tape__flow-labels .is-buy {
+  color: var(--chart-up);
+}
+
+.trades-tape__flow-labels .is-sell {
+  color: var(--chart-down);
+}
+
+.trades-tape__cols {
+  display: grid;
+  grid-template-columns: 4.2rem 1fr 1fr;
+  gap: 0.25rem;
+  padding: 0 0.15rem 0.3rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  flex-shrink: 0;
+}
+
+.trades-tape__cols span:nth-child(2),
+.trades-tape__cols span:nth-child(3) {
+  text-align: right;
+}
+
+.trades-tape__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  margin-top: 0.2rem;
+  scrollbar-width: thin;
+}
+
+.trades-tape__row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 4.2rem 1fr 1fr;
+  gap: 0.25rem;
+  align-items: center;
+  padding: 0.22rem 0.15rem;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 25%, transparent);
+}
+
+.trades-tape__bar {
+  position: absolute;
+  right: 0;
+  top: 1px;
+  bottom: 1px;
+  opacity: 0.14;
+  border-radius: 3px;
+  pointer-events: none;
+}
+
+.trades-tape__row.is-buy .trades-tape__bar {
+  background: var(--chart-up);
+}
+
+.trades-tape__row.is-sell .trades-tape__bar {
+  background: var(--chart-down);
+}
+
+.trades-tape__row.is-buy .trades-tape__px {
+  color: var(--chart-up);
+}
+
+.trades-tape__row.is-sell .trades-tape__px {
+  color: var(--chart-down);
+}
+
+.trades-tape__time {
+  color: var(--muted);
+  z-index: 1;
+}
+
+.trades-tape__px,
+.trades-tape__amt {
+  text-align: right;
+  z-index: 1;
 }
 
 .orderbook {

@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch, apiWsUrl } from "@/lib/api";
 import { PriceChart, ChartBar, HeatmapLevel } from "@/components/PriceChart";
-import { OrderBookPanel, OrderBookData } from "@/components/OrderBookPanel";
+import { OrderBookData } from "@/components/OrderBookPanel";
+import { TradesTapePanel, TradesTapeData } from "@/components/TradesTapePanel";
 import { useScreenContext } from "@/components/ScreenContext";
 
 type AggregatedQuote = {
@@ -156,6 +157,7 @@ export default function CryptoSensePage() {
   const [chartBusy, setChartBusy] = useState(false);
   const [live, setLive] = useState(false);
   const [orderBook, setOrderBook] = useState<OrderBookData | null>(null);
+  const [tradesTape, setTradesTape] = useState<TradesTapeData | null>(null);
   const [showHeatmap, setShowHeatmap] = useState(true);
   const [heatmapLevels, setHeatmapLevels] = useState<HeatmapLevel[]>([]);
   const [heatOpacity, setHeatOpacity] = useState(0.55);
@@ -278,6 +280,17 @@ export default function CryptoSensePage() {
     [applyHeatLevels]
   );
 
+  const loadTrades = useCallback(async (symbol: string) => {
+    try {
+      const res = await apiFetch<TradesTapeData>(
+        `/crypto/trades?symbol=${encodeURIComponent(symbol)}&limit=90`
+      );
+      setTradesTape(res);
+    } catch {
+      /* keep last tape */
+    }
+  }, []);
+
   useEffect(() => {
     void loadOverview();
     const id = window.setInterval(() => void loadOverview(), 30_000);
@@ -287,6 +300,7 @@ export default function CryptoSensePage() {
   useEffect(() => {
     setHeatmapLevels([]);
     heatSymRef.current = selected;
+    setTradesTape(null);
   }, [selected]);
 
   useEffect(() => {
@@ -297,6 +311,12 @@ export default function CryptoSensePage() {
     );
     return () => window.clearInterval(id);
   }, [selected, showHeatmap, loadOrderBook]);
+
+  useEffect(() => {
+    void loadTrades(selected);
+    const id = window.setInterval(() => void loadTrades(selected), 1500);
+    return () => window.clearInterval(id);
+  }, [selected, loadTrades]);
 
   useEffect(() => {
     const symbols = (data?.quotes || []).map((q) => q.symbol);
@@ -599,7 +619,7 @@ export default function CryptoSensePage() {
         </section>
 
         <div className="cryptosense__ob-side">
-          <OrderBookPanel book={orderBook} />
+          <TradesTapePanel tape={tradesTape} />
         </div>
       </div>
     </div>

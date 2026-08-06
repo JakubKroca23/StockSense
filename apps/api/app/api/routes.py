@@ -1988,6 +1988,20 @@ async def crypto_orderbook(
     return await get_crypto_market().fetch_aggregated_order_book(symbol, limit=limit)
 
 
+@router.get("/crypto/trades")
+async def crypto_trades(
+    symbol: str = "BTC/USDT",
+    limit: int = 80,
+    user: AuthUser = Depends(get_current_user),
+):
+    """Recent public trades (time & sales) from Binance + Bybit."""
+    from app.services.crypto_market import get_crypto_market
+
+    if not symbol.strip():
+        raise HTTPException(400, "Chybí symbol")
+    return await get_crypto_market().fetch_recent_trades(symbol, limit=limit)
+
+
 @router.get("/crypto/ohlcv")
 async def crypto_ohlcv(
     symbol: str = "BTC/USDT",

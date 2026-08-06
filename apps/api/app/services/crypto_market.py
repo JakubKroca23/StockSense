@@ -434,6 +434,78 @@ class MultiExchangeCcxt:
                 "as_of": datetime.now(timezone.utc).isoformat(),
             }
 
+    def _fetch_trades_sync(self, exchange_id: str, symbol: str, limit: int = 80) -> list[dict]:
+        try:
+            client = self._get_client(exchange_id)
+            market = self._resolve_market(client, symbol)
+            raw = client.fetch_trades(market, limit=min(max(int(limit), 10), 200))
+            out: list[dict] = []
+            for t in raw or []:
+                ts_ms = int(t.get("timestamp") or 0)
+                price = float(t.get("price") or 0)
+                amount = float(t.get("amount") or 0)
+                if not ts_ms or price <= 0 or amount <= 0:
+                    continue
+                side = (t.get("side") or "").lower()
+                if side not in ("buy", "sell"):
+                    side = "buy"
+                out.append(
+                    {
+                        "id": str(t.get("id") or f"{exchange_id}-{ts_ms}-{price}"),
+                        "ts": datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).isoformat(),
+                        "ts_ms": ts_ms,
+                        "price": price,
+                        "amount": amount,
+                        "cost": float(t.get("cost") or price * amount),
+                        "side": side,
+                        "exchange": exchange_id,
+                    }
+                )
+            return out
+        except Exception as exc:
+            logger.warning("trades %s %s failed: %s", exchange_id, symbol, exc)
+            return []
+
+    async def fetch_recent_trades(self, symbol: str, limit: int = 80) -> dict:
+        """Recent public trades from Binance + Bybit, merged newest-first."""
+        sym = _normalize_market(symbol)
+        lim = max(20, min(int(limit), 150))
+        per_ex = max(lim, 60)
+        parts = await asyncio.gather(
+            *[
+                asyncio.to_thread(self._fetch_trades_sync, ex, sym, per_ex)
+                for ex in self.exchange_ids
+            ]
+        )
+        merged: list[dict] = []
+        seen: set[str] = set()
+        for rows in parts:
+            for t in rows:
+                # Dedup near-identical prints across venues
+                key = f"{t['ts_ms'] // 50}:{round(t['price'], 8)}:{round(t['amount'], 6)}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(t)
+        merged.sort(key=lambda x: x["ts_ms"], reverse=True)
+        trades = merged[:lim]
+        buy_n = sum(1 for t in trades if t["side"] == "buy")
+        sell_n = len(trades) - buy_n
+        buy_vol = sum(t["amount"] for t in trades if t["side"] == "buy")
+        sell_vol = sum(t["amount"] for t in trades if t["side"] == "sell")
+        return {
+            "symbol": sym,
+            "exchanges": self.exchange_ids,
+            "execution_exchange": self.execution,
+            "trades": trades,
+            "count": len(trades),
+            "buy_count": buy_n,
+            "sell_count": sell_n,
+            "buy_volume": buy_vol,
+            "sell_volume": sell_vol,
+            "as_of": datetime.now(timezone.utc).isoformat(),
+        }
+
     async def fetch_aggregated_order_book(self, symbol: str, limit: int = 100) -> dict:
         """Aggregate L2 books from Binance + Bybit into one depth ladder."""
         sym = _normalize_market(symbol)
