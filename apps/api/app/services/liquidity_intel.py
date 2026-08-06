@@ -738,14 +738,25 @@ async def get_status(db: AsyncSession) -> dict[str, Any]:
     last_analysis = (
         await db.execute(select(LiqAnalysis).order_by(LiqAnalysis.ts.desc()).limit(1))
     ).scalar_one_or_none()
+    recent_analyses = (
+        await db.execute(select(LiqAnalysis).order_by(LiqAnalysis.ts.desc()).limit(5))
+    ).scalars().all()
     top_hyps = (
         await db.execute(
             select(TradingHypothesis)
-            .where(TradingHypothesis.status.in_(("active", "candidate")))
+            .where(TradingHypothesis.status.in_(("active", "candidate", "retired")))
             .order_by(TradingHypothesis.trials.desc())
-            .limit(8)
+            .limit(12)
         )
     ).scalars().all()
+
+    open_trials = (
+        await db.execute(
+            select(func.count())
+            .select_from(HypothesisTrial)
+            .where(HypothesisTrial.status == "open")
+        )
+    ).scalar_one()
 
     return {
         "enabled": bool(settings.enable_liq_intel),
@@ -755,10 +766,21 @@ async def get_status(db: AsyncSession) -> dict[str, Any]:
         "snapshots": int(snap_count or 0),
         "feature_bars": int(feat_count or 0),
         "hypotheses_alive": int(hyp_active or 0),
+        "open_trials": int(open_trials or 0),
         "last_snapshot_at": last_snap.ts.isoformat() if last_snap else None,
         "last_analysis_at": last_analysis.ts.isoformat() if last_analysis else None,
         "last_summary": (last_analysis.summary if last_analysis else None),
         "age_seconds": (now - last_snap.ts).total_seconds() if last_snap else None,
+        "recent_analyses": [
+            {
+                "ts": a.ts.isoformat() if a.ts else None,
+                "summary": a.summary,
+                "insights": (a.findings or {}).get("insights") or [],
+                "lessons": (a.findings or {}).get("lessons") or [],
+                "hypotheses_touched": a.hypotheses_touched,
+            }
+            for a in recent_analyses
+        ],
         "hypotheses": [
             {
                 "slug": h.slug,
@@ -772,7 +794,58 @@ async def get_status(db: AsyncSession) -> dict[str, Any]:
                 "avg_move_pct": h.avg_move_pct,
                 "horizon_minutes": h.horizon_minutes,
                 "conditions": h.conditions,
+                "notes": (h.notes or "")[:240],
             }
             for h in top_hyps
         ],
     }
+
+
+def format_bot_brief(status: dict[str, Any], *, max_chars: int = 3500) -> str:
+    """Compact Czech brief for Sense bot / chat context."""
+    lines: list[str] = [
+        "LIQUIDITY INTEL (24/7 smyčka — sledování likvidity + ceny, LLM hypotézy, paper eval):",
+        f"- stav: {'ZAPNUTO' if status.get('enabled') else 'vypnuto'}",
+        f"- symboly: {', '.join(status.get('symbols') or [])}",
+        f"- sample každých {status.get('sample_seconds')}s · LLM review každých {status.get('llm_minutes')} min",
+        f"- snapshots: {status.get('snapshots')} · 1m bary: {status.get('feature_bars')} · "
+        f"živé hyp: {status.get('hypotheses_alive')} · otevřené trialy: {status.get('open_trials')}",
+    ]
+    age = status.get("age_seconds")
+    if age is not None:
+        lines.append(f"- stáří posledního snapshotu: {int(age)}s")
+    if status.get("last_snapshot_at"):
+        lines.append(f"- last snapshot: {status['last_snapshot_at']}")
+    if status.get("last_analysis_at"):
+        lines.append(f"- last LLM analýza: {status['last_analysis_at']}")
+    if status.get("last_summary"):
+        lines.append(f"- poslední shrnutí: {str(status['last_summary'])[:500]}")
+
+    hyps = status.get("hypotheses") or []
+    if hyps:
+        lines.append("- hypotézy (trials/wins/wr):")
+        for h in hyps[:10]:
+            wr = h.get("winrate")
+            wr_s = f"{wr:.0%}" if isinstance(wr, (int, float)) else "n/a"
+            lines.append(
+                f"  · [{h.get('status')}] {h.get('slug')} {h.get('symbol')} {h.get('direction')} "
+                f"{h.get('horizon_minutes')}m | {h.get('wins')}/{h.get('trials')} wr={wr_s} "
+                f"avg_move={h.get('avg_move_pct')}% | {h.get('title')}"
+            )
+            if h.get("notes"):
+                lines.append(f"    pozn: {h['notes'][:160]}")
+
+    analyses = status.get("recent_analyses") or []
+    if analyses:
+        lines.append("- poslední LLM analýzy:")
+        for a in analyses[:4]:
+            lines.append(f"  · {a.get('ts')}: {(a.get('summary') or '')[:280]}")
+            insights = a.get("insights") or []
+            if insights:
+                lines.append("    insights: " + "; ".join(str(x)[:120] for x in insights[:4]))
+            lessons = a.get("lessons") or []
+            if lessons:
+                lines.append("    lessons: " + "; ".join(str(x)[:120] for x in lessons[:3]))
+
+    text = "\n".join(lines)
+    return text if len(text) <= max_chars else text[: max_chars - 1] + "…"

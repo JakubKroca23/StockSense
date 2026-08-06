@@ -1444,6 +1444,35 @@ async def chat(
             + payload.screen_context.strip()[:4000]
         )
 
+    # Always give Sense bot (and liq-related chat) live liquidity-intel memory
+    msg_l = (payload.message or "").lower()
+    wants_liq = bot_mode or any(
+        k in msg_l
+        for k in (
+            "likvidit",
+            "liquidity",
+            "hypotéz",
+            "hypotez",
+            "liq intel",
+            "intel",
+            "order book",
+            "orderbook",
+            "heatmap",
+            "wall",
+            "imbalance",
+            "analýz",
+            "analyz",
+        )
+    )
+    if wants_liq:
+        try:
+            from app.services.liquidity_intel import format_bot_brief, get_status
+
+            liq_status = await get_status(db)
+            context_parts.append(format_bot_brief(liq_status))
+        except Exception as exc:
+            context_parts.append(f"LIQUIDITY INTEL: nedostupné ({str(exc)[:120]})")
+
     # Sense bot: keep it fast — screen context is enough. Full chat still pulls market data.
     if payload.symbol and not bot_mode:
         from app.models import AssetClass, Instrument, MacroSnapshot
@@ -1628,6 +1657,9 @@ async def chat(
             "Jsi Sense bot — stručný rádce v UI StockSense. "
             "Odpovídej česky, 2–8 vět nebo krátké odrážky. "
             "Reaguj na kontext obrazovky, pokud je k dispozici. "
+            "Máš i blok LIQUIDITY INTEL: 24/7 sběr likvidity/ceny, LLM analýzy a paper hypotézy. "
+            "Když se uživatel ptá na vývoj analýz, hypotézy, winrate, likviditu nebo co systém našel, "
+            "odpověz konkrétně z toho bloku (čísla, statusy, shrnutí). "
             "Nevymýšlej čísla. Bez dlouhých markdown sekcí."
         )
         task = LLMTask.light

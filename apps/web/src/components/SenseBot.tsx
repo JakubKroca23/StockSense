@@ -199,8 +199,9 @@ export function SenseBot() {
             {booting && <p className="muted text-sm px-1">Načítám historii…</p>}
             {!booting && messages.length === 0 && (
               <p className="muted text-sm px-1 leading-relaxed">
-                Ahoj — jsem Sense bot. Vidím, co máš na obrazovce, a pamatuju si historii
-                chatu. Zeptej se na trh, graf nebo co dál.
+                Ahoj — jsem Sense bot. Vidím obrazovku a mám přehled o 24/7 liquidity intel
+                (hypotézy, winrate, poslední LLM analýzy). Zeptej se třeba: „co našel intel?“
+                nebo „jak si vedou hypotézy?“
               </p>
             )}
             {messages.map((m) => (
@@ -219,7 +220,7 @@ export function SenseBot() {
             <input
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder="Napiš Sense botovi…"
+              placeholder="např. co našel liquidity intel?"
               disabled={busy}
               aria-label="Zpráva pro Sense bot"
             />
