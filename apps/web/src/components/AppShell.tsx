@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { StockSenseLogo } from "@/components/StockSenseLogo";
+import { SenseBot } from "@/components/SenseBot";
+import { ScreenContextProvider } from "@/components/ScreenContext";
 import {
   IconClose,
   IconMenu,
@@ -14,8 +16,6 @@ import {
 
 const links = [
   { href: "/", label: "Home" },
-  { href: "/tips", label: "Tipy" },
-  { href: "/chat", label: "Analýza" },
   { href: "/cryptosense", label: "CryptoSense" },
 ] as const;
 
@@ -39,7 +39,6 @@ function NavLabel({
   );
 }
 
-/** Block pinch / multi-touch page zoom (iOS Safari ignores viewport user-scalable). */
 function useLockPageZoom() {
   useEffect(() => {
     const preventGesture = (e: Event) => {
@@ -89,102 +88,103 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [menuOpen]);
 
   return (
-    <div className="app-shell min-h-screen pb-8">
-      <header className="app-header sticky top-0 z-40">
-        <div className="app-header__inner mx-auto grid max-w-6xl items-center gap-2 px-4 py-2">
-          <Link href="/" className="brand-logo app-no-drag shrink-0 justify-self-start" aria-label="StockSense">
-            <StockSenseLogo height={36} />
-          </Link>
-
-          {/* Desktop: full nav */}
-          <nav className="app-nav app-nav--desktop app-no-drag justify-self-center" aria-label="Hlavní navigace">
-            {links.map((l) => {
-              const active = isActive(pathname, l.href);
-              return (
-                <Link
-                  key={l.href}
-                  href={l.href}
-                  className={`nav-link ${active ? "nav-link--active" : ""}`}
-                  aria-current={active ? "page" : undefined}
-                >
-                  <NavLabel href={l.href} label={l.label} />
-                </Link>
-              );
-            })}
-          </nav>
-
-          {/* Mobile: only active page */}
-          <nav className="app-nav app-nav--mobile-active app-no-drag justify-self-center" aria-label="Aktivní stránka">
-            <span className="nav-link nav-link--active" aria-current="page">
-              <NavLabel href={activeLink.href} label={activeLink.label} />
-            </span>
-          </nav>
-
-          <div className="app-header__actions app-no-drag justify-self-end">
-            <Link
-              href="/settings"
-              className={`settings-gear ${settingsActive ? "settings-gear--active" : ""}`}
-              aria-label="Nastavení"
-              aria-current={settingsActive ? "page" : undefined}
-              title="Nastavení"
-            >
-              <IconSettings size={22} />
+    <ScreenContextProvider>
+      <div className="app-shell min-h-screen pb-8">
+        <header className="app-header sticky top-0 z-40">
+          <div className="app-header__inner mx-auto grid max-w-6xl items-center gap-2 px-4 py-2">
+            <Link href="/" className="brand-logo app-no-drag shrink-0 justify-self-start" aria-label="StockSense">
+              <StockSenseLogo height={36} />
             </Link>
-            <button
-              type="button"
-              className="nav-burger"
-              aria-label={menuOpen ? "Zavřít menu" : "Otevřít menu"}
-              aria-expanded={menuOpen}
-              onClick={() => setMenuOpen((v) => !v)}
-            >
-              {menuOpen ? <IconClose size={22} /> : <IconMenu size={22} />}
-            </button>
-          </div>
-        </div>
-      </header>
 
-      {menuOpen && (
-        <div className="nav-drawer" role="dialog" aria-modal="true" aria-label="Menu">
-          <button
-            type="button"
-            className="nav-drawer__backdrop"
-            aria-label="Zavřít"
-            onClick={() => setMenuOpen(false)}
-          />
-          <div className="nav-drawer__panel">
-            <p className="nav-drawer__title">Menu</p>
-            <nav className="nav-drawer__nav" aria-label="Mobilní navigace">
+            <nav className="app-nav app-nav--desktop app-no-drag justify-self-center" aria-label="Hlavní navigace">
               {links.map((l) => {
                 const active = isActive(pathname, l.href);
                 return (
                   <Link
                     key={l.href}
                     href={l.href}
-                    className={`nav-drawer__link ${active ? "is-active" : ""}`}
+                    className={`nav-link ${active ? "nav-link--active" : ""}`}
                     aria-current={active ? "page" : undefined}
-                    onClick={() => setMenuOpen(false)}
                   >
                     <NavLabel href={l.href} label={l.label} />
                   </Link>
                 );
               })}
+            </nav>
+
+            <nav className="app-nav app-nav--mobile-active app-no-drag justify-self-center" aria-label="Aktivní stránka">
+              <span className="nav-link nav-link--active" aria-current="page">
+                <NavLabel href={activeLink.href} label={activeLink.label} />
+              </span>
+            </nav>
+
+            <div className="app-header__actions app-no-drag justify-self-end">
               <Link
                 href="/settings"
-                className={`nav-drawer__link ${settingsActive ? "is-active" : ""}`}
+                className={`settings-gear ${settingsActive ? "settings-gear--active" : ""}`}
+                aria-label="Nastavení"
                 aria-current={settingsActive ? "page" : undefined}
-                onClick={() => setMenuOpen(false)}
+                title="Nastavení"
               >
-                <span className="nav-item">
-                  <IconSettings size={NAV_ICON_SIZE} />
-                  <span className="nav-item__label">Nastavení</span>
-                </span>
+                <IconSettings size={22} />
               </Link>
-            </nav>
+              <button
+                type="button"
+                className="nav-burger"
+                aria-label={menuOpen ? "Zavřít menu" : "Otevřít menu"}
+                aria-expanded={menuOpen}
+                onClick={() => setMenuOpen((v) => !v)}
+              >
+                {menuOpen ? <IconClose size={22} /> : <IconMenu size={22} />}
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
-    </div>
+        {menuOpen && (
+          <div className="nav-drawer" role="dialog" aria-modal="true" aria-label="Menu">
+            <button
+              type="button"
+              className="nav-drawer__backdrop"
+              aria-label="Zavřít"
+              onClick={() => setMenuOpen(false)}
+            />
+            <div className="nav-drawer__panel">
+              <p className="nav-drawer__title">Menu</p>
+              <nav className="nav-drawer__nav" aria-label="Mobilní navigace">
+                {links.map((l) => {
+                  const active = isActive(pathname, l.href);
+                  return (
+                    <Link
+                      key={l.href}
+                      href={l.href}
+                      className={`nav-drawer__link ${active ? "is-active" : ""}`}
+                      aria-current={active ? "page" : undefined}
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      <NavLabel href={l.href} label={l.label} />
+                    </Link>
+                  );
+                })}
+                <Link
+                  href="/settings"
+                  className={`nav-drawer__link ${settingsActive ? "is-active" : ""}`}
+                  aria-current={settingsActive ? "page" : undefined}
+                  onClick={() => setMenuOpen(false)}
+                >
+                  <span className="nav-item">
+                    <IconSettings size={NAV_ICON_SIZE} />
+                    <span className="nav-item__label">Nastavení</span>
+                  </span>
+                </Link>
+              </nav>
+            </div>
+          </div>
+        )}
+
+        <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+        <SenseBot />
+      </div>
+    </ScreenContextProvider>
   );
 }

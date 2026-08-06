@@ -27,9 +27,10 @@
   /* Chart — StockSense desk palette */
   --chart-up: #5dde8a;
   --chart-up-dim: #3a9f62;
-  --chart-down: #ff6b7a;
-  --chart-down-dim: #c44d5a;
-  --chart-grid: color-mix(in srgb, #9eb6ff 10%, transparent);
+  --chart-down: #b388ff;
+  --chart-down-dim: #7c5cbf;
+  --chart-bg: #060a12;
+  --chart-grid: color-mix(in srgb, #9eb6ff 8%, transparent);
   --chart-cross: color-mix(in srgb, var(--sense) 55%, #ffffff);
   --chart-ma-fast: #7eb6ff;
   --chart-ma-slow: #e0b35a;
@@ -870,24 +871,41 @@ textarea {
   flex-wrap: nowrap;
   gap: 0.4rem;
   overflow-x: auto;
-  padding: 0.15rem 0.1rem 0.25rem;
+  padding: 0;
   scrollbar-width: thin;
-  flex-shrink: 0;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .crypto-coin-row::-webkit-scrollbar {
   height: 4px;
 }
 
+.cryptosense__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-shrink: 0;
+  padding: 0.1rem 0.05rem 0.2rem;
+}
+
+.cryptosense__tf {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
 .crypto-coin-chip {
-  display: grid;
-  grid-template-columns: auto;
-  grid-template-rows: auto auto auto;
-  justify-items: center;
-  gap: 0.12rem;
-  min-width: 4.6rem;
-  padding: 0.35rem 0.4rem 0.3rem;
-  border-radius: 10px;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  padding: 0.28rem 0.5rem;
+  border-radius: 999px;
   border: 1px solid var(--glass-border);
   background: color-mix(in srgb, var(--glass) 70%, transparent);
   color: var(--muted);
@@ -901,29 +919,31 @@ textarea {
 
 .crypto-coin-chip__sym {
   font-family: var(--font-nav);
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   font-weight: 650;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text);
   line-height: 1;
 }
 
 .crypto-coin-chip__pct {
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   line-height: 1;
+  min-width: 3.2rem;
+  text-align: right;
 }
 
 .crypto-coin-chip.is-up .crypto-coin-chip__pct,
 .crypto-spark.is-up {
-  color: var(--ok);
+  color: var(--chart-up);
 }
 
 .crypto-coin-chip.is-down .crypto-coin-chip__pct,
 .crypto-spark.is-down {
-  color: var(--danger);
+  color: var(--chart-down);
 }
 
 .crypto-coin-chip.is-active {
@@ -938,6 +958,7 @@ textarea {
 
 .crypto-spark {
   display: block;
+  flex-shrink: 0;
 }
 
 .crypto-spark--empty {
@@ -948,7 +969,8 @@ textarea {
 }
 
 .cryptosense__meta {
-  padding-top: 0.1rem;
+  padding-top: 0.05rem;
+  justify-content: flex-start;
 }
 
 .crypto-chart-stage {
@@ -1225,10 +1247,7 @@ textarea {
   border-radius: 12px;
   overflow: hidden;
   touch-action: pan-x pan-y;
-  background:
-    radial-gradient(900px 420px at 12% 0%, color-mix(in srgb, var(--sense) 7%, transparent), transparent 55%),
-    radial-gradient(700px 380px at 100% 100%, color-mix(in srgb, var(--accent-2) 6%, transparent), transparent 50%),
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-soft) 55%, transparent), transparent 40%);
+  background: var(--chart-bg);
 }
 
 .instrument-chart__stage {
@@ -2810,4 +2829,217 @@ textarea {
 .home-legend__pct.is-down,
 .home-donut__value.is-down {
   color: var(--danger);
+}
+
+/* —— Sense bot floating widget —— */
+.sense-bot {
+  position: fixed;
+  right: max(0.85rem, env(safe-area-inset-right));
+  bottom: max(0.85rem, env(safe-area-inset-bottom));
+  z-index: 55;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.65rem;
+  pointer-events: none;
+}
+
+.sense-bot > * {
+  pointer-events: auto;
+}
+
+.sense-bot__fab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.55rem 0.85rem 0.55rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--sense) 40%, var(--glass-border));
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--sense) 18%, var(--glass-strong)),
+    color-mix(in srgb, var(--bg-elevated) 85%, transparent)
+  );
+  color: var(--sense);
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.28),
+    0 0 18px color-mix(in srgb, var(--sense) 22%, transparent);
+  cursor: pointer;
+  font-family: var(--font-nav);
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+  text-transform: lowercase;
+  backdrop-filter: blur(14px);
+}
+
+.sense-bot__fab:hover {
+  border-color: color-mix(in srgb, var(--sense) 60%, var(--glass-border));
+  transform: translateY(-1px);
+}
+
+.sense-bot__fab-eye {
+  display: block;
+  filter:
+    brightness(0)
+    saturate(100%)
+    invert(72%)
+    sepia(48%)
+    saturate(520%)
+    hue-rotate(87deg)
+    brightness(1.05)
+    contrast(1.05)
+    drop-shadow(0 0 5px var(--sense-glow));
+}
+
+.sense-bot__fab-label {
+  line-height: 1;
+}
+
+.sense-bot__panel {
+  width: min(22.5rem, calc(100vw - 1.5rem));
+  height: min(32rem, calc(100dvh - 6.5rem));
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.4);
+}
+
+.sense-bot__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.75rem 0.85rem;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.sense-bot__brand {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.sense-bot__eye {
+  filter:
+    brightness(0)
+    saturate(100%)
+    invert(72%)
+    sepia(48%)
+    saturate(520%)
+    hue-rotate(87deg)
+    brightness(1.05)
+    contrast(1.05);
+}
+
+.sense-bot__title {
+  margin: 0;
+  font-family: var(--font-nav);
+  font-size: 0.85rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  color: var(--sense);
+  text-transform: lowercase;
+}
+
+.sense-bot__sub {
+  margin: 0.1rem 0 0;
+  font-size: 0.68rem;
+  line-height: 1.3;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sense-bot__actions {
+  display: flex;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.sense-bot__icon-btn {
+  border: 1px solid var(--glass-border);
+  background: color-mix(in srgb, var(--glass) 70%, transparent);
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 0.25rem 0.45rem;
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
+.sense-bot__icon-btn:hover {
+  color: var(--sense);
+  border-color: color-mix(in srgb, var(--sense) 35%, var(--glass-border));
+}
+
+.sense-bot__messages {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.75rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.sense-bot__bubble {
+  max-width: 92%;
+  padding: 0.55rem 0.7rem;
+  border-radius: 12px;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.sense-bot__bubble.is-user {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--sense) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sense) 28%, transparent);
+  color: var(--text);
+}
+
+.sense-bot__bubble.is-bot {
+  align-self: flex-start;
+  background: color-mix(in srgb, var(--bg-soft) 80%, transparent);
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+
+.sense-bot__composer {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.65rem 0.75rem;
+  border-top: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.sense-bot__composer input {
+  flex: 1;
+  min-width: 0;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  color: var(--text);
+  padding: 0.55rem 0.7rem;
+  font-size: 0.86rem;
+}
+
+.sense-bot__composer input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--sense) 45%, var(--glass-border));
+}
+
+.sense-bot__composer .btn {
+  flex-shrink: 0;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.78rem;
+}
+
+.app-shell:has(.cryptosense) .sense-bot {
+  bottom: max(0.75rem, env(safe-area-inset-bottom));
 }

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch, apiWsUrl } from "@/lib/api";
 import { PriceChart, ChartBar } from "@/components/PriceChart";
+import { useScreenContext } from "@/components/ScreenContext";
 
 type AggregatedQuote = {
   symbol: string;
@@ -133,6 +134,7 @@ function Sparkline({
 }
 
 export default function CryptoSensePage() {
+  const { setScreen } = useScreenContext();
   const [data, setData] = useState<CryptoOverview | null>(null);
   const [selected, setSelected] = useState("BTC/USDT");
   const [interval, setIntervalTf] = useState<(typeof TIMEFRAMES)[number]["id"]>("1m");
@@ -277,37 +279,71 @@ export default function CryptoSensePage() {
   const up = (activeQuote?.change_pct ?? 0) >= 0;
   const quotes = data?.quotes || [];
 
+  useEffect(() => {
+    const last = ohlcv?.ohlcv?.[ohlcv.ohlcv.length - 1];
+    const coinList = (data?.quotes || []).map((q) => q.symbol.split("/")[0]).join(", ");
+    const detail = [
+      `Timeframe grafu: ${interval}`,
+      live ? "Stream: LIVE (agregace Binance+Bybit)" : "Stream: offline",
+      activeQuote?.primary_price != null
+        ? `Cena (agg): ${activeQuote.primary_price}`
+        : null,
+      activeQuote?.change_pct != null ? `Denní změna: ${activeQuote.change_pct.toFixed(2)}%` : null,
+      last
+        ? `Poslední svíčka: o=${last.open} h=${last.high} l=${last.low} c=${last.close}`
+        : null,
+      `Dostupné coiny: ${coinList || "—"}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    setScreen({
+      page: "cryptosense",
+      title: "CryptoSense — live graf",
+      symbol: selected,
+      detail,
+    });
+  }, [
+    selected,
+    interval,
+    live,
+    activeQuote?.primary_price,
+    activeQuote?.change_pct,
+    ohlcv,
+    data?.quotes,
+    setScreen,
+  ]);
+
   return (
     <div className="cryptosense">
       {error && <div className="card p-4 text-[var(--danger)] mb-3">{error}</div>}
 
       <section className="card instrument-chart cryptosense__chart">
-        <div className="crypto-coin-row" role="group" aria-label="Kryptoměny">
-          {quotes.map((q) => {
-            const closes = sparks[q.symbol] || [];
-            const sparkUp =
-              closes.length >= 2 ? closes[closes.length - 1] >= closes[0] : (q.change_pct ?? 0) >= 0;
-            const base = q.symbol.split("/")[0];
-            const active = selected === q.symbol;
-            return (
-              <button
-                key={q.symbol}
-                type="button"
-                className={`crypto-coin-chip ${active ? "is-active" : ""} ${sparkUp ? "is-up" : "is-down"}`}
-                onClick={() => setSelected(q.symbol)}
-                title={q.symbol}
-              >
-                <span className="crypto-coin-chip__sym">{base}</span>
-                <Sparkline closes={closes} up={sparkUp} />
-                <span className="crypto-coin-chip__pct">{fmtPct(q.change_pct)}</span>
-              </button>
-            );
-          })}
-          {!quotes.length && loading && <span className="muted text-xs px-2">Načítám…</span>}
-        </div>
-
-        <div className="instrument-chart__bar cryptosense__meta">
-          <div className="chart-controls__group" role="group" aria-label="Timeframe">
+        <div className="cryptosense__toolbar">
+          <div className="crypto-coin-row" role="group" aria-label="Kryptoměny">
+            {quotes.map((q) => {
+              const closes = sparks[q.symbol] || [];
+              const sparkUp =
+                closes.length >= 2 ? closes[closes.length - 1] >= closes[0] : (q.change_pct ?? 0) >= 0;
+              const base = q.symbol.split("/")[0];
+              const active = selected === q.symbol;
+              return (
+                <button
+                  key={q.symbol}
+                  type="button"
+                  className={`crypto-coin-chip ${active ? "is-active" : ""} ${sparkUp ? "is-up" : "is-down"}`}
+                  onClick={() => setSelected(q.symbol)}
+                  title={q.symbol}
+                >
+                  <span className="crypto-coin-chip__sym">{base}</span>
+                  <Sparkline closes={closes} up={sparkUp} width={56} height={18} />
+                  <span className="crypto-coin-chip__pct">{fmtPct(q.change_pct)}</span>
+                </button>
+              );
+            })}
+            {!quotes.length && loading && <span className="muted text-xs px-2">Načítám…</span>}
+          </div>
+          <div className="cryptosense__tf chart-controls__group" role="group" aria-label="Timeframe">
             {TIMEFRAMES.map((tf) => (
               <button
                 key={tf.id}
@@ -320,13 +356,16 @@ export default function CryptoSensePage() {
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="instrument-chart__bar cryptosense__meta">
           <div className="flex flex-wrap items-center gap-2 text-xs muted">
             {activeQuote && (
               <>
                 <span className="text-[var(--text)] font-semibold text-sm">
                   {fmtPrice(activeQuote.primary_price)}
                 </span>
-                <span className={up ? "text-[var(--ok)]" : "text-[var(--danger)]"}>
+                <span className={up ? "text-[var(--chart-up)]" : "text-[var(--chart-down)]"}>
                   {fmtPct(activeQuote.change_pct)}
                 </span>
                 <span className={`badge ${live ? "long" : ""}`}>{live ? "LIVE" : "offline"}</span>

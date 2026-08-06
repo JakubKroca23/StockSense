@@ -114,7 +114,5 @@ export function IconClose({ size = NAV_ICON_SIZE, className = "" }: IconProps) {
 
 export const navIcons = {
   "/": IconHome,
-  "/tips": IconTips,
-  "/chat": IconAnalysis,
   "/cryptosense": IconCrypto,
 } as const;

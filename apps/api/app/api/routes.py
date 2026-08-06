@@ -1418,6 +1418,11 @@ async def chat(
         session.symbol = payload.symbol.upper()
 
     context_parts: list[str] = []
+    if payload.screen_context and payload.screen_context.strip():
+        context_parts.append(
+            "KONTEXT OBRAZOVKY (to, co uživatel právě vidí):\n"
+            + payload.screen_context.strip()[:4000]
+        )
     if payload.symbol:
         from app.models import AssetClass, Instrument, MacroSnapshot
 
@@ -1590,13 +1595,27 @@ async def chat(
         "Starší konverzace",
     }
 
-    answer_coro = llm_complete(
-        (
+    bot_mode = (payload.mode or "").lower() == "bot"
+    if bot_mode:
+        user_prompt = (
+            f"{payload.message}\n\n"
+            "Jsi Sense bot — stručný rádce v UI StockSense. "
+            "Odpovídej česky, 2–8 vět nebo krátké odrážky. "
+            "Reaguj na kontext obrazovky, pokud je k dispozici. "
+            "Nevymýšlej čísla. Bez dlouhých markdown sekcí."
+        )
+        task = LLMTask.light
+    else:
+        user_prompt = (
             f"{payload.message}\n\n"
             "Odpověz ve strukturovaném markdownu se sekcemi ## Shrnutí, ## Analýza, "
             "## Pre-závěr a ## Rizika. Buď stručný a přehledný."
-        ),
-        task=LLMTask.heavy if payload.symbol or "tip" in payload.message.lower() else LLMTask.light,
+        )
+        task = LLMTask.heavy if payload.symbol or "tip" in payload.message.lower() else LLMTask.light
+
+    answer_coro = llm_complete(
+        user_prompt,
+        task=task,
         context="\n".join(context_parts),
     )
     if needs_title:

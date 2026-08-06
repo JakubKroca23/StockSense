@@ -209,6 +209,10 @@ class ChatRequest(BaseModel):
     message: str
     symbol: str | None = None
     session_id: int | None = None
+    # UI screen snapshot so the bot can react to what the user sees.
+    screen_context: str | None = None
+    # "bot" (floating Sense bot) | "analysis" (legacy structured reply)
+    mode: str | None = None
 
 
 class ChatMessageOut(ORMModel):

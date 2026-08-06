@@ -59,6 +59,7 @@ type Theme = {
   maSlow: string;
   bgSoft: string;
   bgElevated: string;
+  chartBg: string;
   font: string;
 };
 
@@ -70,16 +71,17 @@ function readTheme(): Theme {
     muted: g("--muted", "#93a0b8"),
     line: g("--line", "#243049"),
     sense: g("--sense", "#5dde8a"),
-    up: g("--chart-up", g("--ok", "#5dde8a")),
+    up: g("--chart-up", "#5dde8a"),
     upDim: g("--chart-up-dim", "#3a9f62"),
-    down: g("--chart-down", g("--danger", "#ff6b7a")),
-    downDim: g("--chart-down-dim", "#c44d5a"),
-    grid: g("--chart-grid", "rgba(158,182,255,0.10)"),
+    down: g("--chart-down", "#b388ff"),
+    downDim: g("--chart-down-dim", "#7c5cbf"),
+    grid: g("--chart-grid", "rgba(158,182,255,0.08)"),
     cross: g("--chart-cross", "#5dde8a"),
     maFast: g("--chart-ma-fast", "#7eb6ff"),
     maSlow: g("--chart-ma-slow", "#e0b35a"),
     bgSoft: g("--bg-soft", "#182238"),
     bgElevated: g("--bg-elevated", "#121a2b"),
+    chartBg: g("--chart-bg", "#060a12"),
     font: g("--font-body", '"IBM Plex Sans", sans-serif'),
   };
 }
@@ -161,7 +163,7 @@ export function PriceChart({
       width: containerRef.current.clientWidth,
       height: initialH,
       layout: {
-        background: { type: ColorType.Solid, color: "transparent" },
+        background: { type: ColorType.Solid, color: theme.chartBg },
         textColor: theme.muted,
         fontFamily: theme.font,
         fontSize: 11,
@@ -218,14 +220,14 @@ export function PriceChart({
       },
     });
 
-    // Up = Sense green (filled), down = soft coral — matches StockSense signals
+    // Bull = Sense green, bear = platform purple
     const candle = chart.addCandlestickSeries({
-      upColor: hexAlpha(theme.up, 0.88),
-      downColor: hexAlpha(theme.down, 0.82),
+      upColor: theme.up,
+      downColor: theme.down,
       borderUpColor: theme.up,
       borderDownColor: theme.down,
       wickUpColor: theme.up,
-      wickDownColor: hexAlpha(theme.down, 0.9),
+      wickDownColor: theme.down,
       borderVisible: true,
       priceLineVisible: true,
       priceLineColor: hexAlpha(theme.sense, 0.55),

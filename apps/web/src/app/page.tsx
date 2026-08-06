@@ -3,10 +3,12 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { MarketSectorCard } from "@/components/MarketSectorCard";
+import { useScreenContext } from "@/components/ScreenContext";
 import { cacheSnapshot, readSnapshot } from "@/lib/offline";
 import { MarketsOverview } from "@/lib/types";
 
 export default function HomePage() {
+  const { setScreen } = useScreenContext();
   const [data, setData] = useState<MarketsOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
@@ -39,6 +41,26 @@ export default function HomePage() {
     window.addEventListener("online", onOnline);
     return () => window.removeEventListener("online", onOnline);
   }, []);
+
+  useEffect(() => {
+    if (!data) {
+      setScreen({ page: "home", title: "Homepage — tržní přehled" });
+      return;
+    }
+    const detail = data.sectors
+      .map(
+        (s) =>
+          `${s.label}: ${s.bias_label}` +
+          (s.avg_change_pct != null ? ` (ø ${s.avg_change_pct.toFixed(2)}%)` : "") +
+          ` — ${s.summary}`
+      )
+      .join("\n");
+    setScreen({
+      page: "home",
+      title: "Homepage — tržní přehled",
+      detail,
+    });
+  }, [data, setScreen]);
 
   if (!data && !error) {
     return <div className="muted">Načítám tržní přehled…</div>;
