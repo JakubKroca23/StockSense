@@ -1,97 +1,154 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { SlotSymbol } from "@/components/games/SlotSymbols";
+
+export const ROW_H = 76;
 
 type Props = {
-  /** 5 reels × 3 rows of symbol ids */
-  grid: string[][];
+  strips: string[][];
+  stops: number[];
+  targetStops: number[] | null;
   spinning: boolean;
-  /** per-reel spin phase 0..1 while spinning */
-  renderSymbol: (id: string, opts: { size: "sm" | "md" }) => ReactNode;
+  rows?: number;
   highlight?: boolean[][];
-  className?: string;
   theme?: "dazzle" | "book";
+  className?: string;
+  onReelStop?: (reelIndex: number) => void;
+  onAllStopped?: () => void;
 };
 
-const ROW_H = 72;
+function easeOutCubic(t: number) {
+  return 1 - Math.pow(1 - t, 3);
+}
 
 export function SlotReels({
-  grid,
+  strips,
+  stops,
+  targetStops,
   spinning,
-  renderSymbol,
+  rows = 3,
   highlight,
-  className = "",
   theme = "dazzle",
+  className = "",
+  onReelStop,
+  onAllStopped,
 }: Props) {
-  const [offsets, setOffsets] = useState(() => grid.map(() => 0));
-  const [blur, setBlur] = useState(false);
-  const raf = useRef<number>(0);
-  const start = useRef(0);
+  const [offsets, setOffsets] = useState(() => stops.map((s) => -s * ROW_H));
+  const [busy, setBusy] = useState<boolean[]>(() => strips.map(() => false));
+  const raf = useRef(0);
+  const finished = useRef<boolean[]>([]);
+  const allDone = useRef(false);
+  const onReelStopRef = useRef(onReelStop);
+  const onAllStoppedRef = useRef(onAllStopped);
+  onReelStopRef.current = onReelStop;
+  onAllStoppedRef.current = onAllStopped;
 
   useEffect(() => {
-    if (!spinning) {
-      cancelAnimationFrame(raf.current);
-      setBlur(false);
-      setOffsets(grid.map(() => 0));
-      return;
-    }
-    setBlur(true);
-    start.current = performance.now();
-    const tick = (t: number) => {
-      const elapsed = t - start.current;
-      setOffsets(
-        grid.map((_, i) => {
-          const speed = 18 + i * 3.5;
-          return -((elapsed / 16) * speed) % (ROW_H * 8);
-        })
-      );
-      raf.current = requestAnimationFrame(tick);
+    if (spinning) return;
+    setOffsets(stops.map((s) => -s * ROW_H));
+    setBusy(strips.map(() => false));
+  }, [stops, spinning, strips]);
+
+  useEffect(() => {
+    if (!spinning || !targetStops) return;
+
+    allDone.current = false;
+    finished.current = strips.map(() => false);
+    setBusy(strips.map(() => true));
+
+    const startTime = performance.now();
+    const baseDuration = 1700;
+    const stagger = 320;
+    const extraLoops = strips.map((_, i) => 5 + i);
+
+    const tick = (now: number) => {
+      let complete = true;
+      const nextY: number[] = [];
+      const nextBusy: boolean[] = [];
+
+      for (let i = 0; i < strips.length; i++) {
+        const len = strips[i].length;
+        const dur = baseDuration + i * stagger;
+        const t = Math.min(1, Math.max(0, (now - startTime) / dur));
+        const e = easeOutCubic(t);
+        const from = stops[i];
+        const to = targetStops[i];
+        let delta = (to - from + len) % len;
+        if (delta === 0) delta = len;
+        const travel = extraLoops[i] * len + delta;
+        nextY[i] = -(from * ROW_H + travel * ROW_H * e);
+        const done = t >= 1;
+        nextBusy[i] = !done;
+        if (!done) complete = false;
+        if (done && !finished.current[i]) {
+          finished.current[i] = true;
+          nextY[i] = -(to + extraLoops[i] * len) * ROW_H;
+          onReelStopRef.current?.(i);
+        }
+      }
+
+      setOffsets(nextY);
+      setBusy(nextBusy);
+
+      if (!complete) {
+        raf.current = requestAnimationFrame(tick);
+      } else if (!allDone.current) {
+        allDone.current = true;
+        // seamless snap to base copy (same symbols)
+        setOffsets(targetStops.map((s) => -s * ROW_H));
+        setBusy(strips.map(() => false));
+        onAllStoppedRef.current?.();
+      }
     };
+
     raf.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf.current);
-  }, [spinning, grid]);
+  }, [spinning, targetStops, stops, strips]);
 
-  const strips = useMemo(() => {
-    return grid.map((col) => {
-      // duplicate column for seamless spin illusion
-      const loop = [...col, ...col, ...col, ...col, ...col, ...col];
-      return loop;
-    });
-  }, [grid]);
+  const renderStrips = useMemo(
+    () => strips.map((strip) => [...strip, ...strip, ...strip, ...strip, ...strip]),
+    [strips]
+  );
 
   return (
     <div className={`slot-reels slot-reels--${theme} ${className}`}>
       <div className="slot-reels__frame">
-        {strips.map((strip, ri) => (
-          <div key={ri} className="slot-reel">
-            <div
-              className={`slot-reel__window ${blur && spinning ? "is-spinning" : ""}`}
-            >
+        {renderStrips.map((strip, ri) => {
+          const stop = !busy[ri] && targetStops ? targetStops[ri] : stops[ri];
+          const len = strips[ri].length;
+          return (
+            <div key={ri} className="slot-reel">
               <div
-                className="slot-reel__strip"
-                style={{
-                  transform: spinning
-                    ? `translateY(${offsets[ri]}px)`
-                    : "translateY(0)",
-                }}
+                className={`slot-reel__window ${busy[ri] ? "is-spinning" : ""}`}
+                style={{ height: ROW_H * rows }}
               >
-                {(spinning ? strip : grid[ri]).map((sym, si) => {
-                  const row = spinning ? si % 3 : si;
-                  const lit = !spinning && highlight?.[ri]?.[row];
-                  return (
-                    <div
-                      key={`${ri}-${si}-${sym}`}
-                      className={`slot-cell ${lit ? "is-win" : ""}`}
-                      style={{ height: ROW_H }}
-                    >
-                      {renderSymbol(sym, { size: "md" })}
-                    </div>
-                  );
-                })}
+                <div
+                  className="slot-reel__strip"
+                  style={{ transform: `translate3d(0, ${offsets[ri]}px, 0)` }}
+                >
+                  {strip.map((sym, si) => {
+                    const logical = si % len;
+                    const rowInWindow = (logical - (stop % len) + len) % len;
+                    const lit =
+                      !busy[ri] &&
+                      rowInWindow < rows &&
+                      !!highlight?.[ri]?.[rowInWindow];
+                    return (
+                      <div
+                        key={`${ri}-${si}`}
+                        className={`slot-cell ${lit ? "is-win" : ""}`}
+                        style={{ height: ROW_H }}
+                      >
+                        <SlotSymbol id={sym} />
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

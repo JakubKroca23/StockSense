@@ -1,5 +1,5 @@
-const CACHE = "stocksense-v6";
-const ASSETS = ["/", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/login"];
+const CACHE = "stocksense-v7";
+const ASSETS = ["/", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png", "/apple-touch-icon.png", "/login"];
 
 function shouldBypass(url) {
   // Never cache authenticated API / Next data — avoids stale 401s.

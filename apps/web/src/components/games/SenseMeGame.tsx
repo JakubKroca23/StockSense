@@ -1,181 +1,175 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { CreditsBar, useCredits } from "@/components/games/CreditsBar";
 import { SlotReels } from "@/components/games/SlotReels";
+import { SlotSymbol } from "@/components/games/SlotSymbols";
 import { awardCredits, spendCredits } from "@/lib/credits";
 import { slotAudio } from "@/lib/slotAudio";
 import {
-  CLASSIC_10_LINES,
-  countScatters,
-  evalLine,
-  sleep,
-  weightedPick,
-} from "@/lib/slotMath";
+  LINES_5X3_10,
+  evaluateSpin,
+  makeStrips,
+  randomStops,
+  type SpinResult,
+} from "@/lib/slotEngine";
 
 const BETS = [10, 20, 50, 100, 250, 500];
+const LINES = 10;
+const ROWS = 3;
 
-/** Dazzle Me–inspired gem cascade feel — Sense green dazzle */
-const SYMBOLS = ["eye", "gemG", "gemB", "gemP", "star", "A", "K", "Q", "J", "scatter"] as const;
-type Sym = (typeof SYMBOLS)[number];
-
-const WEIGHTS: Record<Sym, number> = {
-  eye: 4,
-  gemG: 8,
-  gemB: 9,
-  gemP: 9,
-  star: 10,
-  A: 14,
-  K: 14,
-  Q: 15,
-  J: 16,
-  scatter: 3,
+const WEIGHTS: Record<string, number> = {
+  eye: 2,
+  seven: 2,
+  bell: 3,
+  scatter: 2,
+  watermelon: 5,
+  grapes: 6,
+  orange: 7,
+  plum: 7,
+  cherry: 8,
+  lemon: 8,
 };
 
-/** pays for 3 / 4 / 5 of a kind (index 2,3,4) — per line × bet/10 */
-const PAYS: Record<string, number[]> = {
-  eye: [0, 0, 25, 80, 250],
-  gemG: [0, 0, 15, 50, 150],
-  gemB: [0, 0, 12, 40, 120],
-  gemP: [0, 0, 12, 40, 120],
-  star: [0, 0, 10, 30, 90],
-  A: [0, 0, 8, 20, 60],
-  K: [0, 0, 6, 18, 50],
-  Q: [0, 0, 5, 15, 40],
-  J: [0, 0, 5, 12, 35],
+const PAYTABLE: Record<string, number[]> = {
+  eye: [0, 0, 0, 40, 120, 400],
+  seven: [0, 0, 0, 30, 100, 300],
+  bell: [0, 0, 0, 20, 60, 160],
+  watermelon: [0, 0, 0, 15, 40, 100],
+  grapes: [0, 0, 0, 12, 35, 80],
+  orange: [0, 0, 0, 10, 25, 60],
+  plum: [0, 0, 0, 10, 25, 60],
+  cherry: [0, 0, 0, 8, 20, 50],
+  lemon: [0, 0, 0, 8, 20, 50],
 };
 
-const WILD = "eye";
-const SCATTER = "scatter";
+const SCATTER_PAYS: Record<number, number> = { 3: 2, 4: 10, 5: 50 };
 
-function randomGrid(): string[][] {
-  return Array.from({ length: 5 }, () =>
-    Array.from({ length: 3 }, () => weightedPick(WEIGHTS))
-  );
-}
-
-function SymbolGlyph({ id, size }: { id: string; size: "sm" | "md" }) {
-  const cls = `slot-glyph slot-glyph--${id} slot-glyph--${size}`;
-  const label: Record<string, string> = {
-    eye: "◎",
-    gemG: "◆",
-    gemB: "◈",
-    gemP: "◇",
-    star: "✦",
-    A: "A",
-    K: "K",
-    Q: "Q",
-    J: "J",
-    scatter: "✧",
-  };
-  return (
-    <span className={cls} data-sym={id}>
-      <span className="slot-glyph__face">{label[id] || id}</span>
-    </span>
-  );
-}
+type Meta = { wasFs: boolean; mult: number; fsLeft: number };
 
 export function SenseMeGame() {
   const { balance } = useCredits();
   const [bet, setBet] = useState(50);
-  const [grid, setGrid] = useState<string[][]>(() => randomGrid());
+  const strips = useMemo(() => makeStrips(WEIGHTS, 5, 36), []);
+  const [stops, setStops] = useState(() => randomStops(strips));
+  const [targetStops, setTargetStops] = useState<number[] | null>(null);
   const [spinning, setSpinning] = useState(false);
+  const [highlight, setHighlight] = useState<boolean[][] | undefined>();
   const [lastWin, setLastWin] = useState(0);
-  const [msg, setMsg] = useState("Sense Me — roztoč reels");
+  const [msg, setMsg] = useState("Sense Me — roztoč válce");
   const [freeSpins, setFreeSpins] = useState(0);
   const [fsMult, setFsMult] = useState(1);
-  const [highlight, setHighlight] = useState<boolean[][] | undefined>();
   const [muted, setMuted] = useState(false);
   const [flash, setFlash] = useState(false);
+
+  const pendingRef = useRef<SpinResult | null>(null);
+  const metaRef = useRef<Meta>({ wasFs: false, mult: 1, fsLeft: 0 });
 
   useEffect(() => {
     slotAudio.setMuted(muted);
   }, [muted]);
 
-  const lineBet = bet / 10;
+  const lineBet = bet / LINES;
+  const inFs = freeSpins > 0;
 
-  const evaluate = useCallback(
-    (g: string[][], inFs: boolean, mult: number) => {
-      let total = 0;
-      const hl = Array.from({ length: 5 }, () => [false, false, false]);
-      for (const line of CLASSIC_10_LINES) {
-        const hit = evalLine(g, line, WILD, PAYS);
-        if (!hit) continue;
-        total += hit.winMult * lineBet * (inFs ? mult : 1);
-        line.forEach((row, reel) => {
-          if (reel < hit.count) hl[reel][row] = true;
-        });
+  const settle = useCallback(
+    (result: SpinResult, meta: Meta) => {
+      setStops(result.stops);
+      setTargetStops(null);
+      setHighlight(result.highlight);
+      setLastWin(result.totalWin);
+
+      let nextFs = meta.wasFs ? meta.fsLeft - 1 : 0;
+      let nextMult = meta.mult;
+
+      if (result.scatterCount >= 3) {
+        const add = result.scatterCount === 3 ? 10 : result.scatterCount === 4 ? 15 : 20;
+        nextFs = (meta.wasFs ? meta.fsLeft - 1 : 0) + add;
+        nextMult = meta.wasFs ? Math.min(meta.mult + 1, 5) : 1;
+        setMsg(
+          `Scatter ×${result.scatterCount} → +${add} FS${meta.wasFs ? ` · multi ×${nextMult}` : ""}`
+        );
+        slotAudio.freeSpin();
+        setFlash(true);
+        setTimeout(() => setFlash(false), 700);
       }
-      const sc = countScatters(g, SCATTER);
-      if (sc >= 3) {
-        total += lineBet * (sc === 3 ? 20 : sc === 4 ? 80 : 200) * (inFs ? mult : 1);
+
+      if (result.totalWin > 0) {
+        awardCredits(result.totalWin);
+        const linesDesc = result.lineWins
+          .slice(0, 3)
+          .map((w) => `L${w.lineIndex + 1} ${w.count}×${w.symbol}`)
+          .join(" · ");
+        if (result.scatterCount < 3) {
+          setMsg(
+            `Výhra ${result.totalWin.toLocaleString("cs-CZ")} SC` +
+              (linesDesc ? ` · ${linesDesc}` : "") +
+              (result.scatterWin ? ` · scatter ${result.scatterWin}` : "")
+          );
+        }
+        if (result.totalWin >= bet * 8) slotAudio.winBig();
+        else slotAudio.winSmall();
+        setFlash(true);
+        setTimeout(() => setFlash(false), 450);
+      } else if (result.scatterCount < 3) {
+        setMsg(meta.wasFs && meta.fsLeft <= 1 ? "Free spins hotovo" : "Bez výhry");
+        if (!meta.wasFs) slotAudio.lose();
       }
-      return { total: Math.floor(total), hl, scatters: sc };
+
+      setFreeSpins(nextFs);
+      setFsMult(nextFs > 0 ? nextMult : 1);
+      pendingRef.current = null;
+      setSpinning(false);
     },
-    [lineBet]
+    [bet]
   );
 
-  const spin = useCallback(async () => {
+  const spin = useCallback(() => {
     if (spinning) return;
-    const inFs = freeSpins > 0;
-    if (!inFs) {
-      const spent = spendCredits(bet);
-      if (!spent) {
-        setMsg("Nedostatek Sense Coins — doplň menu");
-        slotAudio.lose();
-        return;
-      }
-    } else {
-      setFreeSpins((n) => n - 1);
+    const wasFs = freeSpins > 0;
+    if (!wasFs && !spendCredits(bet)) {
+      setMsg("Nedostatek Sense Coins — doplň menu");
+      slotAudio.lose();
+      return;
     }
 
-    setSpinning(true);
+    const nextStops = randomStops(strips);
+    const mult = wasFs ? fsMult : 1;
+    const result = evaluateSpin({
+      strips,
+      stops: nextStops,
+      rows: ROWS,
+      lines: LINES_5X3_10,
+      paytable: PAYTABLE,
+      lineBet,
+      totalBet: bet,
+      wild: "eye",
+      scatter: "scatter",
+      scatterPays: SCATTER_PAYS,
+      winMultiplier: mult,
+    });
+
+    metaRef.current = { wasFs, mult, fsLeft: freeSpins };
+    pendingRef.current = result;
     setHighlight(undefined);
     setLastWin(0);
-    setMsg(inFs ? `Free spin · ×${fsMult}` : "Točí se…");
+    setTargetStops(nextStops);
+    setSpinning(true);
+    setMsg(wasFs ? `Free spin · ×${mult}` : "Točí se…");
     slotAudio.spinStart();
+  }, [spinning, freeSpins, bet, strips, fsMult, lineBet]);
 
-    const tick = window.setInterval(() => slotAudio.reelTick(), 90);
-    await sleep(1400 + Math.random() * 600);
-    window.clearInterval(tick);
+  const onReelStop = useCallback((i: number) => {
+    if (i === 0) slotAudio.reelStop();
+    else slotAudio.reelTick();
+  }, []);
 
-    const next = randomGrid();
-    setGrid(next);
-    setSpinning(false);
-    slotAudio.reelStop();
-
-    const { total, hl, scatters } = evaluate(next, inFs, fsMult);
-    setHighlight(hl);
-
-    if (scatters >= 3) {
-      const add = scatters === 3 ? 10 : scatters === 4 ? 15 : 20;
-      const nextMult = inFs ? Math.min(fsMult + 1, 5) : 1;
-      setFreeSpins((n) => n + add);
-      setFsMult(nextMult);
-      setMsg(`Free spins +${add}${inFs ? ` · multi ×${nextMult}` : ""}!`);
-      slotAudio.freeSpin();
-      setFlash(true);
-      setTimeout(() => setFlash(false), 700);
-    }
-
-    if (total > 0) {
-      awardCredits(total);
-      setLastWin(total);
-      setMsg(total >= bet * 10 ? `Velká výhra ${total.toLocaleString("cs-CZ")} SC!` : `Výhra ${total.toLocaleString("cs-CZ")} SC`);
-      if (total >= bet * 10) slotAudio.winBig();
-      else slotAudio.winSmall();
-      setFlash(true);
-      setTimeout(() => setFlash(false), 500);
-    } else if (scatters < 3) {
-      setMsg(inFs && freeSpins <= 1 ? "Free spins hotovo" : "Bez výhry");
-      if (!inFs) slotAudio.lose();
-    }
-
-    if (inFs && freeSpins <= 1 && scatters < 3) {
-      setFsMult(1);
-    }
-  }, [spinning, freeSpins, bet, fsMult, evaluate]);
+  const onAllStopped = useCallback(() => {
+    const result = pendingRef.current;
+    if (!result) return;
+    settle(result, metaRef.current);
+  }, [settle]);
 
   const betIdx = BETS.indexOf(bet);
 
@@ -188,19 +182,23 @@ export function SenseMeGame() {
         <h1 className="game-title game-title--dazzle">Sense Me</h1>
         <CreditsBar compact />
       </div>
-
-      <p className="game-tagline">Dazzle energie · Sense styl · 5×3 · 10 linií</p>
+      <p className="game-tagline">5 válců · 10 linií · Wild oko · Scatter hvězda</p>
 
       <div className="slot-cabinet slot-cabinet--dazzle">
         <div className="slot-cabinet__glow" aria-hidden />
         <SlotReels
-          grid={grid}
+          strips={strips}
+          stops={stops}
+          targetStops={targetStops}
           spinning={spinning}
-          theme="dazzle"
           highlight={highlight}
-          renderSymbol={(id, opts) => <SymbolGlyph id={id} size={opts.size} />}
+          theme="dazzle"
+          onReelStop={onReelStop}
+          onAllStopped={onAllStopped}
         />
-        <div className="slot-payline-hint muted text-xs">Wild ◎ · Scatter ✧ = free spins</div>
+        <div className="slot-payline-hint muted text-xs">
+          Výhra zleva doprava po linii · zvýrazněné = výherní symboly
+        </div>
       </div>
 
       <div className="slot-hud">
@@ -219,12 +217,11 @@ export function SenseMeGame() {
           )}
           <span className="muted tabular-nums">{balance.toLocaleString("cs-CZ")} SC</span>
         </div>
-
         <div className="slot-controls">
           <button
             type="button"
             className="btn"
-            disabled={spinning || betIdx <= 0}
+            disabled={spinning || betIdx <= 0 || inFs}
             onClick={() => {
               slotAudio.click();
               setBet(BETS[Math.max(0, betIdx - 1)]);
@@ -232,18 +229,13 @@ export function SenseMeGame() {
           >
             −
           </button>
-          <button
-            type="button"
-            className="slot-spin slot-spin--dazzle"
-            disabled={spinning}
-            onClick={() => void spin()}
-          >
+          <button type="button" className="slot-spin slot-spin--dazzle" disabled={spinning} onClick={spin}>
             {spinning ? "…" : freeSpins > 0 ? "FREE" : "SPIN"}
           </button>
           <button
             type="button"
             className="btn"
-            disabled={spinning || betIdx >= BETS.length - 1}
+            disabled={spinning || betIdx >= BETS.length - 1 || inFs}
             onClick={() => {
               slotAudio.click();
               setBet(BETS[Math.min(BETS.length - 1, betIdx + 1)]);
@@ -265,13 +257,15 @@ export function SenseMeGame() {
       </div>
 
       <details className="slot-paytable card p-3 text-sm">
-        <summary className="cursor-pointer">Paytable</summary>
-        <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs muted">
-          {Object.entries(PAYS).map(([k, v]) => (
-            <div key={k} className="flex items-center gap-2">
-              <SymbolGlyph id={k} size="sm" />
+        <summary className="cursor-pointer">Paytable (násobek line bet = sázka/10)</summary>
+        <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+          {Object.entries(PAYTABLE).map(([k, v]) => (
+            <div key={k} className="flex items-center gap-2 muted">
+              <span className="slot-sym slot-sym--mini">
+                <SlotSymbol id={k} />
+              </span>
               <span>
-                3×{v[2]} · 4×{v[3]} · 5×{v[4]}
+                3×{v[3]} · 4×{v[4]} · 5×{v[5]}
               </span>
             </div>
           ))}

@@ -2248,51 +2248,57 @@ textarea {
 
 .slot-cabinet {
   position: relative;
-  border-radius: 20px;
-  padding: 0.85rem 0.75rem 0.65rem;
-  border: 1px solid var(--glass-border);
+  border-radius: 18px;
+  padding: 0.9rem 0.7rem 0.7rem;
   overflow: hidden;
   isolation: isolate;
 }
 
 .slot-cabinet--dazzle {
   background:
-    radial-gradient(80% 60% at 50% 0%, rgba(93, 222, 138, 0.18), transparent 55%),
-    linear-gradient(180deg, #152238, #0d1524 70%);
+    radial-gradient(70% 50% at 50% 0%, rgba(93, 222, 138, 0.14), transparent 55%),
+    linear-gradient(180deg, #0e1a33 0%, #08101f 100%);
+  border: 2px solid #e8782a;
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent),
-    0 0 0 1px color-mix(in srgb, var(--sense) 18%, transparent),
-    0 22px 50px rgba(0, 0, 0, 0.4);
+    0 0 0 1px color-mix(in srgb, #ffb074 40%, transparent),
+    0 0 28px rgba(232, 120, 42, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 22px 50px rgba(0, 0, 0, 0.45);
 }
 
 .slot-cabinet--book {
   background:
-    radial-gradient(80% 60% at 50% 0%, rgba(240, 193, 74, 0.16), transparent 55%),
-    linear-gradient(180deg, #1c1820, #100e14 70%);
+    radial-gradient(70% 50% at 50% 0%, rgba(240, 193, 74, 0.14), transparent 55%),
+    linear-gradient(180deg, #1a1410 0%, #0c0a08 100%);
+  border: 2px solid #c9a227;
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent),
-    0 0 0 1px color-mix(in srgb, var(--warn) 22%, transparent),
-    0 22px 50px rgba(0, 0, 0, 0.45);
+    0 0 0 1px color-mix(in srgb, #ffe082 35%, transparent),
+    0 0 28px rgba(201, 162, 39, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 22px 50px rgba(0, 0, 0, 0.5);
 }
 
 .slot-cabinet__glow {
   position: absolute;
-  inset: -20%;
-  background: conic-gradient(from 180deg, transparent, rgba(93, 222, 138, 0.08), transparent 40%);
-  animation: slot-glow-spin 12s linear infinite;
+  inset: -30%;
+  background: conic-gradient(from 180deg, transparent, rgba(93, 222, 138, 0.07), transparent 40%);
+  animation: slot-glow-spin 14s linear infinite;
   pointer-events: none;
   z-index: 0;
-  opacity: 0.7;
+  opacity: 0.65;
 }
 
 .slot-cabinet--book .slot-cabinet__glow {
-  background: conic-gradient(from 90deg, transparent, rgba(240, 193, 74, 0.1), transparent 45%);
+  background: conic-gradient(from 90deg, transparent, rgba(240, 193, 74, 0.09), transparent 45%);
 }
 
 @keyframes slot-glow-spin {
-  to {
-    transform: rotate(360deg);
-  }
+  to { transform: rotate(360deg); }
+}
+
+.slot-reels-wrap {
+  position: relative;
+  z-index: 1;
 }
 
 .slot-reels {
@@ -2303,175 +2309,139 @@ textarea {
 .slot-reels__frame {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: 0.28rem;
-  padding: 0.35rem;
-  border-radius: 14px;
-  background: color-mix(in srgb, #050a12 75%, transparent);
-  border: 1px solid color-mix(in srgb, #9eb6ff 12%, transparent);
+  gap: 0;
+  padding: 0.2rem;
+  border-radius: 10px;
+  background: #07101f;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.slot-reel {
+  border-right: 1px solid rgba(0, 0, 0, 0.55);
+}
+
+.slot-reel:last-child {
+  border-right: none;
 }
 
 .slot-reel__window {
-  height: calc(72px * 3);
   overflow: hidden;
-  border-radius: 10px;
-  background: linear-gradient(180deg, #0a1220, #121c30);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, #fff 5%, transparent);
+  position: relative;
+  background: linear-gradient(180deg, #0a1428, #0c1830 50%, #0a1428);
+}
+
+.slot-reel__window::before,
+.slot-reel__window::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 18%;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.slot-reel__window::before {
+  top: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.55), transparent);
+}
+
+.slot-reel__window::after {
+  bottom: 0;
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.55), transparent);
 }
 
 .slot-reel__window.is-spinning {
-  filter: blur(1.2px) brightness(1.05);
+  filter: blur(1.4px) brightness(1.08) saturate(1.1);
 }
 
 .slot-reel__strip {
   will-change: transform;
-  transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  backface-visibility: hidden;
 }
 
 .slot-cell {
   display: grid;
   place-items: center;
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 .slot-cell.is-win {
-  animation: cell-win 0.7s ease;
-  background: color-mix(in srgb, var(--sense) 18%, transparent);
-  box-shadow: inset 0 0 18px color-mix(in srgb, var(--sense) 25%, transparent);
+  animation: cell-win 0.75s ease infinite;
+  background: radial-gradient(circle at center, rgba(93, 222, 138, 0.28), transparent 70%);
+  box-shadow: inset 0 0 22px rgba(93, 222, 138, 0.35);
+  z-index: 1;
 }
 
 .slot-reels--book .slot-cell.is-win {
-  background: color-mix(in srgb, var(--warn) 16%, transparent);
-  box-shadow: inset 0 0 18px color-mix(in srgb, var(--warn) 22%, transparent);
+  background: radial-gradient(circle at center, rgba(240, 193, 74, 0.26), transparent 70%);
+  box-shadow: inset 0 0 22px rgba(240, 193, 74, 0.32);
+}
+
+.slot-cell.is-expand {
+  animation: expand-sym 0.55s ease;
 }
 
 @keyframes cell-win {
-  0%,
-  100% {
-    transform: scale(1);
-  }
-  40% {
-    transform: scale(1.06);
-  }
+  0%, 100% { transform: scale(1); filter: brightness(1); }
+  50% { transform: scale(1.05); filter: brightness(1.2); }
 }
 
-.slot-glyph {
+@keyframes expand-sym {
+  0% { transform: scale(0.7); opacity: 0.4; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.slot-sym {
   display: grid;
   place-items: center;
-  width: 3.1rem;
-  height: 3.1rem;
-  border-radius: 12px;
+  width: 4rem;
+  height: 4rem;
+  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.45));
+}
+
+.slot-sym--mini {
+  width: 1.85rem;
+  height: 1.85rem;
+}
+
+.slot-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+}
+
+.slot-sym__fallback {
   font-weight: 800;
-  font-family: var(--font-brand);
-  letter-spacing: 0.02em;
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent),
-    0 6px 14px rgba(0, 0, 0, 0.35);
-  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  color: #fff;
 }
 
-.slot-glyph--sm {
-  width: 1.7rem;
-  height: 1.7rem;
-  border-radius: 7px;
-  font-size: 0.7rem;
+.slot-expand-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  pointer-events: none;
+  background: rgba(8, 12, 20, 0.55);
+  backdrop-filter: blur(1px);
+  border-radius: 10px;
+  animation: credits-pop 0.35s ease;
 }
 
-.slot-glyph__face {
-  line-height: 1;
-  font-size: 1.15rem;
-}
-
-.slot-glyph--sm .slot-glyph__face {
-  font-size: 0.72rem;
-}
-
-.slot-glyph--eye {
-  background: linear-gradient(145deg, #7dffb0, #2f9a5c);
-  color: #04140a;
-  box-shadow: 0 0 16px var(--sense-glow);
-}
-
-.slot-glyph--gemG {
-  background: linear-gradient(145deg, #5dde8a, #1e6b45);
-  color: #eafff3;
-}
-
-.slot-glyph--gemB {
-  background: linear-gradient(145deg, #8ec5ff, #3a6db8);
-  color: #eaf3ff;
-}
-
-.slot-glyph--gemP {
-  background: linear-gradient(145deg, #d4a4ff, #7a3fb0);
-  color: #f7ecff;
-}
-
-.slot-glyph--star {
-  background: linear-gradient(145deg, #ffe38a, #d4a017);
-  color: #2a2000;
-}
-
-.slot-glyph--scatter {
-  background: linear-gradient(145deg, #fff6c8, #5dde8a 60%, #6ea8ff);
-  color: #0a1520;
-  animation: dazzle-pulse 2.2s ease-in-out infinite;
-}
-
-.slot-glyph--A,
-.slot-glyph--K,
-.slot-glyph--Q,
-.slot-glyph--J {
-  background: linear-gradient(160deg, #2a3a55, #162235);
-  color: #d7e4fa;
-  border: 1px solid color-mix(in srgb, #9eb6ff 20%, transparent);
-}
-
-@keyframes dazzle-pulse {
-  0%,
-  100% {
-    filter: brightness(1);
-  }
-  50% {
-    filter: brightness(1.18);
-  }
-}
-
-.slot-glyph--book-book {
-  background: linear-gradient(145deg, #f0c14a, #8a6a12);
-  color: #1a1400;
-  box-shadow: 0 0 14px rgba(240, 193, 74, 0.35);
-}
-
-.slot-glyph--book-explorer {
-  background: linear-gradient(145deg, #5dde8a, #1f5c3a);
-  color: #04140a;
-}
-
-.slot-glyph--book-ankh {
-  background: linear-gradient(145deg, #ffd56a, #b8860b);
-  color: #2a1c00;
-}
-
-.slot-glyph--book-scarab {
-  background: linear-gradient(145deg, #5ec4a0, #1d6b55);
-  color: #eafff6;
-}
-
-.slot-glyph--book-A,
-.slot-glyph--book-K,
-.slot-glyph--book-Q,
-.slot-glyph--book-J,
-.slot-glyph--book-10 {
-  background: linear-gradient(160deg, #3a2e24, #1a1410);
-  color: #f3e6c8;
-  border: 1px solid color-mix(in srgb, var(--warn) 25%, transparent);
+.slot-expand-overlay__col {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid rgba(0, 0, 0, 0.4);
 }
 
 .slot-payline-hint {
   position: relative;
   z-index: 1;
   text-align: center;
-  margin-top: 0.45rem;
+  margin-top: 0.5rem;
 }
 
 .book-special-banner {
@@ -2577,46 +2547,24 @@ textarea {
   animation: cabinet-flash 0.55s ease;
 }
 
-.book-sense.is-expanding .slot-reels__frame {
+.book-sense.is-expanding .slot-expand-overlay {
   animation: expand-pulse 0.55s ease;
 }
 
 @keyframes cabinet-flash {
-  0%,
-  100% {
-    filter: brightness(1);
-  }
-  35% {
-    filter: brightness(1.25);
-  }
+  0%, 100% { filter: brightness(1); }
+  35% { filter: brightness(1.22); }
 }
 
 @keyframes expand-pulse {
-  0%,
-  100% {
-    transform: scale(1);
-  }
-  40% {
-    transform: scale(1.015);
-    box-shadow: 0 0 24px rgba(240, 193, 74, 0.35);
-  }
+  0%, 100% { transform: scale(1); }
+  40% { transform: scale(1.02); box-shadow: 0 0 28px rgba(240, 193, 74, 0.4); }
 }
 
 @media (max-width: 520px) {
-  .slot-glyph:not(.slot-glyph--sm) {
-    width: 2.45rem;
-    height: 2.45rem;
-  }
-
-  .slot-glyph__face {
-    font-size: 0.95rem;
-  }
-
-  .slot-reel__window {
-    height: calc(58px * 3);
-  }
-
-  .slot-cell {
-    height: 58px !important;
+  .slot-sym {
+    width: 3.15rem;
+    height: 3.15rem;
   }
 }
+
