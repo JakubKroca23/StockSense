@@ -7,12 +7,11 @@ Osobní PWA rádce pro analýzu akcií, komodit a crypto.
 
 ## Rychlý start (server)
 
-1. Doplň v `.env` heslo a secret + LLM klíče:
+1. Doplň v `.env` LLM klíče (volitelně `AUTH_USER_ID` / `AUTH_DISPLAY_NAME`):
 
 ```bash
-AUTH_PASSWORD=tvoje-heslo
-AUTH_SECRET=dlouhy-nahodny-retezec
 AUTH_USER_ID=admin
+AUTH_DISPLAY_NAME=Jakub
 ```
 
 2. Traefik síť na VPS se jmenuje `appwrite` (historicky — jen Docker network, ne auth).
@@ -46,7 +45,7 @@ make web
 
 - Web: http://localhost:3000  
 - API: http://localhost:8000/docs  
-- Auth: jen heslo z `AUTH_PASSWORD` v `.env`  
+- Auth: vypnuté — aplikace je volně přístupná (shared single user)  
 - `apps/web/.env.local` míří API na produkci nebo `http://localhost:8000/api`.
 
 Zastavení: `make dev-down`
@@ -64,7 +63,7 @@ uvicorn app.main:app --reload --port 8000
 
 ## Co je hotové v MVP
 
-- Appwrite login + JWT ověření v API
+- Volný přístup (bez hesla) + shared user identity v API
 - Portfolio (ruční), watchlist, home (portfolio + tipy)
 - Instrument detail (cena, sparkline, fundament, SEC filings, tip + feedback)
 - Scoring engine (fundament/makro/flow/TA) několikrát denně

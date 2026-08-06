@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.auth import AuthUser, get_current_user, mint_access_token, verify_password
+from app.core.auth import AuthUser, get_current_user
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.models import (
@@ -31,8 +31,6 @@ from app.models import (
 )
 from app.schemas import (
     AlertOut,
-    AuthLogin,
-    AuthTokenOut,
     ChatMessageOut,
     ChatRequest,
     ChatSessionCreate,
@@ -189,41 +187,6 @@ async def _portfolio_with_marks(
 @router.get("/health")
 async def health():
     return {"status": "ok", "service": "stocksense-api"}
-
-
-@router.post("/auth/login", response_model=AuthTokenOut)
-async def auth_login(payload: AuthLogin):
-    """Single-user password login → locally signed JWT."""
-    settings = get_settings()
-    if not settings.auth_password:
-        raise HTTPException(
-            status_code=500,
-            detail="AUTH_PASSWORD není nastaveno na serveru",
-        )
-    if not verify_password(settings, payload.password):
-        raise HTTPException(status_code=401, detail="Neplatné heslo")
-    token = mint_access_token(settings)
-    return AuthTokenOut(
-        access_token=token,
-        expires_in=settings.auth_token_ttl_sec,
-        user={
-            "id": settings.auth_user_id,
-            "email": settings.auth_email or None,
-            "name": settings.auth_display_name,
-        },
-    )
-
-
-@router.post("/auth/refresh", response_model=AuthTokenOut)
-async def auth_refresh(user: AuthUser = Depends(get_current_user)):
-    """Mint a fresh JWT for an already-authenticated user."""
-    settings = get_settings()
-    token = mint_access_token(settings)
-    return AuthTokenOut(
-        access_token=token,
-        expires_in=settings.auth_token_ttl_sec,
-        user={"id": user.id, "email": user.email, "name": user.name},
-    )
 
 
 @router.get("/me")

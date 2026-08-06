@@ -13,13 +13,10 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://stocksense:stocksense@db:5432/stocksense"
     database_url_sync: str = "postgresql://stocksense:stocksense@db:5432/stocksense"
 
-    # Simple single-user password auth (replaces Appwrite)
-    auth_password: str = ""
-    auth_secret: str = ""
+    # Open access — shared single user identity (no password login)
     auth_user_id: str = "admin"
     auth_display_name: str = "Jakub"
     auth_email: str = ""
-    auth_token_ttl_sec: int = 60 * 60 * 24 * 7  # 7 days
 
     cors_origins: str = "https://stocksense.propoj.app,http://localhost:3000"
 

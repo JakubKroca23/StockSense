@@ -1,13 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
-import {
-  clearAuthTokens,
-  ensureApiAuth,
-  getCurrentUser,
-} from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { StockSenseLogo } from "@/components/StockSenseLogo";
 import { NAV_ICON_SIZE, navIcons } from "@/components/NavIcons";
 
@@ -58,10 +54,8 @@ function MenuGlyph({ open }: { open: boolean }) {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const router = useRouter();
   const menuId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
-  const [ready, setReady] = useState(false);
   const [name, setName] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPath, setMenuPath] = useState(pathname);
@@ -75,29 +69,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   useEffect(() => {
-    if (pathname === "/login") return;
     let cancelled = false;
     (async () => {
-      const ok = await ensureApiAuth();
-      if (cancelled) return;
-      if (!ok) {
-        router.replace("/login");
-        return;
-      }
       const user = await getCurrentUser();
       if (cancelled) return;
-      if (!user) {
-        clearAuthTokens();
-        router.replace("/login");
-        return;
-      }
       setName(user.name || user.email || "Ty");
-      setReady(true);
     })();
     return () => {
       cancelled = true;
     };
-  }, [pathname, router]);
+  }, []);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -117,15 +98,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       window.removeEventListener("mousedown", onPointer);
     };
   }, [menuOpen]);
-
-  if (pathname === "/login") return <>{children}</>;
-  if (!ready) {
-    return (
-      <div className="min-h-screen grid place-items-center muted">
-        Načítám StockSense…
-      </div>
-    );
-  }
 
   return (
     <div className="app-shell min-h-screen pb-8">
@@ -179,18 +151,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Link>
           </div>
 
-          <div className="app-no-drag flex shrink-0 items-center gap-2 sm:gap-3 text-sm">
-            <span className="muted hidden sm:inline">{name}</span>
-            <button
-              className="btn"
-              onClick={() => {
-                clearAuthTokens();
-                router.replace("/login");
-              }}
-            >
-              Odhlásit
-            </button>
-          </div>
+          {name ? (
+            <div className="app-no-drag flex shrink-0 items-center gap-2 sm:gap-3 text-sm">
+              <span className="muted hidden sm:inline">{name}</span>
+            </div>
+          ) : null}
         </div>
       </header>
 
