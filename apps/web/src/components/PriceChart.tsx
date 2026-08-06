@@ -178,10 +178,12 @@ export function PriceChart({
     const h = wrap.clientHeight;
     if (w < 8 || h < 8) return;
 
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
-      canvas.width = Math.floor(w * dpr);
-      canvas.height = Math.floor(h * dpr);
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    const cw = Math.floor(w * dpr);
+    const ch = Math.floor(h * dpr);
+    if (canvas.width !== cw || canvas.height !== ch) {
+      canvas.width = cw;
+      canvas.height = ch;
       canvas.style.width = `${w}px`;
       canvas.style.height = `${h}px`;
     }
@@ -195,16 +197,30 @@ export function PriceChart({
     if (!cols.length) return;
 
     const theme = themeRef.current || readTheme();
-    const colW = Math.max(4, Math.min(7, Math.floor(w * 0.012)));
-    const maxCols = Math.max(12, Math.min(cols.length, Math.floor((w * 0.55) / colW)));
+    const leftPad = 4;
+    const rightPad = 52;
+    const usableW = Math.max(40, w - leftPad - rightPad);
+    // Fill entire chart width — one column per snapshot (bookmap-style history)
+    const maxCols = Math.min(cols.length, Math.max(48, Math.floor(usableW / 2)));
     const visible = cols.slice(-maxCols);
+    const colW = usableW / visible.length;
+
     let maxSize = 0;
+    const sizes: number[] = [];
     for (const col of visible) {
       for (const lvl of col.levels) {
-        maxSize = Math.max(maxSize, lvl.bid, lvl.ask);
+        const s = Math.max(lvl.bid, lvl.ask);
+        if (s > 0) {
+          sizes.push(s);
+          maxSize = Math.max(maxSize, s);
+        }
       }
     }
     if (maxSize <= 0) return;
+
+    // Soft wall threshold (~top 12% of liquidity) for stop / cluster emphasis
+    sizes.sort((a, b) => a - b);
+    const wallCut = sizes[Math.floor(sizes.length * 0.88)] || maxSize * 0.45;
 
     const topP = series.coordinateToPrice(0);
     const botP = series.coordinateToPrice(h);
@@ -215,22 +231,53 @@ export function PriceChart({
       return ((topP - price) / (topP - botP)) * h;
     };
 
-    const rightPad = 56;
+    // Intensity: log scale so medium walls still show, big walls pop
+    const intensity = (size: number) => {
+      const t = Math.log1p(size) / Math.log1p(maxSize);
+      return Math.min(0.92, Math.max(0.08, t * 0.95));
+    };
+
+    // Estimate cell height from tick spacing near mid
+    let cellH = Math.max(2, Math.min(10, h * 0.01));
+    const sample = visible[visible.length - 1]?.levels || [];
+    if (sample.length >= 2) {
+      const sorted = [...sample].map((l) => l.price).sort((a, b) => a - b);
+      const midIdx = Math.floor(sorted.length / 2);
+      const y0 = priceToY(sorted[midIdx]);
+      const y1 = priceToY(sorted[Math.min(midIdx + 1, sorted.length - 1)]);
+      if (y0 != null && y1 != null) {
+        cellH = Math.max(1.5, Math.min(12, Math.abs(y1 - y0)));
+      }
+    }
+
     visible.forEach((col, i) => {
-      const x = w - rightPad - (visible.length - i) * colW;
+      const x = leftPad + i * colW;
+      const drawW = Math.max(1.2, colW - 0.35);
       for (const lvl of col.levels) {
         const y = priceToY(lvl.price);
-        if (y == null || y < -20 || y > h + 20) continue;
-        const bidA = Math.min(0.85, (lvl.bid / maxSize) * 0.9);
-        const askA = Math.min(0.85, (lvl.ask / maxSize) * 0.9);
-        const cellH = Math.max(3, Math.min(14, h * 0.018));
-        if (bidA > 0.03) {
-          ctx.fillStyle = hexAlpha(theme.up, Math.max(0.18, bidA));
-          ctx.fillRect(x, y - cellH / 2, colW - 1, cellH);
+        if (y == null || y < -4 || y > h + 4) continue;
+
+        if (lvl.bid > 0) {
+          const a = intensity(lvl.bid);
+          const isWall = lvl.bid >= wallCut;
+          ctx.fillStyle = hexAlpha(theme.up, isWall ? Math.min(0.95, a + 0.2) : a);
+          const hh = isWall ? cellH + 1.2 : cellH;
+          ctx.fillRect(x, y - hh / 2, drawW, hh);
+          if (isWall) {
+            ctx.fillStyle = hexAlpha(theme.up, 0.55);
+            ctx.fillRect(x, y - 0.6, drawW, 1.2);
+          }
         }
-        if (askA > 0.03) {
-          ctx.fillStyle = hexAlpha(theme.down, Math.max(0.18, askA));
-          ctx.fillRect(x, y - cellH / 2, colW - 1, cellH);
+        if (lvl.ask > 0) {
+          const a = intensity(lvl.ask);
+          const isWall = lvl.ask >= wallCut;
+          ctx.fillStyle = hexAlpha(theme.down, isWall ? Math.min(0.95, a + 0.2) : a);
+          const hh = isWall ? cellH + 1.2 : cellH;
+          ctx.fillRect(x, y - hh / 2, drawW, hh);
+          if (isWall) {
+            ctx.fillStyle = hexAlpha(theme.down, 0.55);
+            ctx.fillRect(x, y - 0.6, drawW, 1.2);
+          }
         }
       }
     });
@@ -390,13 +437,15 @@ export function PriceChart({
 
   useEffect(() => {
     chartRef.current?.timeScale().applyOptions({
-      rightOffset: showHeatmap ? 22 : 8,
+      rightOffset: showHeatmap ? 10 : 8,
     });
     drawHeatmap();
   }, [showHeatmap]);
 
   useEffect(() => {
-    drawHeatmap();
+    // Redraw immediately whenever book snapshots update
+    const id = requestAnimationFrame(() => drawHeatmap());
+    return () => cancelAnimationFrame(id);
   }, [heatmap, showHeatmap, bars]);
 
   useEffect(() => {

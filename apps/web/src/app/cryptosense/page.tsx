@@ -149,6 +149,7 @@ export default function CryptoSensePage() {
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [heatmap, setHeatmap] = useState<HeatmapColumn[]>([]);
   const [metaOpen, setMetaOpen] = useState(true);
+  const [mobilePanel, setMobilePanel] = useState<"chart" | "book">("chart");
   const heatSymRef = useRef(selected);
 
   const loadOverview = useCallback(async () => {
@@ -205,10 +206,11 @@ export default function CryptoSensePage() {
 
   const pushHeatColumn = useCallback((res: OrderBookData, symbol: string) => {
     const priceMap = new Map<number, { bid: number; ask: number }>();
-    for (const lvl of res.bids.slice(0, 36)) {
+    // Full depth from API (up to hundreds of levels)
+    for (const lvl of res.bids) {
       priceMap.set(lvl.price, { bid: lvl.amount, ask: 0 });
     }
-    for (const lvl of res.asks.slice(0, 36)) {
+    for (const lvl of res.asks) {
       const cur = priceMap.get(lvl.price) || { bid: 0, ask: 0 };
       cur.ask = lvl.amount;
       priceMap.set(lvl.price, cur);
@@ -219,21 +221,28 @@ export default function CryptoSensePage() {
       ask: v.ask,
     }));
     if (!levels.length) return;
-    const col: HeatmapColumn = { ts: Date.now(), levels };
+    const now = Date.now();
+    const col: HeatmapColumn = { ts: now, levels };
     setHeatmap((prev) => {
       const sameSym = heatSymRef.current === symbol;
       const base = sameSym ? prev : [];
       heatSymRef.current = symbol;
+      const last = base[base.length - 1];
+      // Keep rightmost column live (~refresh in place) so heatmap stays current
+      if (last && now - last.ts < 900) {
+        return [...base.slice(0, -1), { ...col, ts: last.ts }];
+      }
       const next = [...base, col];
-      return next.length > 120 ? next.slice(next.length - 120) : next;
+      return next.length > 220 ? next.slice(next.length - 220) : next;
     });
   }, []);
 
   const loadOrderBook = useCallback(
     async (symbol: string, accumulateHeat: boolean) => {
       try {
+        const depth = accumulateHeat ? 200 : 100;
         const res = await apiFetch<OrderBookData>(
-          `/crypto/orderbook?symbol=${encodeURIComponent(symbol)}&limit=40`
+          `/crypto/orderbook?symbol=${encodeURIComponent(symbol)}&limit=${depth}`
         );
         setOrderBook(res);
         if (accumulateHeat) pushHeatColumn(res, symbol);
@@ -259,7 +268,7 @@ export default function CryptoSensePage() {
     void loadOrderBook(selected, showHeatmap);
     const id = window.setInterval(
       () => void loadOrderBook(selected, showHeatmap),
-      showHeatmap ? 1500 : 2500
+      showHeatmap ? 700 : 2000
     );
     return () => window.clearInterval(id);
   }, [selected, showHeatmap, loadOrderBook]);
@@ -425,7 +434,9 @@ export default function CryptoSensePage() {
       </div>
 
       <div className="cryptosense__desk">
-        <section className="card instrument-chart cryptosense__chart">
+        <section
+          className={`card instrument-chart cryptosense__chart is-${mobilePanel}`}
+        >
           <div className="instrument-chart__bar cryptosense__meta">
             <div className="cryptosense__meta-row">
               {activeQuote && (
@@ -500,7 +511,28 @@ export default function CryptoSensePage() {
             </div>
           </div>
 
-          <div className="instrument-chart__stage crypto-chart-stage">
+          <div className="cryptosense__panel-tabs" role="tablist" aria-label="Graf nebo order book">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mobilePanel === "chart"}
+              className={`cryptosense__panel-tab ${mobilePanel === "chart" ? "is-active" : ""}`}
+              onClick={() => setMobilePanel("chart")}
+            >
+              Graf
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mobilePanel === "book"}
+              className={`cryptosense__panel-tab ${mobilePanel === "book" ? "is-active" : ""}`}
+              onClick={() => setMobilePanel("book")}
+            >
+              Order book
+            </button>
+          </div>
+
+          <div className="instrument-chart__stage crypto-chart-stage cryptosense__chart-pane">
             {ohlcv?.ohlcv?.length ? (
               <PriceChart
                 bars={ohlcv.ohlcv}
@@ -516,9 +548,15 @@ export default function CryptoSensePage() {
               </div>
             )}
           </div>
+
+          <div className="cryptosense__ob-in-card">
+            <OrderBookPanel book={orderBook} />
+          </div>
         </section>
 
-        <OrderBookPanel book={orderBook} />
+        <div className="cryptosense__ob-side">
+          <OrderBookPanel book={orderBook} />
+        </div>
       </div>
     </div>
   );

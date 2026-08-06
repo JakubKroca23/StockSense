@@ -240,11 +240,14 @@ export function SenseBot() {
         <Image
           src="/logo-eye-transparent.png"
           alt=""
-          width={36}
-          height={17}
+          width={32}
+          height={15}
           className="sense-bot__fab-eye"
         />
-        <span className="sense-bot__fab-label">sense bot</span>
+        <span className="sense-bot__fab-brand">
+          <span className="sense-bot__fab-sense">SenSe</span>
+          <span className="sense-bot__fab-bot">BOT</span>
+        </span>
       </button>
     </div>
   );

@@ -378,24 +378,29 @@ class MultiExchangeCcxt:
             self._fetch_ohlcv_execution_sync, _normalize_market(symbol), interval, limit
         )
 
-    def _tick_size(self, price: float) -> float:
+    def _tick_size(self, price: float, *, fine: bool = False) -> float:
         if price >= 10_000:
-            return 1.0
-        if price >= 1_000:
-            return 0.5
-        if price >= 100:
-            return 0.1
-        if price >= 10:
-            return 0.01
-        if price >= 1:
-            return 0.001
-        return 0.0001
+            tick = 1.0
+        elif price >= 1_000:
+            tick = 0.5
+        elif price >= 100:
+            tick = 0.1
+        elif price >= 10:
+            tick = 0.01
+        elif price >= 1:
+            tick = 0.001
+        else:
+            tick = 0.0001
+        if fine:
+            tick = tick / 2.0
+        return tick
 
     def _fetch_order_book_sync(self, exchange_id: str, symbol: str, limit: int = 50) -> dict:
         try:
             client = self._get_client(exchange_id)
             market = self._resolve_market(client, symbol)
-            raw = client.fetch_order_book(market, limit=limit)
+            # Exchanges typically allow 5–1000; ask high and trim later.
+            raw = client.fetch_order_book(market, limit=min(max(int(limit), 5), 1000))
             bids = [[float(p), float(a)] for p, a in (raw.get("bids") or []) if p and a]
             asks = [[float(p), float(a)] for p, a in (raw.get("asks") or []) if p and a]
             return {
@@ -419,10 +424,10 @@ class MultiExchangeCcxt:
                 "as_of": datetime.now(timezone.utc).isoformat(),
             }
 
-    async def fetch_aggregated_order_book(self, symbol: str, limit: int = 40) -> dict:
+    async def fetch_aggregated_order_book(self, symbol: str, limit: int = 100) -> dict:
         """Aggregate L2 books from Binance + Bybit into one depth ladder."""
         sym = _normalize_market(symbol)
-        lim = max(5, min(int(limit), 100))
+        lim = max(10, min(int(limit), 500))
         books = await asyncio.gather(
             *[asyncio.to_thread(self._fetch_order_book_sync, ex, sym, lim) for ex in self.exchange_ids]
         )
@@ -434,7 +439,8 @@ class MultiExchangeCcxt:
             if b["asks"]:
                 mid_candidates.append(b["asks"][0][0])
         mid = float(median(mid_candidates)) if mid_candidates else 0.0
-        tick = self._tick_size(mid) if mid > 0 else 0.01
+        # Finer buckets when deep book — better walls / stop clusters for heatmap.
+        tick = self._tick_size(mid, fine=lim >= 80) if mid > 0 else 0.01
 
         def bucket(price: float) -> float:
             return round(round(price / tick) * tick, 10)

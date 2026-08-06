@@ -153,17 +153,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
 
-        <div className="mobile-nav-fab">
-          <button
-            type="button"
-            className={`mobile-nav-fab__btn ${menuOpen ? "is-open" : ""}`}
-            aria-label={menuOpen ? "Zavřít menu" : "Otevřít menu"}
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((v) => !v)}
-          >
-            {menuOpen ? <IconClose size={22} /> : <IconMenu size={22} />}
-            <span className="mobile-nav-fab__label">{menuOpen ? "Zavřít" : "Menu"}</span>
-          </button>
+        <div className="app-fab-dock">
+          <div className="mobile-nav-fab">
+            <button
+              type="button"
+              className={`mobile-nav-fab__btn ${menuOpen ? "is-open" : ""}`}
+              aria-label={menuOpen ? "Zavřít menu" : "Otevřít menu"}
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((v) => !v)}
+            >
+              {menuOpen ? <IconClose size={22} /> : <IconMenu size={22} />}
+              <span className="mobile-nav-fab__label">{menuOpen ? "Zavřít" : "Menu"}</span>
+            </button>
+          </div>
+          <SenseBot />
         </div>
 
         {menuOpen && (
@@ -210,7 +213,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         )}
 
-        <SenseBot />
         <SettingsPanel open={settingsOpen} onClose={closeSettings} />
       </div>
     </ScreenContextProvider>

@@ -371,18 +371,39 @@ a {
   }
 }
 
-/* Floating mobile menu FAB (bottom-left; Sense bot stays bottom-right) */
+/* Floating dock: Menu + Sense bot */
+.app-fab-dock {
+  position: fixed;
+  z-index: 56;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  pointer-events: none;
+}
+
+.app-fab-dock > * {
+  pointer-events: auto;
+}
+
 .mobile-nav-fab {
   display: none;
 }
 
 @media (max-width: 767px) {
+  .app-fab-dock {
+    left: 50%;
+    bottom: calc(2.15rem + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%);
+    justify-content: center;
+  }
+
+  .app-shell:has(.cryptosense) .app-fab-dock {
+    bottom: calc(2.05rem + env(safe-area-inset-bottom, 0px));
+  }
+
   .mobile-nav-fab {
     display: block;
-    position: fixed;
-    left: max(0.85rem, env(safe-area-inset-left));
-    bottom: max(0.85rem, env(safe-area-inset-bottom));
-    z-index: 56;
+    position: static;
   }
 
   .mobile-nav-fab__btn {
@@ -416,8 +437,47 @@ a {
     text-transform: uppercase;
   }
 
-  .app-shell:has(.cryptosense) .mobile-nav-fab {
-    bottom: max(0.75rem, env(safe-area-inset-bottom));
+  .sense-bot {
+    position: static;
+    right: auto;
+    bottom: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.65rem;
+    pointer-events: none;
+  }
+
+  .sense-bot > * {
+    pointer-events: auto;
+  }
+
+  .sense-bot__panel {
+    position: fixed;
+    left: 50%;
+    right: auto;
+    bottom: calc(5.85rem + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%);
+  }
+
+  .nav-sheet__panel {
+    padding-bottom: calc(6.25rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (min-width: 768px) {
+  .app-fab-dock {
+    right: max(0.85rem, env(safe-area-inset-right));
+    bottom: max(0.85rem, env(safe-area-inset-bottom));
+    left: auto;
+    transform: none;
+    justify-content: flex-end;
+  }
+
+  .sense-bot {
+    position: static;
+    right: auto;
+    bottom: auto;
   }
 }
 
@@ -1109,6 +1169,23 @@ textarea {
   touch-action: none;
 }
 
+.cryptosense__panel-tabs {
+  display: none;
+}
+
+.cryptosense__ob-in-card {
+  display: none;
+}
+
+.cryptosense__ob-side {
+  min-height: 0;
+  height: 100%;
+}
+
+.cryptosense__ob-side .orderbook {
+  height: 100%;
+}
+
 .orderbook {
   display: flex;
   flex-direction: column;
@@ -1228,16 +1305,72 @@ textarea {
   .cryptosense__desk {
     height: auto;
     min-height: 0;
+    grid-template-columns: 1fr;
+  }
+
+  .cryptosense__ob-side {
+    display: none;
+  }
+
+  .cryptosense__panel-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.3rem;
+    flex-shrink: 0;
+    padding: 0.15rem 0.05rem 0.35rem;
+  }
+
+  .cryptosense__panel-tab {
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--glass) 65%, transparent);
+    color: var(--muted);
+    font-family: var(--font-nav);
+    font-size: 0.68rem;
+    font-weight: 650;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.42rem 0.5rem;
+    cursor: pointer;
+  }
+
+  .cryptosense__panel-tab.is-active {
+    color: var(--sense);
+    border-color: color-mix(in srgb, var(--sense) 45%, var(--glass-border));
+    background: color-mix(in srgb, var(--sense) 12%, transparent);
   }
 
   .cryptosense__chart.instrument-chart {
-    min-height: min(58dvh, 480px);
-    height: min(58dvh, 480px);
+    min-height: min(62dvh, 520px);
+    height: min(62dvh, 520px);
+    display: flex;
+    flex-direction: column;
   }
 
-  .orderbook {
-    height: auto;
-    max-height: 420px;
+  .cryptosense__chart.is-book .cryptosense__chart-pane {
+    display: none;
+  }
+
+  .cryptosense__chart.is-chart .cryptosense__ob-in-card {
+    display: none;
+  }
+
+  .cryptosense__chart.is-book .cryptosense__ob-in-card {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .cryptosense__ob-in-card .orderbook {
+    flex: 1 1 auto;
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border: none;
+    background: transparent;
+    padding: 0.15rem 0.1rem 0.35rem;
+    border-radius: 0;
   }
 
   .crypto-coin-card {
@@ -3147,11 +3280,9 @@ textarea {
   color: var(--danger);
 }
 
-/* —— Sense bot floating widget —— */
+/* —— Sense bot floating widget (positioned by .app-fab-dock) —— */
 .sense-bot {
-  position: fixed;
-  right: max(0.85rem, env(safe-area-inset-right));
-  bottom: max(0.85rem, env(safe-area-inset-bottom));
+  position: static;
   z-index: 55;
   display: flex;
   flex-direction: column;
@@ -3168,7 +3299,7 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.55rem 0.85rem 0.55rem 0.65rem;
+  padding: 0.5rem 0.75rem 0.5rem 0.6rem;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--sense) 40%, var(--glass-border));
   background: linear-gradient(
@@ -3181,11 +3312,6 @@ textarea {
     0 10px 28px rgba(0, 0, 0, 0.28),
     0 0 18px color-mix(in srgb, var(--sense) 22%, transparent);
   cursor: pointer;
-  font-family: var(--font-nav);
-  font-size: 0.72rem;
-  font-weight: 650;
-  letter-spacing: 0.1em;
-  text-transform: lowercase;
   backdrop-filter: blur(14px);
 }
 
@@ -3208,7 +3334,37 @@ textarea {
     drop-shadow(0 0 5px var(--sense-glow));
 }
 
-.sense-bot__fab-label {
+.sense-bot__fab-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  line-height: 1;
+}
+
+.sense-bot__fab-sense {
+  font-family: var(--font-logo-hand), "Caveat Brush", cursive;
+  font-size: 1.15rem;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  color: #fff;
+  line-height: 1;
+  text-transform: none;
+}
+
+.sense-bot__fab-bot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.16em 0.42em 0.14em;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--sense) 55%, #1a1a1a);
+  background: color-mix(in srgb, var(--sense) 14%, transparent);
+  color: var(--sense);
+  font-family: var(--font-brand), "Space Grotesk", sans-serif;
+  font-size: 0.58rem;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   line-height: 1;
 }
 
@@ -3559,8 +3715,4 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-}
-
-.app-shell:has(.cryptosense) .sense-bot {
-  bottom: max(0.75rem, env(safe-area-inset-bottom));
 }
