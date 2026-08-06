@@ -519,7 +519,7 @@ export default function InstrumentPage() {
               Přidat paper pozici
             </button>
             <Link
-              href={`/chat?symbol=${encodeURIComponent(symbol)}&prompt=pre-zaver&fresh=1`}
+              href={`/chat?symbol=${encodeURIComponent(symbol)}&fresh=1`}
               className="btn"
             >
               Analyzovat v Sense

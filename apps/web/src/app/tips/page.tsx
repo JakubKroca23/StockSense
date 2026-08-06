@@ -195,6 +195,7 @@ export default function TipsPage() {
   const [okMsg, setOkMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [tipBusy, setTipBusy] = useState(false);
+  const [clearBusy, setClearBusy] = useState(false);
 
   const loadActive = useCallback(async () => {
     const tips = await apiFetch<Tip[]>("/tips");
@@ -228,6 +229,36 @@ export default function TipsPage() {
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  async function clearScope(scope: "active" | "history" | "all") {
+    const labels = {
+      active: "aktivní tipy",
+      history: "výstupy / historii",
+      all: "všechny tipy i výstupy",
+    } as const;
+    if (!window.confirm(`Opravdu smazat ${labels[scope]}? Tuto akci nejde vrátit.`)) {
+      return;
+    }
+    setClearBusy(true);
+    setError(null);
+    setOkMsg(null);
+    try {
+      const res = await apiFetch<{ deleted_tips: number; deleted_alerts: number }>(
+        `/tips/clear?scope=${scope}`,
+        { method: "DELETE" }
+      );
+      setOkMsg(
+        `Smazáno tipů: ${res.deleted_tips}${
+          res.deleted_alerts ? ` · alertů: ${res.deleted_alerts}` : ""
+        }`
+      );
+      await loadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Mazání selhalo");
+    } finally {
+      setClearBusy(false);
+    }
+  }
 
   async function onLifecycle(
     id: number,
@@ -297,14 +328,24 @@ export default function TipsPage() {
       <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h1 className="display text-3xl">Top tipy dne</h1>
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled
-            title="Generování tipů je dočasně vypnuté"
-          >
-            Přepočítat tipy (vypnuto)
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn text-xs px-2 py-1"
+              disabled={clearBusy || tipBusy || activeTips.length === 0}
+              onClick={() => void clearScope("active")}
+            >
+              Smazat tipy
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled
+              title="Generování tipů je dočasně vypnuté"
+            >
+              Přepočítat tipy (vypnuto)
+            </button>
+          </div>
         </div>
         <p className="muted text-sm">
           Automatické tipy a cron jsou vypnuté — scoring se předělává.
@@ -336,11 +377,31 @@ export default function TipsPage() {
       </section>
 
       <section className="space-y-4">
-        <div>
-          <h2 className="display text-2xl">Historie tipů</h2>
-          <p className="muted">
-            Přehled úspěšnosti — kolik tipů trefilo take profit nebo stop loss.
-          </p>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="display text-2xl">Historie tipů</h2>
+            <p className="muted">
+              Přehled úspěšnosti — kolik tipů trefilo take profit nebo stop loss.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn text-xs px-2 py-1"
+              disabled={clearBusy || tipBusy || closedTips.length === 0}
+              onClick={() => void clearScope("history")}
+            >
+              Smazat výstupy
+            </button>
+            <button
+              type="button"
+              className="btn text-xs px-2 py-1"
+              disabled={clearBusy || tipBusy}
+              onClick={() => void clearScope("all")}
+            >
+              Smazat vše
+            </button>
+          </div>
         </div>
 
         {history?.stats && <StatsCards stats={history.stats} />}

@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -748,6 +748,59 @@ async def tips_history(
 @router.get("/tips/stats")
 async def tips_stats(user: AuthUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     return await feedback_stats(db, user.id)
+
+
+@router.delete("/tips/clear")
+async def clear_tips(
+    scope: str = "all",
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Smaž tipy uživatele. scope=active|history|all (feedback jde CASCADE)."""
+    scope = (scope or "all").strip().lower()
+    if scope not in {"active", "history", "all"}:
+        raise HTTPException(400, "Neplatný scope — použij active, history nebo all")
+
+    base = select(Tip.id).where(Tip.user_id == user.id)
+    if scope == "active":
+        ids_q = base.where(Tip.is_active.is_(True))
+    elif scope == "history":
+        ids_q = (
+            select(Tip.id)
+            .join(TipFeedback, TipFeedback.tip_id == Tip.id)
+            .where(Tip.user_id == user.id)
+        )
+    else:
+        ids_q = base
+
+    tip_ids = list((await db.execute(ids_q)).scalars().all())
+    deleted = 0
+    if tip_ids:
+        # Feedback má ON DELETE CASCADE; smažeme tipy přímo.
+        res = await db.execute(delete(Tip).where(Tip.id.in_(tip_ids), Tip.user_id == user.id))
+        deleted = res.rowcount or len(tip_ids)
+
+    alerts_deleted = 0
+    if scope in {"active", "all"}:
+        # Tip-related alerty (payload.tip_id nebo kind s tip)
+        alert_res = await db.execute(
+            delete(Alert).where(
+                Alert.user_id == user.id,
+                Alert.kind.in_(
+                    (
+                        "new_tip",
+                        "tip_invalidated",
+                        "price_stop",
+                        "price_target_1",
+                        "price_target_2",
+                    )
+                ),
+            )
+        )
+        alerts_deleted = alert_res.rowcount or 0
+
+    await db.commit()
+    return {"ok": True, "scope": scope, "deleted_tips": deleted, "deleted_alerts": alerts_deleted}
 
 
 @router.post("/tips/run", response_model=list[TipOut])

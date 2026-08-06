@@ -129,8 +129,9 @@ a {
 
 .brand-logo__word {
   display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.12rem;
   white-space: nowrap;
   overflow: visible;
   line-height: 1;
@@ -156,10 +157,10 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.18em 0.42em 0.2em;
+  padding: 0.12em 0.38em 0.14em;
   border: 1px solid color-mix(in srgb, var(--sense) 55%, #1a1a1a);
-  border-radius: 1px;
-  background: #000;
+  border-radius: 6px;
+  background: transparent;
   color: var(--sense);
   font-family: var(--font-brand), "Space Grotesk", sans-serif;
   font-size: 0.72em;
@@ -168,7 +169,6 @@ a {
   line-height: 1;
   text-transform: lowercase;
   text-shadow: 0 0 8px color-mix(in srgb, var(--sense) 40%, transparent);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--sense) 12%, transparent);
 }
 
 .app-nav {
@@ -684,6 +684,23 @@ textarea {
   padding-top: 0.75rem;
 }
 
+.chat-stack {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.chat-saved-panel {
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+.chat-saved-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.45rem;
+}
+
 .chat-layout {
   display: grid;
   gap: 0.85rem;
@@ -832,6 +849,18 @@ textarea {
 
 .chat-icon-btn:hover:not(:disabled) {
   transform: translateY(-1px);
+}
+
+.chat-icon-btn--save {
+  color: var(--sense);
+  background: color-mix(in srgb, var(--sense) 14%, transparent);
+  border-color: color-mix(in srgb, var(--sense) 35%, var(--line));
+}
+
+.chat-icon-btn--save.is-active {
+  color: #041018;
+  background: var(--sense);
+  border-color: var(--sense);
 }
 
 .chat-icon-btn--pin {

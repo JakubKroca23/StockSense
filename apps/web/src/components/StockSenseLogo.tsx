@@ -1,14 +1,14 @@
 import Image from "next/image";
 
 const STOCK_LETTERS = [
-  { ch: "S", rotate: -8, y: 3 },
-  { ch: "t", rotate: 6, y: -4 },
-  { ch: "o", rotate: -4, y: 5 },
-  { ch: "c", rotate: 9, y: -2 },
-  { ch: "k", rotate: -6, y: 4 },
+  { ch: "S", rotate: -8 },
+  { ch: "t", rotate: 6 },
+  { ch: "o", rotate: -4 },
+  { ch: "c", rotate: 9 },
+  { ch: "k", rotate: -6 },
 ] as const;
 
-/** StockSense wordmark — oko + rozházený Stock + sense v rámečku */
+/** StockSense wordmark — oko + pootočený Stock + sense v rámečku */
 export function StockSenseLogo({
   className = "",
   height = 36,
@@ -40,11 +40,11 @@ export function StockSenseLogo({
       />
       <span className="brand-logo__word">
         <span className="brand-logo__stock" style={{ fontSize: stockSize }}>
-          {STOCK_LETTERS.map(({ ch, rotate, y }) => (
+          {STOCK_LETTERS.map(({ ch, rotate }) => (
             <span
               key={`${ch}-${rotate}`}
               className="brand-logo__stock-letter"
-              style={{ transform: `translateY(${y}px) rotate(${rotate}deg)` }}
+              style={{ transform: `rotate(${rotate}deg)` }}
             >
               {ch}
             </span>
