@@ -159,7 +159,6 @@ export default function CryptoSensePage() {
   const [showHeatmap, setShowHeatmap] = useState(true);
   const [heatmapLevels, setHeatmapLevels] = useState<HeatmapLevel[]>([]);
   const [heatOpacity, setHeatOpacity] = useState(0.55);
-  const [metaOpen, setMetaOpen] = useState(true);
   const [chartExpanded, setChartExpanded] = useState(false);
   const heatSymRef = useRef(selected);
   const chartReqRef = useRef(0);
@@ -454,13 +453,14 @@ export default function CryptoSensePage() {
               closes.length >= 2
                 ? closes[closes.length - 1] >= closes[0]
                 : (q.change_pct ?? 0) >= 0;
+            const chgUp = (q.change_pct ?? 0) >= 0;
             const base = q.symbol.split("/")[0];
             const active = selected === q.symbol;
             return (
               <button
                 key={q.symbol}
                 type="button"
-                className={`crypto-coin-card ${active ? "is-active" : ""} ${sparkUp ? "is-up" : "is-down"}`}
+                className={`crypto-coin-card ${active ? "is-active" : ""} ${sparkUp ? "is-up" : "is-down"} ${chgUp ? "is-chg-up" : "is-chg-down"}`}
                 onClick={() => setSelected(q.symbol)}
                 title={q.symbol}
               >
@@ -482,18 +482,38 @@ export default function CryptoSensePage() {
           className={`card instrument-chart cryptosense__chart ${chartExpanded ? "is-expanded" : ""}`}
         >
           <div className="instrument-chart__bar cryptosense__meta">
-            <div className="cryptosense__meta-row">
+            <div className="cryptosense__meta-row cryptosense__meta-row--data">
               {activeQuote && (
                 <>
-                  <span className="text-[var(--text)] font-semibold text-sm">
-                    {fmtPrice(activeQuote.primary_price)}
-                  </span>
-                  <span className={up ? "text-[var(--chart-up)]" : "text-[var(--chart-down)]"}>
+                  <span className="cryptosense__px">{fmtPrice(activeQuote.primary_price)}</span>
+                  <span className={`cryptosense__chg ${up ? "is-up" : "is-down"}`}>
                     {fmtPct(activeQuote.change_pct)}
                   </span>
                   <span className={`badge ${live ? "long" : ""}`}>{live ? "LIVE" : "offline"}</span>
                 </>
               )}
+              <span className="badge">{exchanges.join(" + ")}</span>
+              <span className="badge">exec {execution}</span>
+              {orderBook?.spread_pct != null && (
+                <span className="badge">spread {orderBook.spread_pct.toFixed(3)}%</span>
+              )}
+              <button
+                type="button"
+                className="chart-chip chart-chip--soft cryptosense__refresh"
+                onClick={() => {
+                  void loadOverview();
+                  void loadChart(selected, interval);
+                  void loadOrderBook(selected, showHeatmap);
+                  if (quotes.length) void loadSparks(quotes.map((q) => q.symbol));
+                }}
+                disabled={loading || chartBusy}
+                title="Obnovit"
+              >
+                {loading || chartBusy ? "…" : "↻"}
+              </button>
+            </div>
+
+            <div className="cryptosense__meta-row cryptosense__meta-row--tools">
               <button
                 type="button"
                 className={`chart-chip chart-chip--soft cryptosense__expand-btn ${chartExpanded ? "is-active" : ""}`}
@@ -501,39 +521,8 @@ export default function CryptoSensePage() {
                 title={chartExpanded ? "Zmenšit graf" : "Maximalizovat graf"}
                 aria-pressed={chartExpanded}
               >
-                {chartExpanded ? "Zmenšit" : "Max"}
+                {chartExpanded ? "Zmenšit" : "Maximalizovat"}
               </button>
-              <button
-                type="button"
-                className={`chart-chip chart-chip--soft ${metaOpen ? "is-active" : ""}`}
-                onClick={() => setMetaOpen((v) => !v)}
-                title={metaOpen ? "Sbalit data grafu" : "Rozbalit data grafu"}
-              >
-                {metaOpen ? "Data ▾" : "Data ▸"}
-              </button>
-              {metaOpen && (
-                <>
-                  <span className="badge">{exchanges.join(" + ")}</span>
-                  <span className="badge">agg OHLCV</span>
-                  <span className="badge">exec {execution}</span>
-                  {orderBook?.spread_pct != null && (
-                    <span className="badge">spread {orderBook.spread_pct.toFixed(3)}%</span>
-                  )}
-                </>
-              )}
-              <div className="cryptosense__tf chart-controls__group" role="group" aria-label="Timeframe">
-                {TIMEFRAMES.map((tf) => (
-                  <button
-                    key={tf.id}
-                    type="button"
-                    className={`chart-chip chart-chip--soft ${interval === tf.id ? "is-active" : ""}`}
-                    disabled={chartBusy}
-                    onClick={() => setIntervalTf(tf.id)}
-                  >
-                    {tf.label}
-                  </button>
-                ))}
-              </div>
               <button
                 type="button"
                 className={`chart-chip chart-chip--soft ${showHeatmap ? "is-active" : ""}`}
@@ -549,32 +538,39 @@ export default function CryptoSensePage() {
               >
                 Heatmap
               </button>
-              {showHeatmap && (
-                <label className="cryptosense__heat-opacity" title="Průhlednost heatmapy">
-                  <span className="muted">α</span>
-                  <input
-                    type="range"
-                    min={15}
-                    max={100}
-                    value={Math.round(heatOpacity * 100)}
-                    onChange={(e) => setHeatOpacity(Number(e.target.value) / 100)}
-                    aria-label="Průhlednost heatmapy"
-                  />
-                </label>
-              )}
-              <button
-                type="button"
-                className="chart-chip chart-chip--soft"
-                onClick={() => {
-                  void loadOverview();
-                  void loadChart(selected, interval);
-                  void loadOrderBook(selected, showHeatmap);
-                  if (quotes.length) void loadSparks(quotes.map((q) => q.symbol));
-                }}
-                disabled={loading || chartBusy}
+              <label
+                className={`cryptosense__heat-opacity ${showHeatmap ? "is-on" : "is-off"}`}
+                title="Průhlednost heatmapy"
               >
-                {loading || chartBusy ? "…" : "↻"}
-              </button>
+                <span className="muted">α</span>
+                <input
+                  type="range"
+                  min={15}
+                  max={100}
+                  value={Math.round(heatOpacity * 100)}
+                  onChange={(e) => setHeatOpacity(Number(e.target.value) / 100)}
+                  aria-label="Průhlednost heatmapy"
+                  disabled={!showHeatmap}
+                />
+              </label>
+            </div>
+
+            <div
+              className="cryptosense__meta-row cryptosense__meta-row--tf cryptosense__tf chart-controls__group"
+              role="group"
+              aria-label="Timeframe"
+            >
+              {TIMEFRAMES.map((tf) => (
+                <button
+                  key={tf.id}
+                  type="button"
+                  className={`chart-chip chart-chip--soft ${interval === tf.id ? "is-active" : ""}`}
+                  disabled={chartBusy}
+                  onClick={() => setIntervalTf(tf.id)}
+                >
+                  {tf.label}
+                </button>
+              ))}
             </div>
           </div>
 

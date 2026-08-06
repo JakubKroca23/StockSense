@@ -210,12 +210,17 @@ export function PriceChart({
 
     const theme = themeRef.current || readTheme();
     const opacityMul = heatOpacityRef.current;
+    const isNarrow =
+      w < 720 ||
+      (typeof window !== "undefined" && window.matchMedia("(max-width: 1099px)").matches);
     // Keep clear of right price labels
     const leftPad = 2;
-    const rightPad = 72;
+    const rightPad = isNarrow ? 58 : 72;
     const plotW = Math.max(48, w - leftPad - rightPad);
-    // Volume-profile lane on the right of the candles
-    const profileW = Math.max(56, Math.min(plotW * 0.32, 140));
+    // Volume-profile lane — half width on mobile
+    const profileW = isNarrow
+      ? Math.max(28, Math.min(plotW * 0.16, 70))
+      : Math.max(56, Math.min(plotW * 0.32, 140));
     const profileRight = leftPad + plotW;
     const profileLeft = profileRight - profileW;
 
