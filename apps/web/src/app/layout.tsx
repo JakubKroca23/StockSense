@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Caveat_Brush, IBM_Plex_Sans, Source_Serif_4, Space_Grotesk } from "next/font/google";
+import { IBM_Plex_Sans, Source_Serif_4, Space_Grotesk } from "next/font/google";
 import { AppShell } from "@/components/AppShell";
 import "./globals.css";
 
@@ -19,13 +19,6 @@ const brand = Space_Grotesk({
   subsets: ["latin", "latin-ext"],
   weight: ["300", "400", "500", "600", "700"],
   variable: "--font-brand-loaded",
-});
-
-/** Handwritten brush — ladí s calligrafickým okem v logu */
-const logoHand = Caveat_Brush({
-  subsets: ["latin"],
-  weight: "400",
-  variable: "--font-logo-hand-loaded",
 });
 
 export const metadata: Metadata = {
@@ -60,16 +53,13 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="cs">
-      <body
-        className={`${body.variable} ${display.variable} ${brand.variable} ${logoHand.variable} antialiased`}
-      >
+      <body className={`${body.variable} ${display.variable} ${brand.variable} antialiased`}>
         <style>{`
           :root {
             --font-body: var(--font-body-loaded), "IBM Plex Sans", sans-serif;
             --font-display: var(--font-display-loaded), "Source Serif 4", serif;
             --font-brand: var(--font-brand-loaded), "Space Grotesk", sans-serif;
             --font-nav: var(--font-brand-loaded), "Space Grotesk", sans-serif;
-            --font-logo-hand: var(--font-logo-hand-loaded), "Caveat Brush", cursive;
           }
         `}</style>
         <AppShell>{children}</AppShell>

@@ -132,7 +132,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="app-header__inner mx-auto flex max-w-6xl items-center gap-2.5 px-4 py-2">
           <div className="flex min-w-0 flex-1 items-center gap-2.5 sm:gap-3">
             <Link href="/" className="brand-logo app-no-drag shrink-0" aria-label="StockSense">
-              <StockSenseLogo height={28} />
+              <StockSenseLogo height={36} />
             </Link>
 
             <div className="app-no-drag nav-roll" ref={panelRef}>

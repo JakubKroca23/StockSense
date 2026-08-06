@@ -1,19 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 52" fill="none" role="img" aria-label="StockSense">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 229 108" fill="none" role="img" aria-label="StockSense">
   <title>StockSense</title>
-  <defs>
-    <filter id="senseGlow" x="-25%" y="-50%" width="150%" height="200%">
-      <feGaussianBlur stdDeviation="1.4" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-  </defs>
-  <!-- původní tvar oka z brand artwork -->
-  <image href="/logo-eye-transparent.png" x="0" y="6" width="72" height="34" preserveAspectRatio="xMidYMid meet"/>
-  <text x="78" y="30" font-family="Caveat Brush, Segoe Script, cursive" font-size="32" font-weight="400" letter-spacing="0.02em" fill="#ffffff" transform="rotate(-2 78 30)">Stock</text>
-  <!-- Sense −10%: sense — Sense green + glow, tenčí písmo -->
-  <text x="124" y="42" font-family="IBM Plex Sans, Segoe UI, sans-serif" font-size="18" font-weight="400" letter-spacing="0.06em" fill="#5dde8a" filter="url(#senseGlow)">sen</text>
-  <text x="164" y="41.5" font-family="IBM Plex Sans, Segoe UI, sans-serif" font-size="22" font-weight="500" fill="#5dde8a" filter="url(#senseGlow)">s</text>
-  <text x="178" y="42" font-family="IBM Plex Sans, Segoe UI, sans-serif" font-size="18" font-weight="400" fill="#5dde8a" filter="url(#senseGlow)">e</text>
+  <image href="/logo-eye-transparent.png" x="0" y="0" width="229" height="108" preserveAspectRatio="xMidYMid meet"/>
 </svg>

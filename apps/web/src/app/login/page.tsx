@@ -29,7 +29,7 @@ export default function LoginPage() {
     <div className="min-h-screen grid place-items-center px-4">
       <div className="card rise w-full max-w-md p-8">
         <div className="mb-4">
-          <StockSenseLogo height={36} />
+          <StockSenseLogo height={44} />
         </div>
         <p className="muted mb-6">Přihlášení heslem · Sense AI analýza</p>
         <form className="space-y-3" onSubmit={onSubmit}>
