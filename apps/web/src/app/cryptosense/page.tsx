@@ -469,7 +469,9 @@ export default function CryptoSensePage() {
                   <span className="crypto-coin-card__pct">{fmtPct(q.change_pct)}</span>
                 </div>
                 <span className="crypto-coin-card__price">{fmtPrice(q.primary_price)}</span>
-                <Sparkline closes={closes} up={sparkUp} width={72} height={16} />
+                <span className="crypto-coin-card__spark">
+                  <Sparkline closes={closes} up={sparkUp} width={72} height={16} />
+                </span>
               </button>
             );
           })}
@@ -556,7 +558,7 @@ export default function CryptoSensePage() {
             </div>
 
             <div
-              className="cryptosense__meta-row cryptosense__meta-row--tf cryptosense__tf chart-controls__group"
+              className="cryptosense__meta-row cryptosense__meta-row--tf"
               role="group"
               aria-label="Timeframe"
             >
