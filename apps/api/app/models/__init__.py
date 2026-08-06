@@ -356,3 +356,123 @@ class PriceAlertRule(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     instrument: Mapped[Instrument] = relationship()
+
+
+class LiqSnapshot(Base):
+    """Compressed L2 + price sample for liquidity intelligence (24/7 ingest)."""
+
+    __tablename__ = "liq_snapshots"
+    __table_args__ = (Index("ix_liq_snapshots_sym_ts", "symbol", "ts"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    mid: Mapped[float] = mapped_column(Float)
+    best_bid: Mapped[float | None] = mapped_column(Float, nullable=True)
+    best_ask: Mapped[float | None] = mapped_column(Float, nullable=True)
+    spread_bps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bid_vol_near: Mapped[float] = mapped_column(Float, default=0.0)
+    ask_vol_near: Mapped[float] = mapped_column(Float, default=0.0)
+    imbalance: Mapped[float] = mapped_column(Float, default=0.0)
+    wall_bid_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    wall_bid_size: Mapped[float] = mapped_column(Float, default=0.0)
+    wall_ask_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    wall_ask_size: Mapped[float] = mapped_column(Float, default=0.0)
+    wall_bid_dist_bps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    wall_ask_dist_bps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    quote_change_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    meta: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+
+class LiqFeatureBar(Base):
+    """1-minute rolled features from liq_snapshots."""
+
+    __tablename__ = "liq_feature_bars"
+    __table_args__ = (
+        UniqueConstraint("symbol", "ts", name="uq_liq_feature_sym_ts"),
+        Index("ix_liq_features_sym_ts", "symbol", "ts"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    mid_open: Mapped[float] = mapped_column(Float)
+    mid_high: Mapped[float] = mapped_column(Float)
+    mid_low: Mapped[float] = mapped_column(Float)
+    mid_close: Mapped[float] = mapped_column(Float)
+    mid_ret_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    spread_bps_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    imbalance_avg: Mapped[float] = mapped_column(Float, default=0.0)
+    imbalance_max: Mapped[float] = mapped_column(Float, default=0.0)
+    bid_vol_avg: Mapped[float] = mapped_column(Float, default=0.0)
+    ask_vol_avg: Mapped[float] = mapped_column(Float, default=0.0)
+    wall_bid_size_max: Mapped[float] = mapped_column(Float, default=0.0)
+    wall_ask_size_max: Mapped[float] = mapped_column(Float, default=0.0)
+    samples: Mapped[int] = mapped_column(Integer, default=0)
+    meta: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+
+class TradingHypothesis(Base):
+    """Evolving microstructure hypotheses — validated quantitatively over time."""
+
+    __tablename__ = "trading_hypotheses"
+    __table_args__ = (Index("ix_trading_hypotheses_status", "status", "symbol"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    slug: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True, default="*")
+    title: Mapped[str] = mapped_column(String(255))
+    direction: Mapped[str] = mapped_column(String(16), default="long")  # long|short|neutral
+    horizon_minutes: Mapped[int] = mapped_column(Integer, default=15)
+    conditions: Mapped[dict] = mapped_column(JSONB, default=dict)
+    expected_move_pct: Mapped[float] = mapped_column(Float, default=0.1)
+    status: Mapped[str] = mapped_column(String(16), default="candidate")  # candidate|active|retired
+    trials: Mapped[int] = mapped_column(Integer, default=0)
+    wins: Mapped[int] = mapped_column(Integer, default=0)
+    avg_move_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    last_eval_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_triggered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    origin: Mapped[str] = mapped_column(String(32), default="llm")
+    meta: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class HypothesisTrial(Base):
+    """Single paper evaluation of a hypothesis trigger."""
+
+    __tablename__ = "hypothesis_trials"
+    __table_args__ = (Index("ix_hyp_trials_hyp_ts", "hypothesis_id", "triggered_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    hypothesis_id: Mapped[int] = mapped_column(
+        ForeignKey("trading_hypotheses.id", ondelete="CASCADE"), index=True
+    )
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    triggered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    resolve_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    entry_mid: Mapped[float] = mapped_column(Float)
+    exit_mid: Mapped[float | None] = mapped_column(Float, nullable=True)
+    move_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    won: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="open")  # open|resolved|expired
+    meta: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+
+class LiqAnalysis(Base):
+    """Periodic LLM review of liquidity + hypothesis memory."""
+
+    __tablename__ = "liq_analyses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    window_minutes: Mapped[int] = mapped_column(Integer, default=60)
+    symbols: Mapped[list] = mapped_column(JSONB, default=list)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    findings: Mapped[dict] = mapped_column(JSONB, default=dict)
+    hypotheses_touched: Mapped[int] = mapped_column(Integer, default=0)
+    model: Mapped[str] = mapped_column(String(64), default="gemini")
+    meta: Mapped[dict] = mapped_column(JSONB, default=dict)

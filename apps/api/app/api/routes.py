@@ -2007,6 +2007,111 @@ async def crypto_ohlcv(
     }
 
 
+@router.get("/crypto/liq-intel/status")
+async def crypto_liq_intel_status(
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Status of 24/7 liquidity intelligence loop."""
+    from app.services.liquidity_intel import get_status
+
+    return await get_status(db)
+
+
+@router.get("/crypto/liq-intel/hypotheses")
+async def crypto_liq_intel_hypotheses(
+    status: str | None = None,
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models import TradingHypothesis
+
+    q = select(TradingHypothesis).order_by(TradingHypothesis.updated_at.desc()).limit(100)
+    if status:
+        q = q.where(TradingHypothesis.status == status)
+    rows = (await db.execute(q)).scalars().all()
+    return {
+        "items": [
+            {
+                "id": h.id,
+                "slug": h.slug,
+                "title": h.title,
+                "symbol": h.symbol,
+                "direction": h.direction,
+                "horizon_minutes": h.horizon_minutes,
+                "conditions": h.conditions,
+                "expected_move_pct": h.expected_move_pct,
+                "status": h.status,
+                "trials": h.trials,
+                "wins": h.wins,
+                "winrate": (h.wins / h.trials) if h.trials else None,
+                "avg_move_pct": h.avg_move_pct,
+                "notes": h.notes,
+                "last_eval_at": h.last_eval_at.isoformat() if h.last_eval_at else None,
+                "last_triggered_at": h.last_triggered_at.isoformat() if h.last_triggered_at else None,
+            }
+            for h in rows
+        ]
+    }
+
+
+@router.get("/crypto/liq-intel/analyses")
+async def crypto_liq_intel_analyses(
+    limit: int = 20,
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.models import LiqAnalysis
+
+    lim = max(1, min(int(limit), 50))
+    rows = (
+        await db.execute(select(LiqAnalysis).order_by(LiqAnalysis.ts.desc()).limit(lim))
+    ).scalars().all()
+    return {
+        "items": [
+            {
+                "id": a.id,
+                "ts": a.ts.isoformat() if a.ts else None,
+                "window_minutes": a.window_minutes,
+                "symbols": a.symbols,
+                "summary": a.summary,
+                "findings": a.findings,
+                "hypotheses_touched": a.hypotheses_touched,
+                "model": a.model,
+            }
+            for a in rows
+        ]
+    }
+
+
+@router.post("/crypto/liq-intel/run-now")
+async def crypto_liq_intel_run_now(
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Force one ingest + feature roll + LLM review cycle."""
+    from app.services.liquidity_intel import (
+        open_hypothesis_trials,
+        resolve_hypothesis_trials,
+        roll_feature_bars,
+        run_ingest_cycle,
+        run_llm_review,
+    )
+
+    ingest = await run_ingest_cycle(db)
+    feats = await roll_feature_bars(db, lookback_minutes=10)
+    opened = await open_hypothesis_trials(db)
+    resolved = await resolve_hypothesis_trials(db)
+    review = await run_llm_review(db)
+    return {
+        "ingest": ingest,
+        "feature_bars_upserted": feats,
+        "trials_opened": opened,
+        "trials_resolved": resolved,
+        "review": review,
+    }
+
+
 @router.websocket("/crypto/ws/ohlcv")
 async def crypto_ws_ohlcv(websocket: WebSocket, symbol: str = "BTC/USDT", interval: str = "1m"):
     """Realtime aggregated candles (Binance + Bybit public kline streams)."""

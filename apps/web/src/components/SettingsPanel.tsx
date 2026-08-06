@@ -42,8 +42,119 @@ type SystemStats = {
     cloud_provider: string;
     scheduler: boolean;
     tip_scoring: boolean;
+    liq_intel?: boolean;
   };
 };
+
+type LiqIntelStatus = {
+  enabled: boolean;
+  symbols: string[];
+  sample_seconds: number;
+  llm_minutes: number;
+  snapshots: number;
+  feature_bars: number;
+  hypotheses_alive: number;
+  last_snapshot_at: string | null;
+  last_analysis_at: string | null;
+  last_summary: string | null;
+  age_seconds: number | null;
+  hypotheses: {
+    slug: string;
+    title: string;
+    symbol: string;
+    direction: string;
+    status: string;
+    trials: number;
+    wins: number;
+    winrate: number | null;
+  }[];
+};
+
+function LiqIntelPanel() {
+  const [st, setSt] = useState<LiqIntelStatus | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      setErr(null);
+      setSt(await apiFetch<LiqIntelStatus>("/crypto/liq-intel/status"));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Liq intel nedostupné");
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const runNow = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await apiFetch("/crypto/liq-intel/run-now", { method: "POST" });
+      await load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Run selhal");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="settings-liq mt-3">
+      <p className="settings-tables__title muted">Liquidity intel (24/7)</p>
+      {err && <p className="text-[var(--danger)] text-xs mb-1">{err}</p>}
+      {st && (
+        <>
+          <div className="settings-meta muted text-xs">
+            <span>{st.enabled ? "běží" : "vypnuto"}</span>
+            <span>·</span>
+            <span>sample {st.sample_seconds}s</span>
+            <span>·</span>
+            <span>LLM /{st.llm_minutes}m</span>
+            <span>·</span>
+            <span>{st.snapshots} snap</span>
+            <span>·</span>
+            <span>{st.feature_bars}×1m</span>
+            <span>·</span>
+            <span>{st.hypotheses_alive} hyp</span>
+          </div>
+          {st.last_summary && (
+            <p className="text-xs mt-1" style={{ color: "var(--text)", opacity: 0.85 }}>
+              {(st.last_summary || "").slice(0, 280)}
+              {(st.last_summary || "").length > 280 ? "…" : ""}
+            </p>
+          )}
+          {st.hypotheses?.length > 0 && (
+            <ul className="settings-tables mt-2">
+              {st.hypotheses.slice(0, 5).map((h) => (
+                <li key={h.slug}>
+                  <span className="settings-tables__name">
+                    {h.symbol} {h.direction} · {h.title}
+                  </span>
+                  <span className="settings-tables__rows">
+                    {h.wins}/{h.trials}
+                    {h.winrate != null ? ` (${Math.round(h.winrate * 100)}%)` : ""}
+                  </span>
+                  <span className="settings-tables__size">{h.status}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <button
+            type="button"
+            className="chart-chip chart-chip--soft mt-2"
+            disabled={busy}
+            onClick={() => void runNow()}
+          >
+            {busy ? "Běží…" : "Spustit analýzu teď"}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
 
 const CURRENCIES = ["USD", "EUR", "CZK"] as const;
 
@@ -212,7 +323,7 @@ export function SettingsPanel({ open, onClose }: Props) {
                   <span>pid {stats.process.pid}</span>
                 </div>
 
-                <div className="settings-meta muted text-xs mt-1">
+              <div className="settings-meta muted text-xs mt-1">
                   <span>
                     Crypto: {(stats.crypto.exchanges || []).join(" + ") || "—"}
                     {stats.crypto.execution_exchange
@@ -221,7 +332,15 @@ export function SettingsPanel({ open, onClose }: Props) {
                   </span>
                   <span>·</span>
                   <span>LLM Gemini</span>
+                  {stats.llm.liq_intel != null && (
+                    <>
+                      <span>·</span>
+                      <span>Liq intel {stats.llm.liq_intel ? "ON" : "off"}</span>
+                    </>
+                  )}
                 </div>
+
+                <LiqIntelPanel />
 
                 {stats.tables.length > 0 && (
                   <div className="settings-tables">

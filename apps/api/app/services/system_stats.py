@@ -171,6 +171,7 @@ async def collect_system_stats(db: AsyncSession) -> dict:
             "ollama_model": None,
             "scheduler": cfg.enable_scheduler,
             "tip_scoring": cfg.enable_tip_scoring,
+            "liq_intel": cfg.enable_liq_intel,
         },
     }
 

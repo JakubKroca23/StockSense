@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     enable_scheduler: bool = False
     enable_tip_scoring: bool = False
 
+    # 24/7 liquidity intelligence (ingest + LLM hypothesis loop)
+    enable_liq_intel: bool = True
+    liq_intel_symbols: str = ""  # empty = DEFAULT_CRYPTO_SYMBOLS
+    liq_intel_sample_seconds: int = 8
+    liq_intel_llm_minutes: int = 30
+    liq_intel_llm_window_minutes: int = 90
+    liq_intel_retain_days: int = 10
+
     # CryptoSense / CCXT — public market data (no API keys required for quotes)
     # Charts/quotes: aggregate across ccxt_exchanges. Bot/execution: ccxt_execution.
     ccxt_exchanges: str = "binance,bybit"

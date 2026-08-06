@@ -1,5 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
@@ -11,6 +12,14 @@ from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal, Base, engine
 from app.models import UserSettings
 from app.services.instruments import ensure_discovery_universe
+from app.services.liquidity_intel import (
+    open_hypothesis_trials,
+    purge_old_snapshots,
+    resolve_hypothesis_trials,
+    roll_feature_bars,
+    run_ingest_cycle,
+    run_llm_review,
+)
 from app.workers.jobs import (
     check_price_alerts,
     generate_daily_report,
@@ -281,23 +290,137 @@ async def job_macro() -> None:
             logger.warning("macro job failed: %s", exc)
 
 
+async def job_liq_ingest() -> None:
+    async with AsyncSessionLocal() as db:
+        try:
+            result = await run_ingest_cycle(db)
+            logger.debug("liq ingest: %s", result)
+        except Exception as exc:
+            logger.warning("liq ingest failed: %s", exc)
+
+
+async def job_liq_features() -> None:
+    async with AsyncSessionLocal() as db:
+        try:
+            n = await roll_feature_bars(db, lookback_minutes=8)
+            opened = await open_hypothesis_trials(db)
+            resolved = await resolve_hypothesis_trials(db)
+            logger.debug("liq features written=%s opened=%s resolved=%s", n, opened, resolved)
+        except Exception as exc:
+            logger.warning("liq features failed: %s", exc)
+
+
+async def job_liq_llm() -> None:
+    async with AsyncSessionLocal() as db:
+        try:
+            result = await run_llm_review(db)
+            logger.info(
+                "liq LLM review: touched=%s summary=%s",
+                result.get("hypotheses_touched"),
+                (result.get("summary") or "")[:160],
+            )
+        except Exception as exc:
+            logger.warning("liq LLM review failed: %s", exc)
+
+
+async def job_liq_purge() -> None:
+    async with AsyncSessionLocal() as db:
+        try:
+            n = await purge_old_snapshots(db)
+            if n:
+                logger.info("liq purge deleted %s snapshots", n)
+        except Exception as exc:
+            logger.warning("liq purge failed: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await _init_db()
-    if settings.enable_scheduler:
-        # APScheduler cron expects a string like "7,12,17,21", not a Python list
-        scoring_hours = ",".join(
-            str(int(h.strip())) for h in settings.scoring_cron_hours.split(",") if h.strip()
-        ) or "7,12,17,21"
-        scheduler.add_job(job_price_poll, "interval", minutes=settings.price_poll_minutes, id="price_poll")
-        scheduler.add_job(job_scoring, "cron", hour=scoring_hours, minute=10, id="scoring")
-        scheduler.add_job(job_daily_report, "cron", hour=6, minute=30, id="daily_report")
-        scheduler.add_job(job_equity_snapshot, "cron", hour=21, minute=5, id="equity_snapshot")
-        scheduler.add_job(job_macro, "cron", hour="*/6", minute=5, id="macro")
+
+    start_scheduler = settings.enable_scheduler or settings.enable_liq_intel
+    if start_scheduler:
+        if settings.enable_scheduler:
+            scoring_hours = ",".join(
+                str(int(h.strip())) for h in settings.scoring_cron_hours.split(",") if h.strip()
+            ) or "7,12,17,21"
+            scheduler.add_job(
+                job_price_poll, "interval", minutes=settings.price_poll_minutes, id="price_poll"
+            )
+            scheduler.add_job(job_scoring, "cron", hour=scoring_hours, minute=10, id="scoring")
+            scheduler.add_job(job_daily_report, "cron", hour=6, minute=30, id="daily_report")
+            scheduler.add_job(job_equity_snapshot, "cron", hour=21, minute=5, id="equity_snapshot")
+            scheduler.add_job(job_macro, "cron", hour="*/6", minute=5, id="macro")
+
+        if settings.enable_liq_intel:
+            sample_s = max(4, int(settings.liq_intel_sample_seconds))
+            llm_m = max(10, int(settings.liq_intel_llm_minutes))
+            scheduler.add_job(
+                job_liq_ingest,
+                "interval",
+                seconds=sample_s,
+                id="liq_ingest",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+            scheduler.add_job(
+                job_liq_features,
+                "interval",
+                minutes=1,
+                id="liq_features",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+            scheduler.add_job(
+                job_liq_llm,
+                "interval",
+                minutes=llm_m,
+                id="liq_llm",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+            scheduler.add_job(
+                job_liq_purge,
+                "cron",
+                hour=3,
+                minute=20,
+                id="liq_purge",
+                replace_existing=True,
+            )
+            # kick first cycles soon after boot
+            scheduler.add_job(
+                job_liq_ingest,
+                "date",
+                run_date=datetime.now(timezone.utc) + timedelta(seconds=3),
+                id="liq_ingest_boot",
+                replace_existing=True,
+            )
+            scheduler.add_job(
+                job_liq_features,
+                "date",
+                run_date=datetime.now(timezone.utc) + timedelta(seconds=25),
+                id="liq_features_boot",
+                replace_existing=True,
+            )
+            scheduler.add_job(
+                job_liq_llm,
+                "date",
+                run_date=datetime.now(timezone.utc) + timedelta(seconds=90),
+                id="liq_llm_boot",
+                replace_existing=True,
+            )
+            logger.info(
+                "Liquidity intel ON (sample=%ss, llm every %s min)",
+                sample_s,
+                llm_m,
+            )
+
         scheduler.start()
         logger.info("APScheduler started (jobs enabled)")
     else:
-        logger.warning("APScheduler disabled (enable_scheduler=false) — no cron/interval jobs")
+        logger.warning("APScheduler disabled — no cron/interval jobs")
     yield
     if scheduler.running:
         scheduler.shutdown(wait=False)
