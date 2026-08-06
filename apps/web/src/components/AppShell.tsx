@@ -15,6 +15,7 @@ const links = [
   { href: "/", label: "Home" },
   { href: "/portfolio", label: "Portfolio" },
   { href: "/watchlist", label: "Watchlist" },
+  { href: "/tips", label: "Tipy" },
   { href: "/chat", label: "Analýza" },
   { href: "/reports", label: "Reporty" },
   { href: "/alerts", label: "Alerty" },

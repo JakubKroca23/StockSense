@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.models import (
     AssetClass,
     ChatSessionStatus,
+    CloseReason,
     DataQuality,
     FeedbackResult,
     RiskProfile,
@@ -122,6 +123,7 @@ class TipFeedbackOut(ORMModel):
     id: int
     tip_id: int
     result: FeedbackResult
+    close_reason: str | None = None
     notes: str | None
     created_at: datetime
 
@@ -151,6 +153,7 @@ class TipOut(ORMModel):
     is_active: bool
     status: str = TipStatus.proposed.value
     as_of: datetime
+    closed_at: datetime | None = None
     created_at: datetime
     feedback: TipFeedbackOut | None = None
 
@@ -158,18 +161,26 @@ class TipOut(ORMModel):
 class TipFeedbackCreate(BaseModel):
     result: FeedbackResult
     notes: str | None = None
+    close_reason: CloseReason | None = None
 
 
 class TipLifecycleUpdate(BaseModel):
     status: TipStatus
     result: FeedbackResult | None = None
     notes: str | None = None
+    close_reason: CloseReason | None = None
 
 
 class TipJournalUpdate(BaseModel):
     entry_notes: str | None = None
     exit_notes: str | None = None
     result: FeedbackResult | None = None
+    close_reason: CloseReason | None = None
+
+
+class TipHistoryOut(BaseModel):
+    stats: dict[str, Any]
+    tips: list[TipOut]
 
 
 class UserSettingsOut(ORMModel):

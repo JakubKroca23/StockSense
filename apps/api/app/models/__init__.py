@@ -66,6 +66,17 @@ class FeedbackResult(str, enum.Enum):
     partial = "partial"
 
 
+class CloseReason(str, enum.Enum):
+    """Why a tip was closed — distinguishes TP vs SL from other exits."""
+
+    stop = "stop"
+    target_1 = "target_1"
+    target_2 = "target_2"
+    ttl = "ttl"
+    score_flip = "score_flip"
+    manual = "manual"
+
+
 class TipStatus(str, enum.Enum):
     proposed = "proposed"
     accepted = "accepted"
@@ -187,6 +198,7 @@ class Tip(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     status: Mapped[str] = mapped_column(String(32), default=TipStatus.proposed.value, index=True)
     as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     instrument: Mapped[Instrument] = relationship(back_populates="tips")
@@ -200,6 +212,7 @@ class TipFeedback(Base):
     tip_id: Mapped[int] = mapped_column(ForeignKey("tips.id", ondelete="CASCADE"), unique=True)
     user_id: Mapped[str] = mapped_column(String(64), index=True)
     result: Mapped[FeedbackResult] = mapped_column(Enum(FeedbackResult))
+    close_reason: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
