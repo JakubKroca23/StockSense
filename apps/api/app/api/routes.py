@@ -1970,14 +1970,14 @@ async def crypto_ohlcv(
 
     allowed = {"1s", "1m", "5m", "15m", "30m", "1h", "4h", "1d", "1wk"}
     iv = interval if interval in allowed else "1h"
-    lim = max(20, min(limit, 1000 if iv == "1s" else 500))
+    lim = max(20, min(limit, 1000))
     # Ultra-short TFs: don't flood price_bars
     do_persist = persist and iv not in {"1s", "1m", "5m", "30m"}
     if do_persist:
         return await persist_crypto_ohlcv(db, symbol=symbol, interval=iv, limit=lim)
 
     market = get_crypto_market()
-    bars = await market.fetch_ohlcv(symbol, interval=iv)
+    bars = await market.fetch_ohlcv(symbol, interval=iv, limit=lim)
     if lim and len(bars) > lim:
         bars = bars[-lim:]
     return {

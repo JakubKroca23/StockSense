@@ -339,43 +339,53 @@ class MultiExchangeCcxt:
         )
 
     async def fetch_ohlcv(
-        self, symbol: str, interval: str = "1d", lookback: str = "6mo"
+        self,
+        symbol: str,
+        interval: str = "1d",
+        lookback: str = "6mo",
+        limit: int | None = None,
     ) -> list[OhlcvBar]:
         """Chart OHLCV — aggregated Binance + Bybit."""
         limit_map = {
-            "1s": 300,
-            "1m": 240,
-            "5m": 288,
-            "15m": 288,
-            "30m": 240,
-            "1h": 336,
-            "4h": 180,
-            "1d": 365,
+            "1s": 1000,
+            "1m": 1000,
+            "5m": 1000,
+            "15m": 800,
+            "30m": 600,
+            "1h": 500,
+            "4h": 360,
+            "1d": 400,
             "1wk": 260,
         }
-        limit = limit_map.get(interval, 180)
+        lim = limit if limit is not None else limit_map.get(interval, 180)
+        lim = max(20, min(int(lim), 1000))
         return await asyncio.to_thread(
-            self._fetch_ohlcv_sync, _normalize_market(symbol), interval, limit
+            self._fetch_ohlcv_sync, _normalize_market(symbol), interval, lim
         )
 
     async def fetch_ohlcv_execution(
-        self, symbol: str, interval: str = "1d", lookback: str = "6mo"
+        self,
+        symbol: str,
+        interval: str = "1d",
+        lookback: str = "6mo",
+        limit: int | None = None,
     ) -> list[OhlcvBar]:
         """Bot OHLCV — Bybit only."""
         limit_map = {
-            "1s": 300,
-            "1m": 240,
-            "5m": 288,
-            "15m": 288,
-            "30m": 240,
-            "1h": 336,
-            "4h": 180,
-            "1d": 365,
+            "1s": 1000,
+            "1m": 1000,
+            "5m": 1000,
+            "15m": 800,
+            "30m": 600,
+            "1h": 500,
+            "4h": 360,
+            "1d": 400,
             "1wk": 260,
         }
-        limit = limit_map.get(interval, 180)
+        lim = limit if limit is not None else limit_map.get(interval, 180)
+        lim = max(20, min(int(lim), 1000))
         return await asyncio.to_thread(
-            self._fetch_ohlcv_execution_sync, _normalize_market(symbol), interval, limit
+            self._fetch_ohlcv_execution_sync, _normalize_market(symbol), interval, lim
         )
 
     def _tick_size(self, price: float, *, fine: bool = False) -> float:

@@ -72,10 +72,13 @@ function fmtPct(n: number | null | undefined) {
 }
 
 function chartLimit(tf: string) {
-  if (tf === "1s") return 360;
-  if (tf === "1m") return 240;
-  if (tf === "5m") return 288;
-  return 220;
+  if (tf === "1s") return 1000;
+  if (tf === "1m") return 1000;
+  if (tf === "5m") return 1000;
+  if (tf === "15m") return 800;
+  if (tf === "30m") return 600;
+  if (tf === "1h") return 500;
+  return 300;
 }
 
 function mergeLiveBar(bars: ChartBar[], live: LiveKline): ChartBar[] {
@@ -92,7 +95,8 @@ function mergeLiveBar(bars: ChartBar[], live: LiveKline): ChartBar[] {
   const sameBucket = new Date(last.ts).getTime() === new Date(live.ts).getTime();
   if (sameBucket) return [...bars.slice(0, -1), next];
   const merged = [...bars, next];
-  return merged.length > 500 ? merged.slice(merged.length - 500) : merged;
+  const maxBars = 1200;
+  return merged.length > maxBars ? merged.slice(merged.length - maxBars) : merged;
 }
 
 function Sparkline({
