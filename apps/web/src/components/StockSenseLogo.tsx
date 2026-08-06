@@ -2,13 +2,13 @@ import Image from "next/image";
 
 const STOCK_LETTERS = [
   { ch: "S", rotate: -8 },
-  { ch: "t", rotate: 6 },
-  { ch: "o", rotate: -4 },
-  { ch: "c", rotate: 9 },
-  { ch: "k", rotate: -6 },
+  { ch: "T", rotate: 6 },
+  { ch: "O", rotate: -4 },
+  { ch: "C", rotate: 9 },
+  { ch: "K", rotate: -6 },
 ] as const;
 
-/** StockSense wordmark — oko + pootočený Stock + sense v rámečku */
+/** StockSense wordmark — oko + pootočený STOCK + sense v rámečku */
 export function StockSenseLogo({
   className = "",
   height = 36,
@@ -18,10 +18,10 @@ export function StockSenseLogo({
   height?: number;
   title?: string;
 }) {
-  const eyeH = Math.round(height * 0.92);
+  const eyeH = Math.round(height * 0.7);
   const eyeW = Math.round(eyeH * (229 / 108));
-  const stockSize = Math.round(height * 0.78);
-  const gap = Math.round(height * 0.12);
+  const stockSize = Math.round(height * 0.58);
+  const gap = Math.round(height * 0.1);
 
   return (
     <span

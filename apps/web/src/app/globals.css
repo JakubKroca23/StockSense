@@ -122,9 +122,20 @@ a {
 
 .brand-logo__eye {
   display: block;
-  height: 100%;
+  height: auto;
   width: auto;
   object-fit: contain;
+  /* přebarvení oka do výrazné sense zelené (#5dde8a) */
+  filter:
+    brightness(0)
+    saturate(100%)
+    invert(72%)
+    sepia(48%)
+    saturate(520%)
+    hue-rotate(87deg)
+    brightness(1.05)
+    contrast(1.05)
+    drop-shadow(0 0 6px color-mix(in srgb, var(--sense) 55%, transparent));
 }
 
 .brand-logo__word {
@@ -144,7 +155,8 @@ a {
   font-weight: 400;
   color: #fff;
   line-height: 1;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   position: relative;
   z-index: 0;
 }
