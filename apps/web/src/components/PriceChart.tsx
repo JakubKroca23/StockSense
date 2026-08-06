@@ -210,31 +210,33 @@ export function PriceChart({
 
     const theme = themeRef.current || readTheme();
     const opacityMul = heatOpacityRef.current;
+    // Keep clear of right price labels
     const leftPad = 2;
-    const rightPad = 52;
-    const usableW = Math.max(40, w - leftPad - rightPad);
-    // Ordinary liquidity lives in a thin strip left of the price scale
-    const stripW = Math.max(36, Math.min(usableW * 0.2, 88));
-    const stripX = leftPad + usableW - stripW;
+    const rightPad = 72;
+    const plotW = Math.max(48, w - leftPad - rightPad);
+    // Volume-profile lane on the right of the candles
+    const profileW = Math.max(56, Math.min(plotW * 0.32, 140));
+    const profileRight = leftPad + plotW;
+    const profileLeft = profileRight - profileW;
 
-    const sizes: number[] = [];
+    type Side = { price: number; size: number; side: "bid" | "ask" };
+    const sides: Side[] = [];
     for (const lvl of raw) {
-      if (lvl.bid > 0) sizes.push(lvl.bid);
-      if (lvl.ask > 0) sizes.push(lvl.ask);
+      if (lvl.bid > 0) sides.push({ price: lvl.price, size: lvl.bid, side: "bid" });
+      if (lvl.ask > 0) sides.push({ price: lvl.price, size: lvl.ask, side: "ask" });
     }
-    if (!sizes.length) return;
-    sizes.sort((a, b) => a - b);
+    if (!sides.length) return;
+
+    const sizes = sides.map((s) => s.size).sort((a, b) => a - b);
     const pct = (p: number) =>
       sizes[Math.min(sizes.length - 1, Math.floor(sizes.length * p))] || sizes[sizes.length - 1];
     const maxSize = sizes[sizes.length - 1];
-    // Aggressive noise cut so mid levels don't blur into one mass
-    const noiseFloor = pct(0.7) || maxSize * 0.12;
-    const midCut = pct(0.82);
-    const wallCut = pct(0.93);
-    const srCut = pct(0.98);
-
-    const levels = raw.filter((l) => l.bid >= noiseFloor || l.ask >= noiseFloor);
-    if (!levels.length) return;
+    // Keep enough levels to read the book, drop pure noise
+    const noiseFloor = Math.max(pct(0.45) * 0.85, maxSize * 0.02);
+    const wallCut = pct(0.9);
+    const srCut = pct(0.97);
+    const visible = sides.filter((s) => s.size >= noiseFloor);
+    if (!visible.length) return;
 
     const topP = series.coordinateToPrice(0);
     const botP = series.coordinateToPrice(h);
@@ -245,64 +247,80 @@ export function PriceChart({
       return ((topP - price) / (topP - botP)) * h;
     };
 
-    // Hard steps — neighboring sizes stay visually distinct
-    const tier = (size: number): 0 | 1 | 2 | 3 | 4 => {
-      if (size >= srCut) return 4;
-      if (size >= wallCut) return 3;
-      if (size >= midCut) return 2;
-      if (size >= noiseFloor) return 1;
-      return 0;
-    };
-
-    let gapH = 1.2;
-    if (levels.length >= 2) {
-      const sorted = [...levels].map((l) => l.price).sort((a, b) => a - b);
-      const midIdx = Math.floor(sorted.length / 2);
-      const y0 = priceToY(sorted[midIdx]);
-      const y1 = priceToY(sorted[Math.min(midIdx + 1, sorted.length - 1)]);
-      if (y0 != null && y1 != null) {
-        gapH = Math.max(0.9, Math.min(3.2, Math.abs(y1 - y0) * 0.55));
-      }
+    // Bucket by screen row so dense books read as a clean profile
+    const rowH = Math.max(2.2, Math.min(5.5, h / 110));
+    type Bucket = { y: number; bid: number; ask: number; price: number };
+    const buckets = new Map<number, Bucket>();
+    for (const s of visible) {
+      const y = priceToY(s.price);
+      if (y == null || y < -6 || y > h + 6) continue;
+      const key = Math.round(y / rowH);
+      const cur = buckets.get(key) || { y: key * rowH, bid: 0, ask: 0, price: s.price };
+      if (s.side === "bid") cur.bid += s.size;
+      else cur.ask += s.size;
+      // Prefer price of the larger side for S/R line placement
+      if (s.size >= Math.max(cur.bid, cur.ask) * 0.5) cur.price = s.price;
+      buckets.set(key, cur);
     }
+    const rows = [...buckets.values()];
+    if (!rows.length) return;
 
-    const drawThinLine = (y: number, x0: number, x1: number, color: string, a: number, th: number) => {
-      ctx.fillStyle = hexAlpha(color, a);
-      ctx.fillRect(x0, y - th / 2, Math.max(0, x1 - x0), th);
+    let peak = 0;
+    for (const r of rows) peak = Math.max(peak, r.bid, r.ask);
+    if (peak <= 0) return;
+
+    // Sqrt scale → mid liquidity stays readable, walls still dominate
+    const widthOf = (size: number) => {
+      const t = Math.sqrt(size / peak);
+      return Math.max(3, profileW * (0.08 + t * 0.92));
     };
 
-    for (const lvl of levels) {
-      const y = priceToY(lvl.price);
-      if (y == null || y < -4 || y > h + 4) continue;
+    // Soft lane backdrop so the profile zone is obvious
+    ctx.fillStyle = hexAlpha(theme.muted, 0.06 * opacityMul);
+    ctx.fillRect(profileLeft, 0, profileW, h);
+    ctx.strokeStyle = hexAlpha(theme.muted, 0.14 * opacityMul);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(profileLeft + 0.5, 0);
+    ctx.lineTo(profileLeft + 0.5, h);
+    ctx.stroke();
 
-      const drawSide = (size: number, color: string) => {
+    // Profile bars (volume-profile style): grow left from the lane's right edge
+    for (const r of rows) {
+      const y = r.y;
+      if (y < -4 || y > h + 4) continue;
+      const barH = Math.max(1.6, rowH * 0.78);
+
+      const paint = (size: number, color: string) => {
         if (size < noiseFloor) return;
-        const t = tier(size);
-        if (t === 0) return;
+        const bw = widthOf(size);
+        const isWall = size >= wallCut;
+        const isSr = size >= srCut;
+        const aBase = isSr ? 0.78 : isWall ? 0.58 : 0.34 + 0.32 * Math.sqrt(size / peak);
+        const a = Math.min(0.92, aBase * opacityMul);
+        ctx.fillStyle = hexAlpha(color, a);
+        ctx.fillRect(profileRight - bw, y - barH / 2, bw, barH);
 
-        // Right-strip depth blob (all visible levels)
-        const stripFrac = t === 1 ? 0.35 : t === 2 ? 0.62 : t === 3 ? 0.88 : 1;
-        const bandW = stripW * stripFrac;
-        const bandA =
-          (t === 1 ? 0.22 : t === 2 ? 0.4 : t === 3 ? 0.58 : 0.78) * opacityMul;
-        const bandH = t >= 3 ? Math.min(2.4, gapH * 0.9) : Math.min(2, gapH * 0.75);
-        ctx.fillStyle = hexAlpha(color, Math.min(0.92, bandA));
-        ctx.fillRect(stripX + (stripW - bandW), y - bandH / 2, bandW, bandH);
-
-        // Truly large walls / S-R: thin line across the whole plot
-        if (t >= 3) {
-          const lineA =
-            (t === 4 ? 0.72 : 0.42) * opacityMul + (t === 4 ? 0.12 : 0.06);
-          const lineTh = t === 4 ? 0.85 : 0.55;
-          drawThinLine(y, leftPad, leftPad + usableW, color, Math.min(0.95, lineA), lineTh);
-          // Soft accent tip at the price scale so the level stays readable
-          if (t === 4) {
-            drawThinLine(y, stripX, leftPad + usableW, color, Math.min(0.95, 0.55 * opacityMul + 0.2), 1.15);
-          }
+        // Crisp edge on significant levels
+        if (isWall) {
+          ctx.fillStyle = hexAlpha(color, Math.min(0.95, (isSr ? 0.85 : 0.55) * opacityMul));
+          ctx.fillRect(profileRight - bw, y - Math.max(0.7, barH * 0.22) / 2, Math.min(3.5, bw), Math.max(0.7, barH * 0.22));
         }
       };
 
-      if (lvl.bid > 0) drawSide(lvl.bid, theme.up);
-      if (lvl.ask > 0) drawSide(lvl.ask, theme.down);
+      if (r.bid > 0) paint(r.bid, theme.up);
+      if (r.ask > 0) paint(r.ask, theme.down);
+
+      // S/R walls: thin guide across the candle area only (stops before profile)
+      const wallSize = Math.max(r.bid, r.ask);
+      if (wallSize >= wallCut) {
+        const isSr = wallSize >= srCut;
+        const color = r.bid >= r.ask ? theme.up : theme.down;
+        const lineA = Math.min(0.9, (isSr ? 0.55 : 0.28) * opacityMul + 0.08);
+        const th = isSr ? 0.9 : 0.55;
+        ctx.fillStyle = hexAlpha(color, lineA);
+        ctx.fillRect(leftPad, y - th / 2, Math.max(0, profileLeft - leftPad - 2), th);
+      }
     }
   };
 
@@ -460,7 +478,7 @@ export function PriceChart({
 
   useEffect(() => {
     chartRef.current?.timeScale().applyOptions({
-      rightOffset: showHeatmap ? 10 : 8,
+      rightOffset: showHeatmap ? 14 : 8,
     });
     drawHeatmap();
   }, [showHeatmap]);
