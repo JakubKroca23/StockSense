@@ -21,17 +21,6 @@ class ORMModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class AuthLogin(BaseModel):
-    password: str = Field(min_length=1)
-
-
-class AuthTokenOut(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    expires_in: int
-    user: dict[str, str | None]
-
-
 class InstrumentOut(ORMModel):
     id: int
     symbol: str

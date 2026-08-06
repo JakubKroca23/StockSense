@@ -1,8 +1,8 @@
-const CACHE = "stocksense-v7";
-const ASSETS = ["/", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png", "/apple-touch-icon.png", "/login"];
+const CACHE = "stocksense-v8";
+const ASSETS = ["/", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png", "/apple-touch-icon.png"];
 
 function shouldBypass(url) {
-  // Never cache authenticated API / Next data — avoids stale 401s.
+  // Never cache API / Next data — avoids stale responses.
   // Offline home/tips live in IndexedDB (apps/web/src/lib/offline.ts).
   return (
     url.pathname.startsWith("/api") ||
@@ -51,7 +51,7 @@ self.addEventListener("fetch", (event) => {
           return res;
         })
         .catch(() =>
-          caches.match(req).then((cached) => cached || caches.match("/") || caches.match("/login"))
+          caches.match(req).then((cached) => cached || caches.match("/"))
         )
     );
     return;

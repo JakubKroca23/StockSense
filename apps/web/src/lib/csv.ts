@@ -21,14 +21,10 @@ export function rowsToCsv(headers: string[], rows: (string | number | null | und
   return lines.join("\n") + "\n";
 }
 
-/** Authenticated download via API (Bearer). */
+/** Download CSV from API (open access). */
 export async function downloadApiCsv(path: string, filename: string) {
-  const { getStoredApiToken } = await import("@/lib/auth");
   const base = process.env.NEXT_PUBLIC_API_URL || "/api";
-  const token = getStoredApiToken();
-  const res = await fetch(`${base.replace(/\/$/, "")}${path.startsWith("/") ? path : `/${path}`}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
+  const res = await fetch(`${base.replace(/\/$/, "")}${path.startsWith("/") ? path : `/${path}`}`);
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || `Export selhal (${res.status})`);
