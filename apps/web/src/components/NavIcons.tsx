@@ -62,7 +62,7 @@ export function IconWatchlist(p: IconProps) {
 
 /** Analýza / Sense — oko z loga aplikace */
 export function IconAnalysis({ size = NAV_ICON_SIZE, className = "" }: IconProps) {
-  const h = Math.round(size * (129 / 247));
+  const h = Math.round(size * (108 / 229));
   return (
     <Image
       src="/logo-eye-transparent.png"

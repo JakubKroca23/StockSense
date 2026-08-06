@@ -117,6 +117,7 @@ a {
   display: inline-flex;
   align-items: center;
   line-height: 0;
+  overflow: visible;
 }
 
 .brand-logo__eye {
@@ -129,6 +130,12 @@ a {
 .brand-logo__word {
   display: inline-block;
   white-space: nowrap;
+  overflow: visible;
+}
+
+.brand-logo__sense {
+  /* $ / S sedí jako koncové „s“ ve Stocks — dolů a doleva */
+  z-index: 1;
 }
 
 .nav-link {
