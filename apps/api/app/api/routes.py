@@ -752,6 +752,11 @@ async def tips_stats(user: AuthUser = Depends(get_current_user), db: AsyncSessio
 
 @router.post("/tips/run", response_model=list[TipOut])
 async def run_tips(user: AuthUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    if not get_settings().enable_tip_scoring:
+        raise HTTPException(
+            status_code=503,
+            detail="Generování tipů je vypnuté — pipeline se předělává.",
+        )
     tips = await run_scoring_for_user(db, user.id)
     ids = [t.id for t in tips]
     if not ids:

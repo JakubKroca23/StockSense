@@ -284,18 +284,23 @@ async def job_macro() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await _init_db()
-    # APScheduler cron expects a string like "7,12,17,21", not a Python list
-    scoring_hours = ",".join(
-        str(int(h.strip())) for h in settings.scoring_cron_hours.split(",") if h.strip()
-    ) or "7,12,17,21"
-    scheduler.add_job(job_price_poll, "interval", minutes=settings.price_poll_minutes, id="price_poll")
-    scheduler.add_job(job_scoring, "cron", hour=scoring_hours, minute=10, id="scoring")
-    scheduler.add_job(job_daily_report, "cron", hour=6, minute=30, id="daily_report")
-    scheduler.add_job(job_equity_snapshot, "cron", hour=21, minute=5, id="equity_snapshot")
-    scheduler.add_job(job_macro, "cron", hour="*/6", minute=5, id="macro")
-    scheduler.start()
+    if settings.enable_scheduler:
+        # APScheduler cron expects a string like "7,12,17,21", not a Python list
+        scoring_hours = ",".join(
+            str(int(h.strip())) for h in settings.scoring_cron_hours.split(",") if h.strip()
+        ) or "7,12,17,21"
+        scheduler.add_job(job_price_poll, "interval", minutes=settings.price_poll_minutes, id="price_poll")
+        scheduler.add_job(job_scoring, "cron", hour=scoring_hours, minute=10, id="scoring")
+        scheduler.add_job(job_daily_report, "cron", hour=6, minute=30, id="daily_report")
+        scheduler.add_job(job_equity_snapshot, "cron", hour=21, minute=5, id="equity_snapshot")
+        scheduler.add_job(job_macro, "cron", hour="*/6", minute=5, id="macro")
+        scheduler.start()
+        logger.info("APScheduler started (jobs enabled)")
+    else:
+        logger.warning("APScheduler disabled (enable_scheduler=false) — no cron/interval jobs")
     yield
-    scheduler.shutdown(wait=False)
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
     await engine.dispose()
 
 

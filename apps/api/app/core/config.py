@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     price_poll_minutes: int = 5
     scoring_cron_hours: str = "7,12,17,21"
 
+    # Background jobs + tip scoring off while tips pipeline is being rebuilt.
+    enable_scheduler: bool = False
+    enable_tip_scoring: bool = False
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

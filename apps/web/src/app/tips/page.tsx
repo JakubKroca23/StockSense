@@ -194,7 +194,6 @@ export default function TipsPage() {
   const [error, setError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [scoring, setScoring] = useState(false);
   const [tipBusy, setTipBusy] = useState(false);
 
   const loadActive = useCallback(async () => {
@@ -229,20 +228,6 @@ export default function TipsPage() {
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
-
-  async function runScoring() {
-    setScoring(true);
-    setError(null);
-    try {
-      await apiFetch("/tips/run", { method: "POST" });
-      await loadAll();
-      setOkMsg("Tipy přepočítány");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Scoring selhal");
-    } finally {
-      setScoring(false);
-    }
-  }
 
   async function onLifecycle(
     id: number,
@@ -315,12 +300,15 @@ export default function TipsPage() {
           <button
             type="button"
             className="btn btn-primary"
-            onClick={() => void runScoring()}
-            disabled={scoring || tipBusy}
+            disabled
+            title="Generování tipů je dočasně vypnuté"
           >
-            {scoring ? "Počítám…" : "Přepočítat tipy"}
+            Přepočítat tipy (vypnuto)
           </button>
         </div>
+        <p className="muted text-sm">
+          Automatické tipy a cron jsou vypnuté — scoring se předělává.
+        </p>
 
         <div className="card p-4 sm:p-5">
           <h2 className="home-chart-title">Tipy podle akce</h2>
@@ -339,7 +327,7 @@ export default function TipsPage() {
           <TipCard
             key={tip.id}
             tip={tip}
-            busy={tipBusy || scoring}
+            busy={tipBusy}
             onLifecycle={onLifecycle}
             onPaper={onPaper}
             onJournal={onJournal}

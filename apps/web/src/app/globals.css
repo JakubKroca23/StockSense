@@ -128,14 +128,47 @@ a {
 }
 
 .brand-logo__word {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   white-space: nowrap;
   overflow: visible;
+  line-height: 1;
+}
+
+.brand-logo__stock {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-logo-hand), "Caveat Brush", cursive;
+  font-weight: 400;
+  color: #fff;
+  line-height: 1;
+  letter-spacing: 0.01em;
+}
+
+.brand-logo__stock-letter {
+  display: inline-block;
+  transform-origin: center center;
+  line-height: 1;
 }
 
 .brand-logo__sense {
-  /* $ / S sedí jako koncové „s“ ve Stocks — dolů a doleva */
-  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.18em 0.42em 0.2em;
+  border: 1px solid color-mix(in srgb, var(--sense) 55%, #1a1a1a);
+  border-radius: 1px;
+  background: #000;
+  color: var(--sense);
+  font-family: var(--font-brand), "Space Grotesk", sans-serif;
+  font-size: 0.72em;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: lowercase;
+  text-shadow: 0 0 8px color-mix(in srgb, var(--sense) 40%, transparent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--sense) 12%, transparent);
 }
 
 .app-nav {

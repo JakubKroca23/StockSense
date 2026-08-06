@@ -155,6 +155,12 @@ async def _instruments_for_user(db: AsyncSession, user_id: str) -> list[Instrume
 
 
 async def run_scoring_for_user(db: AsyncSession, user_id: str) -> list[Tip]:
+    from app.core.config import get_settings
+
+    if not get_settings().enable_tip_scoring:
+        logger.warning("Tip scoring disabled (enable_tip_scoring=false) — skip for %s", user_id)
+        return []
+
     await ensure_discovery_universe(db)
 
     settings_row = (
