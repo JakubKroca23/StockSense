@@ -217,10 +217,10 @@ export function PriceChart({
     const leftPad = 2;
     const rightPad = isNarrow ? 54 : 68;
     const plotW = Math.max(48, w - leftPad - rightPad);
-    // Wide volume-profile lane (liquidity must read clearly)
+    // Profile lane ~half of previous width
     const profileW = isNarrow
-      ? Math.max(88, Math.min(plotW * 0.42, 170))
-      : Math.max(120, Math.min(plotW * 0.48, 240));
+      ? Math.max(44, Math.min(plotW * 0.21, 85))
+      : Math.max(60, Math.min(plotW * 0.24, 120));
     const profileRight = leftPad + plotW;
     const profileLeft = profileRight - profileW;
 
@@ -252,9 +252,9 @@ export function PriceChart({
       return ((topP - price) / (topP - botP)) * h;
     };
 
-    // Coarser bins → merge nearby book levels into readable profile rows
-    const targetRows = isNarrow ? 40 : 55;
-    const rowH = Math.max(3.4, Math.min(9.5, h / targetRows));
+    // Finer bins → more profile rows
+    const targetRows = isNarrow ? 72 : 95;
+    const rowH = Math.max(1.8, Math.min(4.2, h / targetRows));
     type Bucket = { y: number; bid: number; ask: number; price: number };
     const buckets = new Map<number, Bucket>();
     for (const s of visible) {
@@ -274,7 +274,7 @@ export function PriceChart({
       buckets.set(key, cur);
     }
 
-    // Absorb weak neighbor bins into stronger adjacent liquidity
+    // Only absorb very weak neighbors so we keep more distinct rows
     const sortedKeys = [...buckets.keys()].sort((a, b) => a - b);
     const merged = new Map<number, Bucket>();
     for (const key of sortedKeys) {
@@ -282,7 +282,7 @@ export function PriceChart({
       const total = cur.bid + cur.ask;
       const prev = merged.get(key - 1);
       const prevTotal = prev ? prev.bid + prev.ask : 0;
-      if (prev && total < prevTotal * 0.28) {
+      if (prev && total < prevTotal * 0.12) {
         prev.bid += cur.bid;
         prev.ask += cur.ask;
         if (total >= Math.max(prev.bid, prev.ask) * 0.35) prev.price = cur.price;
@@ -298,32 +298,34 @@ export function PriceChart({
     for (const r of rows) peak = Math.max(peak, r.bid, r.ask);
     if (peak <= 0) return;
 
-    const strength = (size: number) => Math.pow(size / peak, 0.55);
+    // Stronger opacity contrast by volume (near-linear, not compressed)
+    const strength = (size: number) => Math.pow(size / peak, 0.85);
     const widthOf = (size: number) => {
       const t = strength(size);
-      return Math.max(4, profileW * (0.1 + t * 0.9));
+      return Math.max(2.5, profileW * (0.06 + t * 0.94));
     };
-    // Line thickness across candles scales with order size
+    // Thin lines; thickness still scales mildly with size
     const lineThickness = (size: number) => {
       const t = strength(size);
-      return 0.45 + t * t * (isNarrow ? 5.2 : 6.5);
+      return 0.35 + t * t * (isNarrow ? 2.4 : 3.1);
     };
     const lineAlpha = (size: number) => {
       const t = strength(size);
-      return Math.min(0.92, (0.12 + t * 0.72) * opacityMul);
+      // Low volume nearly invisible, walls punch through
+      return Math.min(0.9, (0.05 + t * 0.82) * opacityMul);
     };
 
     // Soft lane backdrop
-    ctx.fillStyle = hexAlpha(theme.muted, 0.07 * opacityMul);
+    ctx.fillStyle = hexAlpha(theme.muted, 0.06 * opacityMul);
     ctx.fillRect(profileLeft, 0, profileW, h);
-    ctx.strokeStyle = hexAlpha(theme.muted, 0.16 * opacityMul);
+    ctx.strokeStyle = hexAlpha(theme.muted, 0.14 * opacityMul);
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(profileLeft + 0.5, 0);
     ctx.lineTo(profileLeft + 0.5, h);
     ctx.stroke();
 
-    // Draw weaker full-chart guides first, then strong walls on top
+    // Weaker full-chart guides first, strong walls on top
     const bySize = [...rows].sort(
       (a, b) => Math.max(a.bid, a.ask) - Math.max(b.bid, b.ask)
     );
@@ -336,31 +338,33 @@ export function PriceChart({
       const color = r.bid >= r.ask ? theme.up : theme.down;
       const th = lineThickness(wallSize);
       const a = lineAlpha(wallSize);
-      // Full span across candles + into profile tip
-      ctx.fillStyle = hexAlpha(color, a * (wallSize >= srCut ? 1 : wallSize >= wallCut ? 0.85 : 0.55));
+      const boost = wallSize >= srCut ? 1 : wallSize >= wallCut ? 0.78 : 0.42;
+      ctx.fillStyle = hexAlpha(color, a * boost);
       ctx.fillRect(leftPad, y - th / 2, Math.max(0, profileRight - leftPad), th);
     }
 
-    // Profile bars on top of guides
+    // Profile bars — thin rows, opacity strongly tied to volume
     for (const r of rows) {
       const y = r.y;
       if (y < -4 || y > h + 4) continue;
-      const barH = Math.max(2.2, rowH * 0.82);
+      const barH = Math.max(1.15, rowH * 0.62);
 
       const paint = (size: number, color: string) => {
         if (size < noiseFloor) return;
         const bw = widthOf(size);
+        const t = strength(size);
         const isWall = size >= wallCut;
         const isSr = size >= srCut;
-        const aBase = 0.28 + strength(size) * 0.58;
-        const a = Math.min(0.94, aBase * opacityMul * (isSr ? 1.12 : isWall ? 1.05 : 1));
+        // Big spread: faint mid-book vs opaque walls
+        const aBase = 0.08 + t * 0.78;
+        const a = Math.min(0.94, aBase * opacityMul * (isSr ? 1.15 : isWall ? 1.05 : 1));
         ctx.fillStyle = hexAlpha(color, a);
         ctx.fillRect(profileRight - bw, y - barH / 2, bw, barH);
 
         if (isWall) {
-          const tipH = Math.max(1.1, Math.min(barH, 2 + strength(size) * 3));
-          ctx.fillStyle = hexAlpha(color, Math.min(0.96, (isSr ? 0.9 : 0.62) * opacityMul));
-          ctx.fillRect(profileRight - bw, y - tipH / 2, Math.min(5, bw), tipH);
+          const tipH = Math.max(0.8, Math.min(barH, 0.9 + t * 1.8));
+          ctx.fillStyle = hexAlpha(color, Math.min(0.96, (0.35 + t * 0.55) * opacityMul));
+          ctx.fillRect(profileRight - bw, y - tipH / 2, Math.min(3.5, bw), tipH);
         }
       };
 
