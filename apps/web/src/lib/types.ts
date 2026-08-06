@@ -30,11 +30,19 @@ export interface PortfolioPosition {
 
 export type TipStatus = "proposed" | "accepted" | "rejected" | "closed";
 export type FeedbackResult = "hit" | "miss" | "partial";
+export type CloseReason =
+  | "stop"
+  | "target_1"
+  | "target_2"
+  | "ttl"
+  | "score_flip"
+  | "manual";
 
 export interface TipFeedback {
   id: number;
   tip_id: number;
   result: FeedbackResult;
+  close_reason?: CloseReason | string | null;
   notes?: string | null;
   created_at: string;
 }
@@ -64,8 +72,28 @@ export interface Tip {
   status?: TipStatus | string;
   entry_notes?: string | null;
   as_of: string;
+  closed_at?: string | null;
   created_at: string;
   feedback?: TipFeedback | null;
+}
+
+export interface TipStats {
+  total: number;
+  hits: number;
+  misses: number;
+  partials: number;
+  hit_rate: number | null;
+  tp_hits?: number;
+  sl_hits?: number;
+  tp_rate?: number | null;
+  by_close_reason?: Record<string, number>;
+  score_adj: number;
+  by_asset_class?: Record<string, unknown>;
+}
+
+export interface TipHistory {
+  stats: TipStats;
+  tips: Tip[];
 }
 
 export interface HomeData {
@@ -76,15 +104,7 @@ export interface HomeData {
   briefing_cs?: string | null;
   briefing_title?: string | null;
   briefing_at?: string | null;
-  tip_stats?: {
-    total: number;
-    hits: number;
-    misses: number;
-    partials: number;
-    hit_rate: number | null;
-    score_adj: number;
-    by_asset_class?: Record<string, unknown>;
-  } | null;
+  tip_stats?: TipStats | null;
   equity?: {
     as_of: string;
     total_value: number;
@@ -133,6 +153,21 @@ export const tipStatusLabel: Record<string, string> = {
   accepted: "Přijatý",
   rejected: "Odmítnutý",
   closed: "Uzavřený",
+};
+
+export const closeReasonLabel: Record<string, string> = {
+  stop: "Stop loss",
+  target_1: "Take profit (TP1)",
+  target_2: "Take profit (TP2)",
+  ttl: "Expirace",
+  score_flip: "Změna scoringu",
+  manual: "Manuálně",
+};
+
+export const feedbackResultLabel: Record<FeedbackResult, string> = {
+  hit: "Hit",
+  miss: "Miss",
+  partial: "Partial",
 };
 
 export interface AlertItem {

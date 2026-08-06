@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models import FeedbackResult, Tip, TipFeedback, TipHorizon, TipStatus
+from app.models import CloseReason, FeedbackResult, Tip, TipFeedback, TipHorizon, TipStatus
 from app.services.alerts import create_alert
 
 HORIZON_TTL_DAYS: dict[str, int] = {
@@ -48,28 +48,58 @@ def score_flip(old_score: float, old_action: str, new_score: float, new_action: 
     return False
 
 
+def infer_close_reason(notes: str | None) -> str | None:
+    """Best-effort parse of legacy free-text notes into a close reason."""
+    if not notes:
+        return None
+    n = notes.lower()
+    if "zásahu stop" in n or "zasah stop" in n or "zásah stop" in n:
+        return CloseReason.stop.value
+    if "zásahu target_2" in n or "target_2" in n:
+        return CloseReason.target_2.value
+    if "zásahu target_1" in n or "target_1" in n or "zásah target" in n:
+        return CloseReason.target_1.value
+    if "expirace horizontu" in n or "ttl" in n:
+        return CloseReason.ttl.value
+    if "změna scoringu" in n or "zmena scoringu" in n:
+        return CloseReason.score_flip.value
+    return CloseReason.manual.value
+
+
+def _reason_value(reason: CloseReason | str | None) -> str | None:
+    if reason is None:
+        return None
+    return reason.value if hasattr(reason, "value") else str(reason)
+
+
 async def close_tip(
     db: AsyncSession,
     tip: Tip,
     *,
     result: FeedbackResult,
     notes: str,
+    close_reason: CloseReason | str = CloseReason.manual,
     alert: bool = True,
 ) -> None:
+    now = datetime.now(timezone.utc)
     tip.is_active = False
     tip.status = TipStatus.closed.value
+    tip.closed_at = now
+    reason = _reason_value(close_reason) or CloseReason.manual.value
     existing = (
         await db.execute(select(TipFeedback).where(TipFeedback.tip_id == tip.id))
     ).scalar_one_or_none()
     if existing:
         existing.result = result
         existing.notes = notes
+        existing.close_reason = reason
     else:
         db.add(
             TipFeedback(
                 tip_id=tip.id,
                 user_id=tip.user_id,
                 result=result,
+                close_reason=reason,
                 notes=notes,
             )
         )
@@ -85,6 +115,7 @@ async def close_tip(
                 "tip_id": tip.id,
                 "symbol": sym,
                 "result": result.value,
+                "close_reason": reason,
                 "reason": notes,
             },
         )
@@ -107,6 +138,7 @@ async def invalidate_expired_tips(db: AsyncSession, user_id: str) -> int:
             db,
             tip,
             result=FeedbackResult.partial,
+            close_reason=CloseReason.ttl,
             notes=f"Expirace horizontu {tip.horizon.value} (TTL {horizon_ttl_days(tip.horizon)}d).",
         )
         n += 1

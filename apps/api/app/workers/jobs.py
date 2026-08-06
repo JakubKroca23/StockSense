@@ -233,6 +233,7 @@ async def _run_scoring(
                         db,
                         accepted,
                         result=FeedbackResult.miss,
+                        close_reason="score_flip",
                         notes=(
                             f"Velká změna scoringu: {accepted.score:.0f}/{accepted.action.value} → "
                             f"{result.score:.0f}/{result.action.value}."
@@ -571,7 +572,7 @@ async def check_price_alerts(db: AsyncSession, user_id: str) -> int:
         if quote.price is None:
             continue
         price = quote.price
-        # Only stop / target — not entry zone (most tips already sit inside entry → alert flood).
+        # Only stop / targets — not entry zone (most tips already sit inside entry → alert flood).
         hit = None
         level_px = None
         if tip.stop and (
@@ -580,6 +581,12 @@ async def check_price_alerts(db: AsyncSession, user_id: str) -> int:
         ):
             hit = "stop"
             level_px = tip.stop
+        elif tip.target_2 and (
+            (tip.action.value in ("buy", "trade") and price >= tip.target_2)
+            or (tip.action.value == "sell" and price <= tip.target_2)
+        ):
+            hit = "target_2"
+            level_px = tip.target_2
         elif tip.target_1 and (
             (tip.action.value in ("buy", "trade") and price >= tip.target_1)
             or (tip.action.value == "sell" and price <= tip.target_1)
@@ -609,6 +616,7 @@ async def check_price_alerts(db: AsyncSession, user_id: str) -> int:
                 db,
                 tip,
                 result=FeedbackResult.miss if hit == "stop" else FeedbackResult.hit,
+                close_reason=hit,
                 notes=f"Auto-uzavření po zásahu {hit} @ {price:.4f} (level {level_px}).",
                 alert=False,  # price_* alert already created
             )

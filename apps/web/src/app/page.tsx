@@ -446,7 +446,12 @@ export default function HomePage() {
         </section>
 
         <section className="space-y-3">
-          <h2 className="display text-2xl rise">Top tipy dne</h2>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="display text-2xl rise">Top tipy dne</h2>
+            <Link href="/tips" className="btn text-xs px-2 py-1">
+              Historie / TP·SL
+            </Link>
+          </div>
           {(data?.tips || []).length === 0 && (
             <div className="card p-5 muted">Žádné tipy — spusť přepočet nebo doplň watchlist.</div>
           )}

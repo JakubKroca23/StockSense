@@ -337,12 +337,18 @@ export function HomeOverview({
         </div>
         <div className="home-kpi">
           <div className="home-kpi__label">Hit-rate tipů</div>
-          <div className="home-kpi__value">
+          <Link href="/tips" className="home-kpi__value block hover:opacity-90">
             {hitPct}
             <span className="home-kpi__suffix">
-              {tipStats?.total ? `${tipStats.hits}/${tipStats.total}` : "dej feedback"}
+              {tipStats?.total
+                ? `${tipStats.hits}/${tipStats.total}${
+                    tipStats.tp_hits != null || tipStats.sl_hits != null
+                      ? ` · TP ${tipStats.tp_hits ?? 0}/SL ${tipStats.sl_hits ?? 0}`
+                      : ""
+                  }`
+                : "dej feedback"}
             </span>
-          </div>
+          </Link>
         </div>
         <div className="home-kpi">
           <div className="home-kpi__label">Tipy / alerty</div>

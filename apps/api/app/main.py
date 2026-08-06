@@ -78,6 +78,89 @@ async def _ensure_chat_schema(conn) -> None:
     await conn.execute(
         text("ALTER TABLE tips ADD COLUMN IF NOT EXISTS entry_notes TEXT")
     )
+    await conn.execute(
+        text("ALTER TABLE tips ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ")
+    )
+    await conn.execute(
+        text(
+            "ALTER TABLE tip_feedback ADD COLUMN IF NOT EXISTS close_reason VARCHAR(32)"
+        )
+    )
+    await conn.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_tip_feedback_close_reason "
+            "ON tip_feedback (close_reason)"
+        )
+    )
+    # Backfill structured close reasons from legacy free-text notes
+    await conn.execute(
+        text(
+            """
+            UPDATE tip_feedback SET close_reason = 'stop'
+            WHERE close_reason IS NULL
+              AND notes ILIKE '%zásahu stop%';
+            """
+        )
+    )
+    await conn.execute(
+        text(
+            """
+            UPDATE tip_feedback SET close_reason = 'target_2'
+            WHERE close_reason IS NULL
+              AND notes ILIKE '%zásahu target_2%';
+            """
+        )
+    )
+    await conn.execute(
+        text(
+            """
+            UPDATE tip_feedback SET close_reason = 'target_1'
+            WHERE close_reason IS NULL
+              AND (
+                notes ILIKE '%zásahu target_1%'
+                OR notes ILIKE '%zásahu target%'
+              );
+            """
+        )
+    )
+    await conn.execute(
+        text(
+            """
+            UPDATE tip_feedback SET close_reason = 'ttl'
+            WHERE close_reason IS NULL
+              AND notes ILIKE '%Expirace horizontu%';
+            """
+        )
+    )
+    await conn.execute(
+        text(
+            """
+            UPDATE tip_feedback SET close_reason = 'score_flip'
+            WHERE close_reason IS NULL
+              AND notes ILIKE '%změna scoringu%';
+            """
+        )
+    )
+    await conn.execute(
+        text(
+            """
+            UPDATE tip_feedback SET close_reason = 'manual'
+            WHERE close_reason IS NULL;
+            """
+        )
+    )
+    await conn.execute(
+        text(
+            """
+            UPDATE tips t
+            SET closed_at = fb.created_at
+            FROM tip_feedback fb
+            WHERE fb.tip_id = t.id
+              AND t.closed_at IS NULL
+              AND t.status = 'closed';
+            """
+        )
+    )
 
 
 async def _init_db() -> None:

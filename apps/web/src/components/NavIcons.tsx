@@ -109,6 +109,20 @@ export function IconFun(p: IconProps) {
   );
 }
 
+/** Tipy — historie / úspěšnost */
+export function IconTips(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M4.5 19.5V6.8" />
+      <path d="M4.5 19.5H19.5" />
+      <path d="M7.5 15.2V11.5" />
+      <path d="M11.5 15.2V8.2" />
+      <path d="M15.5 15.2V10" />
+      <path d="M8.8 6.2 12.2 4.5 16.8 7.2" />
+    </Svg>
+  );
+}
+
 /** Nastavení */
 export function IconSettings(p: IconProps) {
   return (
@@ -123,6 +137,7 @@ export const navIcons = {
   "/": IconHome,
   "/portfolio": IconPortfolio,
   "/watchlist": IconWatchlist,
+  "/tips": IconTips,
   "/chat": IconAnalysis,
   "/reports": IconReports,
   "/alerts": IconAlerts,

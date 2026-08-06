@@ -14,6 +14,8 @@ from app.models import (
     ChatMessage,
     ChatSession,
     ChatSessionStatus,
+    CloseReason,
+    FeedbackResult,
     PortfolioPosition,
     PortfolioSnapshot,
     PriceAlertRule,
@@ -52,6 +54,7 @@ from app.schemas import (
     ReportOut,
     TipFeedbackCreate,
     TipFeedbackOut,
+    TipHistoryOut,
     TipJournalUpdate,
     TipLifecycleUpdate,
     TipOut,
@@ -64,6 +67,7 @@ from app.schemas import (
     WatchlistOut,
 )
 from app.services.feedback import feedback_adj_for_asset_class, feedback_stats
+from app.services.tip_lifecycle import infer_close_reason
 from app.services.fundament_macro import (
     fetch_edgar_recent_filings,
     fetch_yahoo_headlines,
@@ -728,6 +732,56 @@ async def list_tips(
     return [TipOut.model_validate(t) for t in tips]
 
 
+@router.get("/tips/history", response_model=TipHistoryOut)
+async def tips_history(
+    result: FeedbackResult | None = None,
+    close_reason: CloseReason | None = None,
+    level: str | None = None,
+    limit: int = 100,
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Closed tips with feedback + aggregate TP/SL stats.
+
+    `level=tp` → target_1/target_2; `level=sl` → stop.
+    """
+    limit = max(1, min(limit, 300))
+    stats = await feedback_stats(db, user.id)
+
+    q = (
+        select(Tip)
+        .join(TipFeedback, TipFeedback.tip_id == Tip.id)
+        .where(Tip.user_id == user.id)
+        .options(*_tip_load_options())
+        .order_by(TipFeedback.created_at.desc())
+    )
+    if result is not None:
+        q = q.where(TipFeedback.result == result)
+
+    level_key = (level or "").strip().lower()
+    if level_key == "tp":
+        q = q.where(
+            TipFeedback.close_reason.in_(
+                [CloseReason.target_1.value, CloseReason.target_2.value]
+            )
+        )
+    elif level_key == "sl":
+        q = q.where(TipFeedback.close_reason == CloseReason.stop.value)
+    elif close_reason is not None:
+        q = q.where(TipFeedback.close_reason == close_reason.value)
+
+    tips = (await db.execute(q.limit(limit))).scalars().unique().all()
+
+    out: list[TipOut] = []
+    for tip in tips:
+        item = TipOut.model_validate(tip)
+        if item.feedback and not item.feedback.close_reason:
+            item.feedback.close_reason = infer_close_reason(item.feedback.notes)
+        out.append(item)
+
+    return TipHistoryOut(stats=stats, tips=out)
+
+
 @router.get("/tips/stats")
 async def tips_stats(user: AuthUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     return await feedback_stats(db, user.id)
@@ -773,12 +827,19 @@ async def tip_lifecycle(
             tip.entry_notes = payload.notes.strip()
     elif status == TipStatus.closed:
         tip.is_active = False
+        tip.closed_at = tip.closed_at or datetime.now(timezone.utc)
+        reason = (
+            payload.close_reason.value
+            if payload.close_reason is not None
+            else CloseReason.manual.value
+        )
         if payload.result:
             existing = (
                 await db.execute(select(TipFeedback).where(TipFeedback.tip_id == tip_id))
             ).scalar_one_or_none()
             if existing:
                 existing.result = payload.result
+                existing.close_reason = reason
                 if payload.notes is not None:
                     existing.notes = payload.notes
             else:
@@ -787,11 +848,14 @@ async def tip_lifecycle(
                         tip_id=tip_id,
                         user_id=user.id,
                         result=payload.result,
+                        close_reason=reason,
                         notes=payload.notes,
                     )
                 )
         elif not tip.feedback:
             raise HTTPException(400, "Uzavření tipu vyžaduje výsledek (hit/miss/partial)")
+        elif tip.feedback and not tip.feedback.close_reason:
+            tip.feedback.close_reason = reason
 
     await db.commit()
     tip = (
@@ -820,26 +884,36 @@ async def tip_journal(
     data = payload.model_dump(exclude_unset=True)
     if "entry_notes" in data:
         tip.entry_notes = data["entry_notes"]
-    if "exit_notes" in data or "result" in data:
+    if "exit_notes" in data or "result" in data or "close_reason" in data:
         existing = (
             await db.execute(select(TipFeedback).where(TipFeedback.tip_id == tip_id))
         ).scalar_one_or_none()
         exit_notes = data.get("exit_notes")
         result = data.get("result")
+        reason = data.get("close_reason")
+        reason_val = reason.value if reason is not None and hasattr(reason, "value") else reason
         if existing:
             if exit_notes is not None:
                 existing.notes = exit_notes
             if result is not None:
                 existing.result = result
+            if reason_val is not None:
+                existing.close_reason = reason_val
+            elif result is not None and not existing.close_reason:
+                existing.close_reason = CloseReason.manual.value
         elif result is not None:
             db.add(
                 TipFeedback(
                     tip_id=tip_id,
                     user_id=user.id,
                     result=result,
+                    close_reason=reason_val or CloseReason.manual.value,
                     notes=exit_notes,
                 )
             )
+            tip.closed_at = tip.closed_at or datetime.now(timezone.utc)
+            tip.status = TipStatus.closed.value
+            tip.is_active = False
         elif exit_notes:
             raise HTTPException(400, "Exit poznámka vyžaduje výsledek (hit/miss/partial) u tipu bez feedbacku")
     await db.commit()
@@ -902,10 +976,14 @@ async def export_tips_csv(
     tips = (await db.execute(q.order_by(Tip.created_at.desc()).limit(500))).scalars().all()
     lines = [
         "id,symbol,action,horizon,status,score,confidence,entry_low,entry_high,stop,target_1,"
-        "suggested_size_pct,data_quality,is_active,as_of,entry_notes,feedback_result,feedback_notes,narrative"
+        "suggested_size_pct,data_quality,is_active,as_of,closed_at,entry_notes,"
+        "feedback_result,close_reason,feedback_notes,narrative"
     ]
     for t in tips:
         fb = t.feedback
+        reason = (fb.close_reason if fb and fb.close_reason else None) or (
+            infer_close_reason(fb.notes) if fb else None
+        )
         lines.append(
             ",".join(
                 [
@@ -924,8 +1002,10 @@ async def export_tips_csv(
                     _csv(t.data_quality.value),
                     "1" if t.is_active else "0",
                     _csv(t.as_of.isoformat() if t.as_of else ""),
+                    _csv(t.closed_at.isoformat() if t.closed_at else ""),
                     _csv(t.entry_notes or ""),
                     _csv(fb.result.value if fb else ""),
+                    _csv(reason or ""),
                     _csv(fb.notes if fb and fb.notes else ""),
                     _csv((t.narrative_cs or "")[:500]),
                 ]
@@ -958,18 +1038,31 @@ async def tip_feedback(
     ).scalar_one_or_none()
     if not tip:
         raise HTTPException(404, "Tip nenalezen")
+    reason = (
+        payload.close_reason.value
+        if payload.close_reason is not None
+        else CloseReason.manual.value
+    )
     existing = (
         await db.execute(select(TipFeedback).where(TipFeedback.tip_id == tip_id))
     ).scalar_one_or_none()
     if existing:
         existing.result = payload.result
         existing.notes = payload.notes
+        existing.close_reason = reason
         fb = existing
     else:
-        fb = TipFeedback(tip_id=tip_id, user_id=user.id, result=payload.result, notes=payload.notes)
+        fb = TipFeedback(
+            tip_id=tip_id,
+            user_id=user.id,
+            result=payload.result,
+            close_reason=reason,
+            notes=payload.notes,
+        )
         db.add(fb)
     tip.status = TipStatus.closed.value
     tip.is_active = False
+    tip.closed_at = tip.closed_at or datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(fb)
     return TipFeedbackOut.model_validate(fb)
