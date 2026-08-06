@@ -2408,3 +2408,138 @@ textarea {
   border-color: color-mix(in srgb, var(--sense) 45%, var(--line));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--sense) 18%, transparent);
 }
+
+.market-home__intro {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.market-home__title {
+  margin: 0;
+  font-family: var(--font-nav);
+  font-size: 1.35rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.market-sectors-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 1100px) {
+  .market-sectors-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.market-sector {
+  padding: 1.1rem 1.15rem 1.2rem;
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.market-sector__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.market-sector__title {
+  margin: 0;
+  font-family: var(--font-nav);
+  font-size: 1.05rem;
+  font-weight: 650;
+}
+
+.market-sector__bias {
+  margin: 0.2rem 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-weight: 550;
+}
+
+.market-sector__bias.is-up { color: var(--ok); }
+.market-sector__bias.is-down { color: var(--danger); }
+
+.market-sector__link {
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  color: var(--sense);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.market-sector__link:hover {
+  text-decoration: underline;
+}
+
+.market-sector__summary {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.market-sector__body {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.market-sector__chart {
+  min-width: 0;
+}
+
+.market-sector__donut-block {
+  padding-top: 0.15rem;
+}
+
+.market-sector__benches {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.7rem;
+}
+
+.market-sector__benches li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-size: 0.82rem;
+}
+
+.market-sector__bench-name {
+  color: var(--text);
+  font-weight: 550;
+}
+
+.market-sector__bench-sym {
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.market-sector__bench-pct {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  min-width: 4.2rem;
+  text-align: right;
+}
+
+.market-sector__bench-pct.is-up,
+.home-legend__pct.is-up,
+.home-donut__value.is-up {
+  color: var(--ok);
+}
+
+.market-sector__bench-pct.is-down,
+.home-legend__pct.is-down,
+.home-donut__value.is-down {
+  color: var(--danger);
+}

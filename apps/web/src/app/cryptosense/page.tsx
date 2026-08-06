@@ -48,7 +48,11 @@ type CryptoOhlcv = {
 };
 
 const TIMEFRAMES = [
+  { id: "1s", label: "1s" },
+  { id: "1m", label: "1m" },
+  { id: "5m", label: "5m" },
   { id: "15m", label: "15m" },
+  { id: "30m", label: "30m" },
   { id: "1h", label: "1H" },
   { id: "4h", label: "4H" },
   { id: "1d", label: "1D" },
@@ -76,7 +80,7 @@ const ROADMAP = [
   {
     title: "Canonical OHLCV + grafy",
     status: "now" as const,
-    body: "1d / 1h / 4h / 15m z primary burzy, upsert do price_bars, candle chart.",
+    body: "1s–1d z primary burzy (1s z klines nebo tradů), candle chart.",
   },
   {
     title: "Paper trading bot",
@@ -90,10 +94,24 @@ const ROADMAP = [
   },
 ];
 
+function chartLimit(tf: string) {
+  if (tf === "1s") return 360;
+  if (tf === "1m") return 240;
+  if (tf === "5m") return 288;
+  return 220;
+}
+
+function chartPollMs(tf: string) {
+  if (tf === "1s") return 3_000;
+  if (tf === "1m") return 15_000;
+  if (tf === "5m") return 30_000;
+  return 60_000;
+}
+
 export default function CryptoSensePage() {
   const [data, setData] = useState<CryptoOverview | null>(null);
   const [selected, setSelected] = useState("BTC/USDT");
-  const [interval, setIntervalTf] = useState<(typeof TIMEFRAMES)[number]["id"]>("1h");
+  const [interval, setIntervalTf] = useState<(typeof TIMEFRAMES)[number]["id"]>("1m");
   const [ohlcv, setOhlcv] = useState<CryptoOhlcv | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -115,18 +133,19 @@ export default function CryptoSensePage() {
     }
   }, []);
 
-  const loadChart = useCallback(async (symbol: string, tf: string) => {
-    setChartBusy(true);
+  const loadChart = useCallback(async (symbol: string, tf: string, quiet = false) => {
+    if (!quiet) setChartBusy(true);
     try {
+      const persist = !["1s", "1m", "5m", "30m"].includes(tf);
       const res = await apiFetch<CryptoOhlcv>(
-        `/crypto/ohlcv?symbol=${encodeURIComponent(symbol)}&interval=${tf}&limit=220&persist=true`
+        `/crypto/ohlcv?symbol=${encodeURIComponent(symbol)}&interval=${tf}&limit=${chartLimit(tf)}&persist=${persist}`
       );
       setOhlcv(res);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Načtení grafu selhalo");
     } finally {
-      setChartBusy(false);
+      if (!quiet) setChartBusy(false);
     }
   }, []);
 
@@ -137,7 +156,12 @@ export default function CryptoSensePage() {
   }, [loadOverview]);
 
   useEffect(() => {
-    void loadChart(selected, interval);
+    void loadChart(selected, interval, false);
+    const id = window.setInterval(
+      () => void loadChart(selected, interval, true),
+      chartPollMs(interval)
+    );
+    return () => window.clearInterval(id);
   }, [selected, interval, loadChart]);
 
   const activeQuote = data?.quotes.find((q) => q.symbol === selected) || null;
@@ -145,28 +169,6 @@ export default function CryptoSensePage() {
 
   return (
     <div className="cryptosense space-y-6">
-      <section className="rise flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="advisor-card__eyebrow">CryptoSense</p>
-          <h1 className="display text-3xl md:text-4xl mt-1">Live crypto desk</h1>
-          <p className="muted mt-2 max-w-2xl">
-            Multi-exchange quote + canonical OHLCV z primary burzy. Graf se ukládá do historie
-            pro budoucí backtest a bota.
-          </p>
-        </div>
-        <button
-          type="button"
-          className="btn text-xs px-2 py-1"
-          onClick={() => {
-            void loadOverview();
-            void loadChart(selected, interval);
-          }}
-          disabled={loading || chartBusy}
-        >
-          {loading || chartBusy ? "Načítám…" : "Obnovit"}
-        </button>
-      </section>
-
       {error && <div className="card p-4 text-[var(--danger)]">{error}</div>}
 
       <section className="card instrument-chart">
@@ -200,6 +202,17 @@ export default function CryptoSensePage() {
                 </button>
               ))}
             </div>
+            <button
+              type="button"
+              className="chart-chip chart-chip--soft"
+              onClick={() => {
+                void loadOverview();
+                void loadChart(selected, interval);
+              }}
+              disabled={loading || chartBusy}
+            >
+              {loading || chartBusy ? "…" : "↻"}
+            </button>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs muted">
             {activeQuote && (
@@ -223,7 +236,7 @@ export default function CryptoSensePage() {
         </div>
         <div className="instrument-chart__stage crypto-chart-stage">
           {ohlcv?.ohlcv?.length ? (
-            <PriceChart bars={ohlcv.ohlcv} showMa />
+            <PriceChart bars={ohlcv.ohlcv} showMa={!["1s", "1m"].includes(interval)} />
           ) : (
             <div className="muted p-6 text-sm">
               {chartBusy ? "Připravuji svíčky…" : "Žádná OHLCV data."}

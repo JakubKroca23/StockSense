@@ -2,27 +2,26 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import { SenseBriefing } from "@/components/SenseBriefing";
+import { MarketSectorCard } from "@/components/MarketSectorCard";
 import { cacheSnapshot, readSnapshot } from "@/lib/offline";
-import { HomeData } from "@/lib/types";
+import { MarketsOverview } from "@/lib/types";
 
 export default function HomePage() {
-  const [data, setData] = useState<HomeData | null>(null);
+  const [data, setData] = useState<MarketsOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [briefingBusy, setBriefingBusy] = useState(false);
   const [offline, setOffline] = useState(false);
   const [cachedAt, setCachedAt] = useState<string | null>(null);
 
   async function load() {
     try {
-      const home = await apiFetch<HomeData>("/home");
-      setData(home);
+      const overview = await apiFetch<MarketsOverview>("/markets/overview");
+      setData(overview);
       setError(null);
       setOffline(false);
       setCachedAt(null);
-      await cacheSnapshot("home_v1", home);
+      await cacheSnapshot("markets_overview_v1", overview);
     } catch (err) {
-      const snap = await readSnapshot<HomeData>("home_v1");
+      const snap = await readSnapshot<MarketsOverview>("markets_overview_v1");
       if (snap) {
         setData(snap.data);
         setOffline(true);
@@ -41,41 +40,33 @@ export default function HomePage() {
     return () => window.removeEventListener("online", onOnline);
   }, []);
 
-  async function generateBriefing() {
-    if (offline) return;
-    setBriefingBusy(true);
-    try {
-      await apiFetch("/reports/daily", { method: "POST" });
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Report selhal");
-    } finally {
-      setBriefingBusy(false);
-    }
-  }
-
   if (!data && !error) {
-    return <div className="muted">Načítám…</div>;
+    return <div className="muted">Načítám tržní přehled…</div>;
   }
 
   return (
     <div className="space-y-6">
+      <div className="market-home__intro">
+        <h1 className="market-home__title">Tržní přehled</h1>
+        <p className="muted text-sm">
+          Stručný stav krypta, akcií a komodit podle hlavních benchmarků.
+        </p>
+      </div>
+
       {offline && (
         <div className="offline-banner">
           Offline režim — zobrazuji poslední snapshot
-          {cachedAt ? ` z ${new Date(cachedAt).toLocaleString("cs-CZ")}` : ""}. Mutace jsou vypnuté.
+          {cachedAt ? ` z ${new Date(cachedAt).toLocaleString("cs-CZ")}` : ""}.
         </div>
       )}
       {error && <div className="card p-4 text-[var(--danger)]">{error}</div>}
 
       {data && (
-        <SenseBriefing
-          briefingCs={data.briefing_cs}
-          briefingTitle={data.briefing_title}
-          briefingAt={data.briefing_at}
-          onGenerateBriefing={offline ? undefined : () => void generateBriefing()}
-          briefingBusy={briefingBusy}
-        />
+        <div className="market-sectors-grid">
+          {data.sectors.map((sector) => (
+            <MarketSectorCard key={sector.id} sector={sector} />
+          ))}
+        </div>
       )}
     </div>
   );

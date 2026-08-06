@@ -479,3 +479,89 @@ async def narrate_tip(symbol: str, tip_payload: dict) -> str:
         task=LLMTask.heavy,
         context=ctx,
     )
+
+
+def _clean_sector_blurb(raw: str, fallback: str) -> str:
+    text = (raw or "").strip()
+    if not text:
+        return fallback
+    # Drop accidental markdown headings / bullets from the shared system prompt style.
+    lines: list[str] = []
+    for line in text.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if s.startswith("#"):
+            continue
+        if s.startswith(("- ", "* ", "• ")):
+            s = s[2:].strip()
+        lines.append(s)
+    joined = " ".join(lines)
+    joined = re.sub(r"\s+", " ", joined).strip()
+    if len(joined) < 40:
+        return fallback
+    if len(joined) > 420:
+        cut = joined[:417].rsplit(" ", 1)[0]
+        joined = f"{cut}…"
+    return joined
+
+
+async def narrate_market_sector(sector: dict) -> str:
+    """2–3 sentence Czech market-state blurb for a homepage sector card."""
+    fallback = str(sector.get("summary") or "Tržní data jsou omezená — ber hodnocení s rezervou.")
+    benches = sector.get("benchmarks") or []
+    bench_lines = []
+    for b in benches:
+        ch = b.get("change_pct")
+        px = b.get("price")
+        ch_s = f"{float(ch):+.2f}%" if ch is not None else "n/a"
+        px_s = f"{float(px):.4g}" if px is not None else "n/a"
+        bench_lines.append(f"- {b.get('name')} ({b.get('symbol')}): cena {px_s}, den {ch_s}")
+
+    spark = sector.get("spark") or []
+    range_note = "n/a"
+    if len(spark) >= 2:
+        try:
+            a = float(spark[0]["close"])
+            b = float(spark[-1]["close"])
+            if a:
+                range_note = f"{((b - a) / a) * 100:+.1f}% za ~{len(spark)} dní ({sector.get('chart_symbol')})"
+        except (TypeError, ValueError, KeyError):
+            pass
+
+    avg = sector.get("avg_change_pct")
+    avg_s = f"{float(avg):+.2f}%" if avg is not None else "n/a"
+    ctx = (
+        f"Sektor: {sector.get('label')} ({sector.get('id')})\n"
+        f"Systémový bias: {sector.get('bias_label')} ({sector.get('bias')})\n"
+        f"Průměrná denní změna benchmarků: {avg_s}\n"
+        f"Trend grafu: {range_note}\n"
+        f"Benchmarky:\n" + ("\n".join(bench_lines) if bench_lines else "- žádná data")
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Jsi StockSense — stručný tržní komentátor. "
+                "Odpovídej výhradně česky, 2 až 3 věty, bez markdownu, bez nadpisů, bez odrážek. "
+                "Popiš obecný stav trhu v daném sektoru. "
+                "Nikdy nevymýšlej čísla — používej jen data z kontextu. "
+                "Neuváděj konkrétní obchodní tip (buy/sell), jen tón trhu."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "Napiš krátký souhrn stavu tohoto trhu pro homepage kartu.\n\n"
+                f"Kontext:\n{ctx}"
+            ),
+        },
+    ]
+    try:
+        text = await _ollama_chat(messages)
+        if not text:
+            text = await _cloud_chat(messages)
+        return _clean_sector_blurb(text, fallback)
+    except Exception as exc:
+        logger.warning("narrate_market_sector failed: %s", exc)
+        return fallback

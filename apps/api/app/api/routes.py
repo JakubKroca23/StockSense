@@ -268,6 +268,14 @@ async def home(user: AuthUser = Depends(get_current_user), db: AsyncSession = De
     )
 
 
+@router.get("/markets/overview")
+async def markets_overview_endpoint(user: AuthUser = Depends(get_current_user)):
+    """Sector cards for homepage — crypto / stocks / commodities."""
+    from app.services.markets_overview import markets_overview
+
+    return await markets_overview()
+
+
 @router.get("/settings", response_model=UserSettingsOut)
 async def get_settings_endpoint(
     user: AuthUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)
@@ -1898,9 +1906,12 @@ async def crypto_ohlcv(
     """Canonical OHLCV from primary CCXT exchange; optionally upsert into price_bars."""
     from app.services.crypto_market import get_crypto_market, persist_crypto_ohlcv
 
-    iv = interval if interval in {"15m", "1h", "4h", "1d", "1wk"} else "1h"
-    lim = max(20, min(limit, 500))
-    if persist:
+    allowed = {"1s", "1m", "5m", "15m", "30m", "1h", "4h", "1d", "1wk"}
+    iv = interval if interval in allowed else "1h"
+    lim = max(20, min(limit, 1000 if iv == "1s" else 500))
+    # Ultra-short TFs: don't flood price_bars
+    do_persist = persist and iv not in {"1s", "1m", "5m", "30m"}
+    if do_persist:
         return await persist_crypto_ohlcv(db, symbol=symbol, interval=iv, limit=lim)
 
     market = get_crypto_market()

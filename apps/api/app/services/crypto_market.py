@@ -193,9 +193,27 @@ class MultiExchangeCcxt:
     ) -> list[OhlcvBar]:
         client = self._get_client(self.primary)
         market = self._resolve_market(client, symbol)
-        tf_map = {"15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d", "1wk": "1w"}
+        tf_map = {
+            "1s": "1s",
+            "1m": "1m",
+            "5m": "5m",
+            "15m": "15m",
+            "30m": "30m",
+            "1h": "1h",
+            "4h": "4h",
+            "1d": "1d",
+            "1wk": "1w",
+        }
         timeframe = tf_map.get(interval, "1d")
-        raw = client.fetch_ohlcv(market, timeframe=timeframe, limit=limit)
+        try:
+            raw = client.fetch_ohlcv(market, timeframe=timeframe, limit=limit)
+        except Exception as exc:
+            if interval == "1s":
+                logger.info("1s OHLCV unavailable on %s (%s) — building from trades", self.primary, exc)
+                return self._ohlcv_from_trades_sync(client, market, limit=limit)
+            raise
+        if not raw and interval == "1s":
+            return self._ohlcv_from_trades_sync(client, market, limit=limit)
         bars: list[OhlcvBar] = []
         for row in raw:
             bars.append(
@@ -212,10 +230,55 @@ class MultiExchangeCcxt:
             )
         return bars
 
+    def _ohlcv_from_trades_sync(self, client, market: str, limit: int = 300) -> list[OhlcvBar]:
+        """Synthesize 1s candles from recent trades when exchange has no 1s klines."""
+        trades = client.fetch_trades(market, limit=min(1000, max(limit * 3, 200)))
+        buckets: dict[int, list] = {}
+        for t in trades or []:
+            ts_ms = int(t.get("timestamp") or 0)
+            if not ts_ms:
+                continue
+            sec = ts_ms // 1000
+            price = float(t.get("price") or 0)
+            amount = float(t.get("amount") or 0)
+            if price <= 0:
+                continue
+            buckets.setdefault(sec, []).append((price, amount))
+        bars: list[OhlcvBar] = []
+        for sec in sorted(buckets.keys()):
+            rows = buckets[sec]
+            prices = [p for p, _ in rows]
+            vol = sum(a for _, a in rows)
+            bars.append(
+                OhlcvBar(
+                    ts=datetime.fromtimestamp(sec, tz=timezone.utc),
+                    open=prices[0],
+                    high=max(prices),
+                    low=min(prices),
+                    close=prices[-1],
+                    volume=vol,
+                    source=f"ccxt:{self.primary}:trades1s",
+                    data_quality=DataQuality.medium,
+                )
+            )
+        if limit and len(bars) > limit:
+            bars = bars[-limit:]
+        return bars
+
     async def fetch_ohlcv(
         self, symbol: str, interval: str = "1d", lookback: str = "6mo"
     ) -> list[OhlcvBar]:
-        limit_map = {"15m": 288, "1h": 336, "4h": 180, "1d": 365, "1wk": 260}
+        limit_map = {
+            "1s": 300,
+            "1m": 240,
+            "5m": 288,
+            "15m": 288,
+            "30m": 240,
+            "1h": 336,
+            "4h": 180,
+            "1d": 365,
+            "1wk": 260,
+        }
         limit = limit_map.get(interval, 180)
         return await asyncio.to_thread(self._fetch_ohlcv_sync, _normalize_market(symbol), interval, limit)
 

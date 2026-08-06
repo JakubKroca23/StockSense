@@ -114,6 +114,50 @@ export interface HomeData {
   }[];
 }
 
+export interface MarketBenchmark {
+  symbol: string;
+  name: string;
+  price: number | null;
+  change_pct: number | null;
+  source?: string | null;
+  ok: boolean;
+}
+
+export interface MarketCompositionSlice {
+  key: string;
+  label: string;
+  value: number;
+  change_pct: number | null;
+}
+
+export interface MarketSector {
+  id: string;
+  label: string;
+  href?: string | null;
+  bias: string;
+  bias_label: string;
+  summary: string;
+  avg_change_pct: number | null;
+  benchmarks: MarketBenchmark[];
+  composition: MarketCompositionSlice[];
+  chart_symbol: string;
+  spark: {
+    ts: string;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume?: number;
+  }[];
+  as_of: string;
+  data_quality: DataQuality;
+}
+
+export interface MarketsOverview {
+  as_of: string;
+  sectors: MarketSector[];
+}
+
 export interface Watchlist {
   id: number;
   name: string;
