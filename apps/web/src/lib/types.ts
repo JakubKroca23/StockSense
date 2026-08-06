@@ -1,5 +1,5 @@
 export type AssetClass = "stock" | "commodity" | "crypto" | "etf" | "index" | "other";
-export type TipAction = "buy" | "sell" | "hold" | "trade";
+export type TipAction = "long" | "short" | "hold" | "sell";
 export type TipHorizon = "intraday" | "swing" | "position" | "long_term";
 export type RiskProfile = "conservative" | "balanced" | "aggressive";
 export type DataQuality = "high" | "medium" | "low" | "proxy" | "unavailable";
@@ -217,10 +217,10 @@ export interface ChatTurn {
 }
 
 export const actionLabel: Record<TipAction, string> = {
-  buy: "Koupit",
-  sell: "Prodat",
+  long: "Long",
+  short: "Short",
   hold: "Držet",
-  trade: "Tradovat",
+  sell: "Prodat",
 };
 
 export const horizonLabel: Record<TipHorizon, string> = {

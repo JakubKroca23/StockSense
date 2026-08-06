@@ -163,10 +163,57 @@ async def _ensure_chat_schema(conn) -> None:
     )
 
 
+async def _ensure_tip_action_enum(conn) -> None:
+    """Rename tip actions: buy→long, sell→short, trade→sell (hold unchanged)."""
+    # Detect Postgres tipaction labels; no-op on SQLite / fresh DBs without the type.
+    row = (
+        await conn.execute(
+            text(
+                """
+                SELECT EXISTS (
+                  SELECT 1 FROM pg_type WHERE typname = 'tipaction'
+                )
+                """
+            )
+        )
+    ).scalar()
+    if not row:
+        return
+
+    labels = (
+        await conn.execute(
+            text(
+                """
+                SELECT enumlabel
+                FROM pg_enum e
+                JOIN pg_type t ON t.oid = e.enumtypid
+                WHERE t.typname = 'tipaction'
+                """
+            )
+        )
+    ).scalars().all()
+    label_set = set(labels or [])
+
+    async def _rename(old: str, new: str) -> None:
+        if old in label_set and new not in label_set:
+            await conn.execute(text(f"ALTER TYPE tipaction RENAME VALUE '{old}' TO '{new}'"))
+            label_set.discard(old)
+            label_set.add(new)
+
+    # Order matters: sell→short before trade→sell
+    await _rename("buy", "long")
+    await _rename("sell", "short")
+    await _rename("trade", "sell")
+
+
 async def _init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await _ensure_chat_schema(conn)
+        try:
+            await _ensure_tip_action_enum(conn)
+        except Exception as exc:
+            logger.warning("tipaction enum migrate skipped: %s", exc)
     async with AsyncSessionLocal() as db:
         await ensure_discovery_universe(db)
 

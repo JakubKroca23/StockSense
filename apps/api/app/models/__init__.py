@@ -33,10 +33,10 @@ class AssetClass(str, enum.Enum):
 
 
 class TipAction(str, enum.Enum):
-    buy = "buy"
-    sell = "sell"
+    long = "long"
+    short = "short"
     hold = "hold"
-    trade = "trade"
+    sell = "sell"
 
 
 class TipHorizon(str, enum.Enum):

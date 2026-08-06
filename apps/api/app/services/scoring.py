@@ -132,11 +132,11 @@ def _scenarios(
     key_flow = flow_notes[0] if flow_notes else "flow neutrální"
     key_fund = fund_notes[0] if fund_notes else "fund omezený"
 
-    if action == TipAction.buy or score > 15:
+    if action == TipAction.long or score > 15:
         bull = f"Continuation: {key_ta}; {rs_s}; cena drží {struct}; cíle násobky ATR ({atr:.2f})." if atr else f"Continuation: {key_ta}; {rs_s}."
         base = f"Konsolidace kolem vstupu; čekat potvrzení volume. {rsi_s}. {key_flow}."
         bear = f"Invalidace pod stopem / ztráta {struct}; zhoršení {key_fund} nebo RS."
-    elif action == TipAction.sell or score < -15:
+    elif action in (TipAction.short, TipAction.sell) or score < -15:
         bull = f"Squeeze proti shortu: odraz nad SMA a RS flip; {rsi_s}."
         base = f"Drift níž při slabém flow. {key_ta}; {key_flow}."
         bear = f"Continuation down: breakdown struktury; {rs_s}; {key_fund}."
@@ -363,12 +363,12 @@ def score_instrument(
     raw = 0.32 * fund + 0.22 * macro + 0.28 * flow + 0.13 * ta + 0.05 * learn
     score = round(max(-100.0, min(100.0, raw * 100)), 1)
 
-    if score >= 35:
-        action = TipAction.buy
+    if score >= 15:
+        action = TipAction.long
     elif score <= -35:
+        action = TipAction.short
+    elif score <= -15:
         action = TipAction.sell
-    elif abs(score) >= 15:
-        action = TipAction.trade
     else:
         action = TipAction.hold
 
@@ -380,12 +380,12 @@ def score_instrument(
         horizon = TipHorizon.long_term if abs(score) < 10 else TipHorizon.swing
 
     # Levels from Wilder ATR
-    if action == TipAction.buy:
+    if action == TipAction.long:
         entry_low, entry_high = price * 0.99, price * 1.01
         stop = price - 1.5 * atr
         t1 = price + 2 * atr
         t2 = price + 3.5 * atr
-    elif action == TipAction.sell:
+    elif action in (TipAction.short, TipAction.sell):
         entry_low, entry_high = price * 0.99, price * 1.01
         stop = price + 1.5 * atr
         t1 = price - 2 * atr
@@ -406,7 +406,10 @@ def score_instrument(
         ),
         2,
     )
-    if risk == RiskProfile.conservative and confidence < 0.55 and action in (TipAction.buy, TipAction.sell):
+    if risk == RiskProfile.conservative and confidence < 0.55 and action in (
+        TipAction.long,
+        TipAction.short,
+    ):
         action = TipAction.hold
 
     features = {

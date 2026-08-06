@@ -38,8 +38,8 @@ def tip_expired(tip: Tip, now: datetime | None = None) -> bool:
 def score_flip(old_score: float, old_action: str, new_score: float, new_action: str) -> bool:
     if abs(new_score - old_score) >= SCORE_FLIP_THRESHOLD:
         return True
-    longish = {"buy", "trade", "hold"}
-    shortish = {"sell"}
+    longish = {"long", "hold"}
+    shortish = {"short", "sell"}
     oa, na = str(old_action), str(new_action)
     if oa in longish and na in shortish:
         return True

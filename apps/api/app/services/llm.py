@@ -30,10 +30,10 @@ SYSTEM_CS = (
 )
 
 _ACTION_CS = {
-    "buy": "nákup (systém vidí spíš příležitost nahoru)",
-    "sell": "prodej (systém vidí spíš slabost / dolů)",
+    "long": "long (systém vidí spíš příležitost nahoru)",
+    "short": "short (systém vidí silnou slabost / dolů)",
     "hold": "držet / nic nedělat (signál je slabý nebo smíšený)",
-    "trade": "obchodovat opatrně (mírný tip, ne silný trend)",
+    "sell": "prodat (mírný medvědí tip / redukce)",
 }
 
 _HORIZON_CS = {

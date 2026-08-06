@@ -102,10 +102,10 @@ function ActionBars({ byAction }: { byAction: Record<string, number> }) {
   const entries = Object.entries(byAction);
   const max = Math.max(1, ...entries.map(([, n]) => n));
   const color: Record<string, string> = {
-    buy: "var(--ok)",
-    sell: "var(--danger)",
+    long: "var(--ok)",
+    short: "var(--danger)",
     hold: "var(--warn)",
-    trade: "var(--accent-2)",
+    sell: "var(--accent-2)",
   };
   if (!entries.length) return <p className="muted text-sm">Žádné aktivní tipy.</p>;
   return (

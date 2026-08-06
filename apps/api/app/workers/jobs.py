@@ -576,20 +576,20 @@ async def check_price_alerts(db: AsyncSession, user_id: str) -> int:
         hit = None
         level_px = None
         if tip.stop and (
-            (tip.action.value in ("buy", "trade", "hold") and price <= tip.stop)
-            or (tip.action.value == "sell" and price >= tip.stop)
+            (tip.action.value in ("long", "hold") and price <= tip.stop)
+            or (tip.action.value in ("short", "sell") and price >= tip.stop)
         ):
             hit = "stop"
             level_px = tip.stop
         elif tip.target_2 and (
-            (tip.action.value in ("buy", "trade") and price >= tip.target_2)
-            or (tip.action.value == "sell" and price <= tip.target_2)
+            (tip.action.value == "long" and price >= tip.target_2)
+            or (tip.action.value in ("short", "sell") and price <= tip.target_2)
         ):
             hit = "target_2"
             level_px = tip.target_2
         elif tip.target_1 and (
-            (tip.action.value in ("buy", "trade") and price >= tip.target_1)
-            or (tip.action.value == "sell" and price <= tip.target_1)
+            (tip.action.value == "long" and price >= tip.target_1)
+            or (tip.action.value in ("short", "sell") and price <= tip.target_1)
         ):
             hit = "target_1"
             level_px = tip.target_1

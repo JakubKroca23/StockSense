@@ -10,7 +10,6 @@ import { cacheSnapshot, readSnapshot } from "@/lib/offline";
 import {
   FeedbackResult,
   HomeData,
-  PortfolioPosition,
   Tip,
   TipStatus,
   actionLabel,
@@ -196,31 +195,6 @@ function TipCard({
   );
 }
 
-function PositionRow({ p }: { p: PortfolioPosition }) {
-  const pnl = p.pnl ?? 0;
-  return (
-    <Link
-      href={`/instrument/${p.instrument.symbol}`}
-      className="flex items-center justify-between gap-3 border-b border-[var(--line)] py-3 last:border-0"
-    >
-      <div>
-        <div className="font-medium">
-          {p.instrument.symbol} {p.is_paper && <span className="badge">paper</span>}
-        </div>
-        <div className="muted text-xs">
-          {Number(p.quantity)} @ {Number(p.avg_cost).toFixed(2)}
-        </div>
-      </div>
-      <div className="text-right">
-        <div>{p.last_price != null ? p.last_price.toFixed(2) : "—"}</div>
-        <div className={pnl >= 0 ? "text-[var(--ok)] text-sm" : "text-[var(--danger)] text-sm"}>
-          {p.pnl != null ? `${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} (${p.pnl_pct?.toFixed(1)}%)` : "—"}
-        </div>
-      </div>
-    </Link>
-  );
-}
-
 export default function HomePage() {
   const [data, setData] = useState<HomeData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -356,17 +330,8 @@ export default function HomePage() {
     }
   }
 
-  async function exportPortfolio() {
-    try {
-      await downloadApiCsv("/export/portfolio.csv", "stocksense-portfolio.csv");
-      setOkMsg("CSV portfolia staženo");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Export portfolia selhal");
-    }
-  }
-
   if (!data && !error) {
-    return <div className="muted">Načítám portfolio a tipy…</div>;
+    return <div className="muted">Načítám tipy…</div>;
   }
 
   return (
@@ -380,9 +345,6 @@ export default function HomePage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button className="btn text-xs px-2 py-1" onClick={() => void exportPortfolio()} disabled={offline}>
-            CSV portfolio
-          </button>
           <button className="btn text-xs px-2 py-1" onClick={() => void exportTips()} disabled={offline}>
             CSV tipy
           </button>
@@ -403,62 +365,39 @@ export default function HomePage() {
 
       {data && (
         <HomeOverview
-          portfolio={data.portfolio || []}
           tips={data.tips || []}
           alertsUnread={data.alerts_unread || 0}
           briefingCs={data.briefing_cs}
           briefingTitle={data.briefing_title}
           briefingAt={data.briefing_at}
           tipStats={data.tip_stats}
-          equity={data.equity}
           onGenerateBriefing={offline ? undefined : () => void generateBriefing()}
           briefingBusy={briefingBusy}
         />
       )}
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <section className="card p-5 rise">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="display text-2xl">Portfolio</h2>
-          </div>
-          <div>
-            {(data?.portfolio || []).length === 0 && (
-              <p className="muted text-sm mb-3">Zatím prázdné.</p>
-            )}
-            {(data?.portfolio || []).slice(0, 6).map((p) => (
-              <PositionRow key={p.id} p={p} />
-            ))}
-            {(data?.portfolio || []).length > 6 && (
-              <p className="muted text-sm mt-2">
-                +{(data?.portfolio.length || 0) - 6} dalších
-              </p>
-            )}
-          </div>
-        </section>
-
-        <section className="space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="display text-2xl rise">Top tipy dne</h2>
-            <Link href="/tips" className="btn text-xs px-2 py-1">
-              Historie / TP·SL
-            </Link>
-          </div>
-          {(data?.tips || []).length === 0 && (
-            <div className="card p-5 muted">Žádné tipy — spusť přepočet nebo doplň watchlist.</div>
-          )}
-          {(data?.tips || []).map((tip) => (
-            <TipCard
-              key={tip.id}
-              tip={tip}
-              busy={tipBusy}
-              offline={offline}
-              onLifecycle={onLifecycle}
-              onPaper={onPaper}
-              onJournal={onJournal}
-            />
-          ))}
-        </section>
-      </div>
+      <section className="space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="display text-2xl rise">Top tipy dne</h2>
+          <Link href="/tips" className="btn text-xs px-2 py-1">
+            Historie / TP·SL
+          </Link>
+        </div>
+        {(data?.tips || []).length === 0 && (
+          <div className="card p-5 muted">Žádné tipy — spusť přepočet.</div>
+        )}
+        {(data?.tips || []).map((tip) => (
+          <TipCard
+            key={tip.id}
+            tip={tip}
+            busy={tipBusy}
+            offline={offline}
+            onLifecycle={onLifecycle}
+            onPaper={onPaper}
+            onJournal={onJournal}
+          />
+        ))}
+      </section>
     </div>
   );
 }

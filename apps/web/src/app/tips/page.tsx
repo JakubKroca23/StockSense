@@ -41,12 +41,12 @@ function pct(v: number | null | undefined) {
 
 function reasonBadgeClass(reason: string | null | undefined) {
   if (reason === "stop") return "badge sell";
-  if (reason === "target_1" || reason === "target_2") return "badge buy";
+  if (reason === "target_1" || reason === "target_2") return "badge long";
   return "badge";
 }
 
 function resultBadgeClass(result: string) {
-  if (result === "hit") return "badge buy";
+  if (result === "hit") return "badge long";
   if (result === "miss") return "badge sell";
   return "badge";
 }
