@@ -17,7 +17,7 @@ import {
 
 const links = [
   { href: "/", label: "Home" },
-  { href: "/cryptosense", label: "CryptoSense" },
+  { href: "/cryptosense", label: "Crypto" },
 ] as const;
 
 function isActive(pathname: string, href: string) {
@@ -136,6 +136,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <div className="app-header__actions app-no-drag justify-self-end">
               <button
                 type="button"
+                className={`header-menu-btn ${menuOpen ? "is-open" : ""}`}
+                aria-label={menuOpen ? "Zavřít menu" : "Otevřít menu"}
+                aria-expanded={menuOpen}
+                title="Menu"
+                onClick={() => {
+                  setSettingsOpen(false);
+                  setMenuOpen((v) => !v);
+                }}
+              >
+                {menuOpen ? <IconClose size={22} /> : <IconMenu size={22} />}
+              </button>
+              <button
+                type="button"
                 className={`settings-gear ${settingsOpen ? "settings-gear--active" : ""}`}
                 aria-label="Nastavení"
                 aria-expanded={settingsOpen}
@@ -154,18 +167,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
 
         <div className="app-fab-dock">
-          <div className="mobile-nav-fab">
-            <button
-              type="button"
-              className={`mobile-nav-fab__btn ${menuOpen ? "is-open" : ""}`}
-              aria-label={menuOpen ? "Zavřít menu" : "Otevřít menu"}
-              aria-expanded={menuOpen}
-              onClick={() => setMenuOpen((v) => !v)}
-            >
-              {menuOpen ? <IconClose size={22} /> : <IconMenu size={22} />}
-              <span className="mobile-nav-fab__label">{menuOpen ? "Zavřít" : "Menu"}</span>
-            </button>
-          </div>
           <SenseBot />
         </div>
 

@@ -42,7 +42,7 @@ function fmtAmt(n: number) {
   return n.toLocaleString("en-US", { maximumFractionDigits: 4 });
 }
 
-const ROWS = 24;
+const ROWS = 36;
 
 export function OrderBookPanel({ book }: { book: OrderBookData | null }) {
   if (!book) {

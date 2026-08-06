@@ -30,10 +30,17 @@ export type ChartLevel = {
   style?: "solid" | "dashed" | "dotted";
 };
 
-/** One order-book snapshot column for Bookmap-style heatmap overlay. */
+/** Live order-book liquidity level for heatmap overlay (no history). */
+export type HeatmapLevel = {
+  price: number;
+  bid: number;
+  ask: number;
+};
+
+/** @deprecated use HeatmapLevel[] — kept for type aliases */
 export type HeatmapColumn = {
   ts: number;
-  levels: { price: number; bid: number; ask: number }[];
+  levels: HeatmapLevel[];
 };
 
 type Props = {
@@ -48,9 +55,11 @@ type Props = {
   realtime?: boolean;
   /** Show seconds on time axis (1s / 1m charts). */
   secondsVisible?: boolean;
-  /** Bookmap-style liquidity heatmap columns (newest last). */
-  heatmap?: HeatmapColumn[];
+  /** Current L2 liquidity levels (live snapshot, no scroll history). */
+  heatmapLevels?: HeatmapLevel[];
   showHeatmap?: boolean;
+  /** Global heatmap opacity 0–1 (default 0.55). */
+  heatOpacity?: number;
 };
 
 type Theme = {
@@ -146,8 +155,9 @@ export function PriceChart({
   showMa = true,
   realtime = false,
   secondsVisible = false,
-  heatmap = [],
+  heatmapLevels = [],
   showHeatmap = false,
+  heatOpacity = 0.55,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -160,12 +170,14 @@ export function PriceChart({
   const linesRef = useRef<IPriceLine[]>([]);
   const themeRef = useRef<Theme | null>(null);
   const prevSigRef = useRef<string>("");
-  const heatmapRef = useRef<HeatmapColumn[]>(heatmap);
+  const heatLevelsRef = useRef<HeatmapLevel[]>(heatmapLevels);
   const showHeatRef = useRef(showHeatmap);
+  const heatOpacityRef = useRef(heatOpacity);
   const fill = height == null;
 
-  heatmapRef.current = heatmap;
+  heatLevelsRef.current = heatmapLevels;
   showHeatRef.current = showHeatmap;
+  heatOpacityRef.current = Math.min(1, Math.max(0.1, heatOpacity));
 
   const drawHeatmap = () => {
     const canvas = heatRef.current;
@@ -193,34 +205,30 @@ export function PriceChart({
     ctx.clearRect(0, 0, w, h);
 
     if (!showHeatRef.current) return;
-    const cols = heatmapRef.current;
-    if (!cols.length) return;
+    const raw = heatLevelsRef.current;
+    if (!raw.length) return;
 
     const theme = themeRef.current || readTheme();
+    const opacityMul = heatOpacityRef.current;
     const leftPad = 4;
     const rightPad = 52;
     const usableW = Math.max(40, w - leftPad - rightPad);
-    // Fill entire chart width — one column per snapshot (bookmap-style history)
-    const maxCols = Math.min(cols.length, Math.max(48, Math.floor(usableW / 2)));
-    const visible = cols.slice(-maxCols);
-    const colW = usableW / visible.length;
 
-    let maxSize = 0;
     const sizes: number[] = [];
-    for (const col of visible) {
-      for (const lvl of col.levels) {
-        const s = Math.max(lvl.bid, lvl.ask);
-        if (s > 0) {
-          sizes.push(s);
-          maxSize = Math.max(maxSize, s);
-        }
-      }
+    for (const lvl of raw) {
+      if (lvl.bid > 0) sizes.push(lvl.bid);
+      if (lvl.ask > 0) sizes.push(lvl.ask);
     }
-    if (maxSize <= 0) return;
-
-    // Soft wall threshold (~top 12% of liquidity) for stop / cluster emphasis
+    if (!sizes.length) return;
     sizes.sort((a, b) => a - b);
-    const wallCut = sizes[Math.floor(sizes.length * 0.88)] || maxSize * 0.45;
+    const maxSize = sizes[sizes.length - 1];
+    // Drop noisy small levels — keep roughly top half / meaningful liquidity
+    const noiseFloor = sizes[Math.floor(sizes.length * 0.62)] || maxSize * 0.15;
+    const wallCut = sizes[Math.floor(sizes.length * 0.9)] || maxSize * 0.55;
+    const strongCut = sizes[Math.floor(sizes.length * 0.97)] || maxSize * 0.8;
+
+    const levels = raw.filter((l) => l.bid >= noiseFloor || l.ask >= noiseFloor);
+    if (!levels.length) return;
 
     const topP = series.coordinateToPrice(0);
     const botP = series.coordinateToPrice(h);
@@ -231,56 +239,53 @@ export function PriceChart({
       return ((topP - price) / (topP - botP)) * h;
     };
 
-    // Intensity: log scale so medium walls still show, big walls pop
-    const intensity = (size: number) => {
-      const t = Math.log1p(size) / Math.log1p(maxSize);
-      return Math.min(0.92, Math.max(0.08, t * 0.95));
+    // Discrete intensity steps — less visual noise than continuous log
+    const stepped = (size: number): number => {
+      const t = size / maxSize;
+      if (t >= 0.85) return 0.9;
+      if (t >= 0.55) return 0.62;
+      if (t >= 0.3) return 0.38;
+      return 0.18;
     };
 
-    // Estimate cell height from tick spacing near mid
-    let cellH = Math.max(2, Math.min(10, h * 0.01));
-    const sample = visible[visible.length - 1]?.levels || [];
-    if (sample.length >= 2) {
-      const sorted = [...sample].map((l) => l.price).sort((a, b) => a - b);
+    let cellH = Math.max(2, Math.min(9, h * 0.009));
+    if (levels.length >= 2) {
+      const sorted = [...levels].map((l) => l.price).sort((a, b) => a - b);
       const midIdx = Math.floor(sorted.length / 2);
       const y0 = priceToY(sorted[midIdx]);
       const y1 = priceToY(sorted[Math.min(midIdx + 1, sorted.length - 1)]);
       if (y0 != null && y1 != null) {
-        cellH = Math.max(1.5, Math.min(12, Math.abs(y1 - y0)));
+        cellH = Math.max(1.5, Math.min(11, Math.abs(y1 - y0) * 0.92));
       }
     }
 
-    visible.forEach((col, i) => {
-      const x = leftPad + i * colW;
-      const drawW = Math.max(1.2, colW - 0.35);
-      for (const lvl of col.levels) {
-        const y = priceToY(lvl.price);
-        if (y == null || y < -4 || y > h + 4) continue;
+    // Live snapshot only: horizontal bands across the full chart (no scrolling history)
+    for (const lvl of levels) {
+      const y = priceToY(lvl.price);
+      if (y == null || y < -4 || y > h + 4) continue;
 
-        if (lvl.bid > 0) {
-          const a = intensity(lvl.bid);
-          const isWall = lvl.bid >= wallCut;
-          ctx.fillStyle = hexAlpha(theme.up, isWall ? Math.min(0.95, a + 0.2) : a);
-          const hh = isWall ? cellH + 1.2 : cellH;
-          ctx.fillRect(x, y - hh / 2, drawW, hh);
-          if (isWall) {
-            ctx.fillStyle = hexAlpha(theme.up, 0.55);
-            ctx.fillRect(x, y - 0.6, drawW, 1.2);
-          }
+      const drawSide = (size: number, color: string) => {
+        if (size < noiseFloor) return;
+        const step = stepped(size);
+        const isWall = size >= wallCut;
+        const isStrong = size >= strongCut;
+        // Band width grows with size from the right (depth feel) but always spans meaningfully
+        const widthFrac = isStrong ? 1 : isWall ? 0.78 : 0.28 + step * 0.45;
+        const bandW = usableW * widthFrac;
+        const x = leftPad + (usableW - bandW);
+        const a = Math.min(0.95, step * opacityMul * (isStrong ? 1.15 : isWall ? 1.05 : 0.85));
+        const hh = isStrong ? cellH + 2.2 : isWall ? cellH + 1.1 : cellH;
+        ctx.fillStyle = hexAlpha(color, a);
+        ctx.fillRect(x, y - hh / 2, bandW, hh);
+        if (isWall) {
+          ctx.fillStyle = hexAlpha(color, Math.min(0.95, 0.5 * opacityMul + 0.15));
+          ctx.fillRect(leftPad, y - 0.7, usableW, 1.4);
         }
-        if (lvl.ask > 0) {
-          const a = intensity(lvl.ask);
-          const isWall = lvl.ask >= wallCut;
-          ctx.fillStyle = hexAlpha(theme.down, isWall ? Math.min(0.95, a + 0.2) : a);
-          const hh = isWall ? cellH + 1.2 : cellH;
-          ctx.fillRect(x, y - hh / 2, drawW, hh);
-          if (isWall) {
-            ctx.fillStyle = hexAlpha(theme.down, 0.55);
-            ctx.fillRect(x, y - 0.6, drawW, 1.2);
-          }
-        }
-      }
-    });
+      };
+
+      if (lvl.bid > 0) drawSide(lvl.bid, theme.up);
+      if (lvl.ask > 0) drawSide(lvl.ask, theme.down);
+    }
   };
 
   useEffect(() => {
@@ -443,10 +448,9 @@ export function PriceChart({
   }, [showHeatmap]);
 
   useEffect(() => {
-    // Redraw immediately whenever book snapshots update
     const id = requestAnimationFrame(() => drawHeatmap());
     return () => cancelAnimationFrame(id);
-  }, [heatmap, showHeatmap, bars]);
+  }, [heatmapLevels, showHeatmap, heatOpacity, bars]);
 
   useEffect(() => {
     if (!seriesRef.current || !volumeRef.current || !chartRef.current) return;

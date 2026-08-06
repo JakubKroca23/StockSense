@@ -303,6 +303,7 @@ a {
   gap: 0.35rem;
 }
 
+.header-menu-btn,
 .settings-gear {
   display: inline-flex;
   align-items: center;
@@ -318,8 +319,14 @@ a {
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 
+.header-menu-btn {
+  display: none;
+}
+
 .settings-gear .nav-icon__gear,
-.settings-gear .nav-item__icon {
+.settings-gear .nav-item__icon,
+.header-menu-btn .nav-item__icon,
+.header-menu-btn svg {
   color: var(--sense);
   width: 1.35rem;
   height: 1.35rem;
@@ -327,6 +334,8 @@ a {
   filter: drop-shadow(0 0 5px var(--sense-glow));
 }
 
+.header-menu-btn:hover,
+.header-menu-btn.is-open,
 .settings-gear:hover,
 .settings-gear--active {
   border-color: color-mix(in srgb, var(--sense) 40%, var(--glass-border));
@@ -371,7 +380,7 @@ a {
   }
 }
 
-/* Floating dock: Menu + Sense bot */
+/* Floating dock: Sense bot */
 .app-fab-dock {
   position: fixed;
   z-index: 56;
@@ -379,62 +388,33 @@ a {
   align-items: center;
   gap: 0.55rem;
   pointer-events: none;
+  right: max(0.55rem, env(safe-area-inset-right));
+  bottom: max(0.85rem, env(safe-area-inset-bottom));
+  left: auto;
+  transform: none;
+  justify-content: flex-end;
 }
 
 .app-fab-dock > * {
   pointer-events: auto;
 }
 
-.mobile-nav-fab {
-  display: none;
-}
-
 @media (max-width: 767px) {
+  .header-menu-btn {
+    display: inline-flex;
+  }
+
+  .settings-gear {
+    display: none;
+  }
+
   .app-fab-dock {
-    left: 50%;
-    bottom: calc(2.15rem + env(safe-area-inset-bottom, 0px));
-    transform: translateX(-50%);
-    justify-content: center;
+    right: max(0.4rem, env(safe-area-inset-right));
+    bottom: calc(1.35rem + env(safe-area-inset-bottom, 0px));
   }
 
   .app-shell:has(.cryptosense) .app-fab-dock {
-    bottom: calc(2.05rem + env(safe-area-inset-bottom, 0px));
-  }
-
-  .mobile-nav-fab {
-    display: block;
-    position: static;
-  }
-
-  .mobile-nav-fab__btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.55rem 0.9rem 0.55rem 0.7rem;
-    border-radius: 999px;
-    border: 1px solid color-mix(in srgb, var(--sense) 40%, var(--glass-border));
-    background: linear-gradient(
-      145deg,
-      color-mix(in srgb, var(--sense) 18%, var(--glass-strong)),
-      color-mix(in srgb, var(--bg-elevated) 88%, transparent)
-    );
-    color: var(--sense);
-    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
-    cursor: pointer;
-    font: inherit;
-  }
-
-  .mobile-nav-fab__btn.is-open {
-    border-color: color-mix(in srgb, var(--sense) 55%, var(--glass-border));
-    background: color-mix(in srgb, var(--sense) 22%, var(--glass-strong));
-  }
-
-  .mobile-nav-fab__label {
-    font-family: var(--font-nav);
-    font-size: 0.68rem;
-    font-weight: 650;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px));
   }
 
   .sense-bot {
@@ -454,14 +434,15 @@ a {
 
   .sense-bot__panel {
     position: fixed;
-    left: 50%;
-    right: auto;
-    bottom: calc(5.85rem + env(safe-area-inset-bottom, 0px));
-    transform: translateX(-50%);
+    left: auto;
+    right: max(0.4rem, env(safe-area-inset-right));
+    bottom: calc(5.1rem + env(safe-area-inset-bottom, 0px));
+    transform: none;
+    width: min(22rem, calc(100vw - 0.8rem - env(safe-area-inset-right, 0px)));
   }
 
   .nav-sheet__panel {
-    padding-bottom: calc(6.25rem + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
   }
 }
 
@@ -469,9 +450,6 @@ a {
   .app-fab-dock {
     right: max(0.85rem, env(safe-area-inset-right));
     bottom: max(0.85rem, env(safe-area-inset-bottom));
-    left: auto;
-    transform: none;
-    justify-content: flex-end;
   }
 
   .sense-bot {
@@ -991,7 +969,7 @@ textarea {
   overflow-y: hidden;
   flex-shrink: 0;
   padding: 0.05rem 0.1rem 0.35rem;
-  margin: 0 -0.15rem;
+  margin: 0;
   scroll-snap-type: x mandatory;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
@@ -1000,6 +978,7 @@ textarea {
 
 .crypto-coin-strip::-webkit-scrollbar {
   height: 3px;
+  width: 3px;
 }
 
 .crypto-coin-strip::-webkit-scrollbar-thumb {
@@ -1110,8 +1089,28 @@ textarea {
 
 @media (min-width: 1100px) {
   .cryptosense__desk {
-    grid-template-columns: minmax(0, 1fr) 260px;
-    height: calc(100dvh - 4.75rem - 5.5rem);
+    grid-template-columns: 168px minmax(0, 1fr) 260px;
+    height: calc(100dvh - 4.75rem);
+    align-items: stretch;
+  }
+
+  .crypto-coin-strip {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    overflow-x: hidden;
+    overflow-y: auto;
+    height: 100%;
+    min-height: 0;
+    padding: 0.1rem 0.15rem 0.2rem;
+    margin: 0;
+    gap: 0.45rem;
+    scroll-snap-type: y proximity;
+    overscroll-behavior-y: contain;
+  }
+
+  .crypto-coin-card {
+    width: 100%;
+    min-height: 4.85rem;
   }
 }
 
@@ -1160,6 +1159,19 @@ textarea {
   flex-wrap: wrap;
   gap: 0.25rem;
   margin-left: auto;
+}
+
+.cryptosense__heat-opacity {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.68rem;
+}
+
+.cryptosense__heat-opacity input[type="range"] {
+  width: 4.5rem;
+  accent-color: var(--sense);
+  cursor: pointer;
 }
 
 .crypto-chart-stage {
@@ -3339,16 +3351,6 @@ textarea {
   align-items: center;
   gap: 0.35rem;
   line-height: 1;
-}
-
-.sense-bot__fab-sense {
-  font-family: var(--font-logo-hand), "Caveat Brush", cursive;
-  font-size: 1.15rem;
-  font-weight: 400;
-  letter-spacing: 0.02em;
-  color: #fff;
-  line-height: 1;
-  text-transform: none;
 }
 
 .sense-bot__fab-bot {

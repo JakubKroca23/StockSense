@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch, apiWsUrl } from "@/lib/api";
-import { PriceChart, ChartBar, HeatmapColumn } from "@/components/PriceChart";
+import { PriceChart, ChartBar, HeatmapLevel } from "@/components/PriceChart";
 import { OrderBookPanel, OrderBookData } from "@/components/OrderBookPanel";
 import { useScreenContext } from "@/components/ScreenContext";
 
@@ -33,6 +33,8 @@ type CryptoOhlcv = {
 
 type LiveKline = {
   type?: string;
+  symbol?: string;
+  interval?: string;
   ts: string;
   open: number;
   high: number;
@@ -40,6 +42,10 @@ type LiveKline = {
   close: number;
   volume?: number;
 };
+
+function normalizeSym(s: string) {
+  return s.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
 
 const TIMEFRAMES = [
   { id: "1s", label: "1s" },
@@ -147,10 +153,17 @@ export default function CryptoSensePage() {
   const [live, setLive] = useState(false);
   const [orderBook, setOrderBook] = useState<OrderBookData | null>(null);
   const [showHeatmap, setShowHeatmap] = useState(false);
-  const [heatmap, setHeatmap] = useState<HeatmapColumn[]>([]);
+  const [heatmapLevels, setHeatmapLevels] = useState<HeatmapLevel[]>([]);
+  const [heatOpacity, setHeatOpacity] = useState(0.55);
   const [metaOpen, setMetaOpen] = useState(true);
   const [mobilePanel, setMobilePanel] = useState<"chart" | "book">("chart");
   const heatSymRef = useRef(selected);
+  const chartReqRef = useRef(0);
+  const selectedRef = useRef(selected);
+  const intervalRef = useRef(interval);
+
+  selectedRef.current = selected;
+  intervalRef.current = interval;
 
   const loadOverview = useCallback(async () => {
     try {
@@ -189,24 +202,32 @@ export default function CryptoSensePage() {
   }, []);
 
   const loadChart = useCallback(async (symbol: string, tf: string) => {
+    const req = ++chartReqRef.current;
     setChartBusy(true);
     try {
       const persist = !["1s", "1m", "5m", "30m"].includes(tf);
       const res = await apiFetch<CryptoOhlcv>(
         `/crypto/ohlcv?symbol=${encodeURIComponent(symbol)}&interval=${tf}&limit=${chartLimit(tf)}&persist=${persist}`
       );
+      if (req !== chartReqRef.current) return;
+      if (
+        normalizeSym(res.symbol) !== normalizeSym(symbol) ||
+        res.interval !== tf
+      ) {
+        return;
+      }
       setOhlcv(res);
       setError(null);
     } catch (err) {
+      if (req !== chartReqRef.current) return;
       setError(err instanceof Error ? err.message : "Načtení grafu selhalo");
     } finally {
-      setChartBusy(false);
+      if (req === chartReqRef.current) setChartBusy(false);
     }
   }, []);
 
-  const pushHeatColumn = useCallback((res: OrderBookData, symbol: string) => {
+  const applyHeatLevels = useCallback((res: OrderBookData, symbol: string) => {
     const priceMap = new Map<number, { bid: number; ask: number }>();
-    // Full depth from API (up to hundreds of levels)
     for (const lvl of res.bids) {
       priceMap.set(lvl.price, { bid: lvl.amount, ask: 0 });
     }
@@ -215,42 +236,29 @@ export default function CryptoSensePage() {
       cur.ask = lvl.amount;
       priceMap.set(lvl.price, cur);
     }
-    const levels = [...priceMap.entries()].map(([price, v]) => ({
+    const levels: HeatmapLevel[] = [...priceMap.entries()].map(([price, v]) => ({
       price,
       bid: v.bid,
       ask: v.ask,
     }));
-    if (!levels.length) return;
-    const now = Date.now();
-    const col: HeatmapColumn = { ts: now, levels };
-    setHeatmap((prev) => {
-      const sameSym = heatSymRef.current === symbol;
-      const base = sameSym ? prev : [];
-      heatSymRef.current = symbol;
-      const last = base[base.length - 1];
-      // Keep rightmost column live (~refresh in place) so heatmap stays current
-      if (last && now - last.ts < 900) {
-        return [...base.slice(0, -1), { ...col, ts: last.ts }];
-      }
-      const next = [...base, col];
-      return next.length > 220 ? next.slice(next.length - 220) : next;
-    });
+    heatSymRef.current = symbol;
+    setHeatmapLevels(levels);
   }, []);
 
   const loadOrderBook = useCallback(
-    async (symbol: string, accumulateHeat: boolean) => {
+    async (symbol: string, forHeatmap: boolean) => {
       try {
-        const depth = accumulateHeat ? 200 : 100;
+        const depth = forHeatmap ? 400 : 180;
         const res = await apiFetch<OrderBookData>(
           `/crypto/orderbook?symbol=${encodeURIComponent(symbol)}&limit=${depth}`
         );
         setOrderBook(res);
-        if (accumulateHeat) pushHeatColumn(res, symbol);
+        if (forHeatmap) applyHeatLevels(res, symbol);
       } catch {
         /* keep last book */
       }
     },
-    [pushHeatColumn]
+    [applyHeatLevels]
   );
 
   useEffect(() => {
@@ -260,7 +268,7 @@ export default function CryptoSensePage() {
   }, [loadOverview]);
 
   useEffect(() => {
-    setHeatmap([]);
+    setHeatmapLevels([]);
     heatSymRef.current = selected;
   }, [selected]);
 
@@ -268,7 +276,7 @@ export default function CryptoSensePage() {
     void loadOrderBook(selected, showHeatmap);
     const id = window.setInterval(
       () => void loadOrderBook(selected, showHeatmap),
-      showHeatmap ? 700 : 2000
+      showHeatmap ? 650 : 2000
     );
     return () => window.clearInterval(id);
   }, [selected, showHeatmap, loadOrderBook]);
@@ -282,6 +290,7 @@ export default function CryptoSensePage() {
   }, [data?.quotes, loadSparks]);
 
   useEffect(() => {
+    setOhlcv(null);
     void loadChart(selected, interval);
   }, [selected, interval, loadChart]);
 
@@ -289,11 +298,13 @@ export default function CryptoSensePage() {
     let ws: WebSocket | null = null;
     let closed = false;
     let retry: number | null = null;
+    const sym = selected;
+    const tf = interval;
 
     const connect = () => {
       if (closed) return;
       const url = apiWsUrl(
-        `/crypto/ws/ohlcv?symbol=${encodeURIComponent(selected)}&interval=${encodeURIComponent(interval)}`
+        `/crypto/ws/ohlcv?symbol=${encodeURIComponent(sym)}&interval=${encodeURIComponent(tf)}`
       );
       ws = new WebSocket(url);
       ws.onopen = () => setLive(true);
@@ -321,8 +332,23 @@ export default function CryptoSensePage() {
             return;
           }
           if (msg.ts == null || msg.close == null) return;
+          if (
+            selectedRef.current !== sym ||
+            intervalRef.current !== tf
+          ) {
+            return;
+          }
+          if (msg.symbol && normalizeSym(msg.symbol) !== normalizeSym(sym)) {
+            return;
+          }
           setOhlcv((prev) => {
             if (!prev) return prev;
+            if (
+              normalizeSym(prev.symbol) !== normalizeSym(sym) ||
+              prev.interval !== tf
+            ) {
+              return prev;
+            }
             const ohlcvBars = mergeLiveBar(prev.ohlcv, msg);
             return { ...prev, bars: ohlcvBars.length, ohlcv: ohlcvBars };
           });
@@ -379,7 +405,7 @@ export default function CryptoSensePage() {
 
     setScreen({
       page: "cryptosense",
-      title: "CryptoSense — live graf",
+      title: "Crypto — live graf",
       symbol: selected,
       detail,
     });
@@ -402,38 +428,41 @@ export default function CryptoSensePage() {
     <div className="cryptosense">
       {error && <div className="card p-4 text-[var(--danger)] mb-3">{error}</div>}
 
-      <div className="crypto-coin-strip" role="group" aria-label="Kryptoměny">
-        {quotes.map((q) => {
-          const closes = sparks[q.symbol] || [];
-          const sparkUp =
-            closes.length >= 2
-              ? closes[closes.length - 1] >= closes[0]
-              : (q.change_pct ?? 0) >= 0;
-          const base = q.symbol.split("/")[0];
-          const active = selected === q.symbol;
-          return (
-            <button
-              key={q.symbol}
-              type="button"
-              className={`crypto-coin-card ${active ? "is-active" : ""} ${sparkUp ? "is-up" : "is-down"}`}
-              onClick={() => setSelected(q.symbol)}
-              title={q.symbol}
-            >
-              <div className="crypto-coin-card__top">
-                <span className="crypto-coin-card__sym">{base}</span>
-                <span className="crypto-coin-card__pct">{fmtPct(q.change_pct)}</span>
-              </div>
-              <span className="crypto-coin-card__price">{fmtPrice(q.primary_price)}</span>
-              <Sparkline closes={closes} up={sparkUp} width={88} height={22} />
-            </button>
-          );
-        })}
-        {!quotes.length && loading && (
-          <div className="crypto-coin-card crypto-coin-card--ghost muted text-xs">Načítám…</div>
-        )}
-      </div>
-
       <div className="cryptosense__desk">
+        <div className="crypto-coin-strip" role="group" aria-label="Kryptoměny">
+          {quotes.map((q) => {
+            const closes = sparks[q.symbol] || [];
+            const sparkUp =
+              closes.length >= 2
+                ? closes[closes.length - 1] >= closes[0]
+                : (q.change_pct ?? 0) >= 0;
+            const base = q.symbol.split("/")[0];
+            const active = selected === q.symbol;
+            return (
+              <button
+                key={q.symbol}
+                type="button"
+                className={`crypto-coin-card ${active ? "is-active" : ""} ${sparkUp ? "is-up" : "is-down"}`}
+                onClick={() => {
+                  setSelected(q.symbol);
+                  setMobilePanel("chart");
+                }}
+                title={q.symbol}
+              >
+                <div className="crypto-coin-card__top">
+                  <span className="crypto-coin-card__sym">{base}</span>
+                  <span className="crypto-coin-card__pct">{fmtPct(q.change_pct)}</span>
+                </div>
+                <span className="crypto-coin-card__price">{fmtPrice(q.primary_price)}</span>
+                <Sparkline closes={closes} up={sparkUp} width={88} height={22} />
+              </button>
+            );
+          })}
+          {!quotes.length && loading && (
+            <div className="crypto-coin-card crypto-coin-card--ghost muted text-xs">Načítám…</div>
+          )}
+        </div>
+
         <section
           className={`card instrument-chart cryptosense__chart is-${mobilePanel}`}
         >
@@ -487,14 +516,28 @@ export default function CryptoSensePage() {
                 onClick={() => {
                   setShowHeatmap((v) => {
                     const next = !v;
-                    if (next && orderBook) pushHeatColumn(orderBook, selected);
+                    if (next && orderBook) applyHeatLevels(orderBook, selected);
+                    if (!next) setHeatmapLevels([]);
                     return next;
                   });
                 }}
-                title="Bookmap-stylová heatmapa likvidity z order booku"
+                title="Živá heatmapa likvidity z order booku"
               >
                 Heatmap
               </button>
+              {showHeatmap && (
+                <label className="cryptosense__heat-opacity" title="Průhlednost heatmapy">
+                  <span className="muted">α</span>
+                  <input
+                    type="range"
+                    min={15}
+                    max={100}
+                    value={Math.round(heatOpacity * 100)}
+                    onChange={(e) => setHeatOpacity(Number(e.target.value) / 100)}
+                    aria-label="Průhlednost heatmapy"
+                  />
+                </label>
+              )}
               <button
                 type="button"
                 className="chart-chip chart-chip--soft"
@@ -533,14 +576,18 @@ export default function CryptoSensePage() {
           </div>
 
           <div className="instrument-chart__stage crypto-chart-stage cryptosense__chart-pane">
-            {ohlcv?.ohlcv?.length ? (
+            {ohlcv?.ohlcv?.length &&
+            normalizeSym(ohlcv.symbol) === normalizeSym(selected) &&
+            ohlcv.interval === interval ? (
               <PriceChart
+                key={`${selected}-${interval}`}
                 bars={ohlcv.ohlcv}
                 showMa={!["1s", "1m"].includes(interval)}
                 realtime
                 secondsVisible={interval === "1s" || interval === "1m"}
-                heatmap={heatmap}
+                heatmapLevels={heatmapLevels}
                 showHeatmap={showHeatmap}
+                heatOpacity={heatOpacity}
               />
             ) : (
               <div className="muted p-6 text-sm">

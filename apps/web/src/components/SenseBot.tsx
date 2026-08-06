@@ -245,7 +245,6 @@ export function SenseBot() {
           className="sense-bot__fab-eye"
         />
         <span className="sense-bot__fab-brand">
-          <span className="sense-bot__fab-sense">SenSe</span>
           <span className="sense-bot__fab-bot">BOT</span>
         </span>
       </button>

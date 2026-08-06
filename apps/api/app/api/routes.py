@@ -1945,7 +1945,7 @@ async def crypto_quote(
 @router.get("/crypto/orderbook")
 async def crypto_orderbook(
     symbol: str = "BTC/USDT",
-    limit: int = 120,
+    limit: int = 200,
     user: AuthUser = Depends(get_current_user),
 ):
     """Aggregated L2 order book (Binance + Bybit) for depth + heatmap."""
