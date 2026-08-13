@@ -924,164 +924,8 @@ def _oil_payload(bars, *, iv: str, lb: str, source: str, symbol: str, label: str
     }
 
 
-@router.get("/oil/chart")
-async def oil_chart(
-    lookback: str = "6mo",
-    interval: str = "1d",
-    user: AuthUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """WTI chart: live Bybit CLUSDT (XTB-like CFD), Yahoo CL=F only as fallback."""
-    from app.services.market_data import clamp_lookback, normalize_interval
-    from app.services.oil_bybit import fetch_clusdt_klines
-    from app.services.oil_store import get_oil_bars
-
-    allowed_lb = {"1d", "5d", "7d", "1mo", "3mo", "6mo", "1y", "2y", "5y"}
-    allowed_iv = {"1m", "5m", "15m", "30m", "1h", "4h", "1d", "1wk"}
-    iv = normalize_interval(interval)
-    if iv not in allowed_iv:
-        iv = "1d"
-    lb_raw = lookback if lookback in allowed_lb else "6mo"
-    lb = clamp_lookback(iv, lb_raw)
-
-    bars = await fetch_clusdt_klines(iv, lookback=lb)
-    if bars:
-        return _oil_payload(
-            bars,
-            iv=iv,
-            lb=lb,
-            source="bybit:CLUSDT",
-            symbol="WTI",
-            label="WTI Crude",
-            note="Bybit CLUSDT — live WTI perp, stejná třída jako XTB CFD.",
-        )
-
-    bars = await get_oil_bars(db, interval=iv, lookback=lb)
-    if not bars:
-        raise HTTPException(status_code=502, detail="Nepodařilo se načíst WTI")
-    return _oil_payload(
-        bars,
-        iv=iv,
-        lb=lb,
-        source=bars[-1].source or "yahoo:CL=F",
-        symbol="CL=F",
-        label="WTI Crude (NYMEX)",
-        note="Yahoo CL=F — zpožděný NYMEX. Live Bybit momentálně nedostupný.",
-    )
-
-
-@router.get("/oil/orderbook")
-async def oil_orderbook(
-    limit: int = 200,
-    user: AuthUser = Depends(get_current_user),
-):
-    """Bybit linear L2 order book for WTI (CLUSDT)."""
-    from app.services.oil_bybit import fetch_clusdt_orderbook
-
-    try:
-        return await fetch_clusdt_orderbook(limit=limit)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Nepodařilo se načíst WTI L2: {exc}") from exc
-
-
-@router.get("/oil/trades")
-async def oil_trades(
-    limit: int = 80,
-    user: AuthUser = Depends(get_current_user),
-):
-    """Bybit linear public trades for WTI (CLUSDT)."""
-    from app.services.oil_bybit import fetch_clusdt_trades
-
-    try:
-        return await fetch_clusdt_trades(limit=limit)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Nepodařilo se načíst WTI trady: {exc}") from exc
-
-
-@router.get("/oil/footprint")
-async def oil_footprint(
-    interval: str = "1m",
-    lookback: str = "1d",
-    user: AuthUser = Depends(get_current_user),
-):
-    """Volume-at-price footprint from Bybit CLUSDT public trades (1m persisted)."""
-    from app.services.oil_footprint import snapshot_footprint
-
-    return await snapshot_footprint(interval, lookback)
-
-
-@router.get("/oil/live")
-async def oil_live(
-    interval: str = "1m",
-    user: AuthUser = Depends(get_current_user),
-):
-    """Latest forming WTI candle from Bybit CLUSDT."""
-    from app.services.market_data import normalize_interval
-    from app.services.oil_bybit import fetch_clusdt_tail
-
-    allowed_iv = {"1m", "5m", "15m", "30m", "1h", "4h", "1d", "1wk"}
-    iv = normalize_interval(interval)
-    if iv not in allowed_iv:
-        iv = "1m"
-    bars = await fetch_clusdt_tail(iv, n=4)
-    if not bars:
-        raise HTTPException(status_code=502, detail="Nepodařilo se načíst WTI live")
-
-    last = bars[-1]
-    prev = bars[-2] if len(bars) > 1 else last
-    change_pct = ((last.close - prev.close) / prev.close * 100.0) if prev.close else None
-    return {
-        "symbol": "WTI",
-        "interval": iv,
-        "price": last.close,
-        "change_pct": change_pct,
-        "as_of": last.ts.isoformat(),
-        "source": "bybit:CLUSDT",
-        "bar": {
-            "ts": last.ts.isoformat(),
-            "open": last.open,
-            "high": last.high,
-            "low": last.low,
-            "close": last.close,
-            "volume": last.volume,
-        },
-    }
-
-
-@router.websocket("/oil/ws/ohlcv")
-async def oil_ws_ohlcv(websocket: WebSocket, interval: str = "1m"):
-    """Realtime WTI candles from Bybit linear CLUSDT public kline stream."""
-    from app.services.market_data import normalize_interval
-    from app.services.oil_bybit import iter_clusdt_klines
-
-    await websocket.accept()
-    allowed_iv = {"1m", "5m", "15m", "30m", "1h", "4h", "1d", "1wk"}
-    iv = normalize_interval(interval)
-    if iv not in allowed_iv:
-        iv = "1m"
-    await websocket.send_json(
-        {
-            "type": "hello",
-            "symbol": "CLUSDT",
-            "interval": iv,
-            "source": "bybit:CLUSDT:ws",
-        }
-    )
-    try:
-        while True:
-            try:
-                async for bar in iter_clusdt_klines(iv):
-                    await websocket.send_json(bar)
-            except WebSocketDisconnect:
-                raise
-            except Exception as exc:
-                try:
-                    await websocket.send_json({"type": "error", "detail": str(exc)[:200]})
-                except Exception:
-                    break
-                await asyncio.sleep(1.5)
-    except WebSocketDisconnect:
-        return
+_DESK_LB = {"15m", "1h", "4h", "1d", "5d", "7d", "1mo", "3mo", "6mo", "1y", "2y", "5y"}
+_DESK_IV = {"1s", "1m", "5m", "15m", "30m", "1h", "4h", "1d", "1wk"}
 
 
 def _desk_live_payload(bars, *, symbol: str, iv: str, source: str) -> dict:
@@ -1106,117 +950,229 @@ def _desk_live_payload(bars, *, symbol: str, iv: str, source: str) -> dict:
     }
 
 
-@router.get("/btc/chart")
-async def btc_chart(
+def _require_desk(desk_id: str):
+    from app.services.oil_bybit import get_desk
+
+    desk = get_desk(desk_id)
+    if desk is None:
+        raise HTTPException(status_code=404, detail="Neznámý desk")
+    return desk
+
+
+async def _desk_chart_impl(desk_id: str, lookback: str, interval: str, db: AsyncSession):
+    from app.services.market_data import clamp_lookback, normalize_interval
+    from app.services.oil_bybit import fetch_linear_klines
+    from app.services.oil_footprint import ENGINES
+    from app.services.oil_store import get_oil_bars
+
+    desk = _require_desk(desk_id)
+    iv = normalize_interval(interval)
+    if iv not in _DESK_IV:
+        iv = "1m"
+    lb_raw = lookback if lookback in _DESK_LB else "1d"
+    lb = clamp_lookback(iv, lb_raw)
+    engine = ENGINES.get(desk.id)
+
+    klines = []
+    if iv != "1s":
+        klines = await fetch_linear_klines(desk, iv, lookback=lb)
+    bars = klines
+    source = desk.source
+    note = desk.note
+    if engine is not None:
+        merged, source = await engine.chart_ohlcv(iv, lb, klines)
+        if merged:
+            bars = merged
+            if ":ticks" in source:
+                if "+kline" in source:
+                    note = (
+                        f"{desk.note} Graf z Bybit public ticků (1s); "
+                        "úseky bez tickové historie doplněné Bybit klines."
+                    )
+                else:
+                    note = f"{desk.note} Graf složený z Bybit public ticků (1s → {iv})."
+    if bars:
+        return _oil_payload(
+            bars,
+            iv=iv,
+            lb=lb,
+            source=source,
+            symbol=desk.display,
+            label=desk.label,
+            note=note,
+        )
+    if desk.yahoo_fallback:
+        bars = await get_oil_bars(db, interval=iv, lookback=lb)
+        if bars:
+            return _oil_payload(
+                bars,
+                iv=iv,
+                lb=lb,
+                source=bars[-1].source or "yahoo:CL=F",
+                symbol="CL=F",
+                label="WTI Crude (NYMEX)",
+                note="Yahoo CL=F — zpožděný NYMEX. Live Bybit momentálně nedostupný.",
+            )
+    raise HTTPException(status_code=502, detail=f"Nepodařilo se načíst {desk.display}")
+
+
+@router.get("/desk")
+async def desk_list(user: AuthUser = Depends(get_current_user)):
+    from app.services.oil_bybit import DESKS
+
+    return {
+        "desks": [
+            {
+                "id": d.id,
+                "title": d.title,
+                "display": d.display,
+                "symbol": d.symbol,
+                "tick": d.tick,
+                "tick_decimals": d.tick_decimals,
+                "label": d.label,
+            }
+            for d in DESKS.values()
+        ]
+    }
+
+
+@router.get("/desk/{desk_id}/chart")
+async def desk_chart(
+    desk_id: str,
     lookback: str = "1d",
     interval: str = "1m",
     user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """BTC chart from Bybit linear BTCUSDT."""
-    from app.services.market_data import clamp_lookback, normalize_interval
-    from app.services.oil_bybit import BTC_DESK, fetch_linear_klines
-
-    allowed_lb = {"1d", "5d", "7d", "1mo", "3mo", "6mo", "1y", "2y", "5y"}
-    allowed_iv = {"1m", "5m", "15m", "30m", "1h", "4h", "1d", "1wk"}
-    iv = normalize_interval(interval)
-    if iv not in allowed_iv:
-        iv = "1m"
-    lb_raw = lookback if lookback in allowed_lb else "1d"
-    lb = clamp_lookback(iv, lb_raw)
-
-    bars = await fetch_linear_klines(BTC_DESK, iv, lookback=lb)
-    if not bars:
-        raise HTTPException(status_code=502, detail="Nepodařilo se načíst BTC")
-    return _oil_payload(
-        bars,
-        iv=iv,
-        lb=lb,
-        source=BTC_DESK.source,
-        symbol="BTC",
-        label="Bitcoin",
-        note="Bybit BTCUSDT — live linear perp.",
-    )
+    return await _desk_chart_impl(desk_id, lookback, interval, db)
 
 
-@router.get("/btc/orderbook")
-async def btc_orderbook(
+@router.get("/desk/{desk_id}/orderbook")
+async def desk_orderbook(
+    desk_id: str,
     limit: int = 200,
     user: AuthUser = Depends(get_current_user),
 ):
-    from app.services.oil_bybit import BTC_DESK, fetch_linear_orderbook
+    from app.services.oil_bybit import fetch_linear_orderbook
 
+    desk = _require_desk(desk_id)
     try:
-        return await fetch_linear_orderbook(BTC_DESK, limit=limit)
+        return await fetch_linear_orderbook(desk, limit=limit)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Nepodařilo se načíst BTC L2: {exc}") from exc
+        raise HTTPException(
+            status_code=502, detail=f"Nepodařilo se načíst {desk.display} L2: {exc}"
+        ) from exc
 
 
-@router.get("/btc/trades")
-async def btc_trades(
+@router.get("/desk/{desk_id}/trades")
+async def desk_trades(
+    desk_id: str,
     limit: int = 80,
     user: AuthUser = Depends(get_current_user),
 ):
-    from app.services.oil_bybit import BTC_DESK, fetch_linear_trades
+    from app.services.oil_bybit import fetch_linear_trades
 
+    desk = _require_desk(desk_id)
     try:
-        return await fetch_linear_trades(BTC_DESK, limit=limit)
+        return await fetch_linear_trades(desk, limit=limit)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Nepodařilo se načíst BTC trady: {exc}") from exc
+        raise HTTPException(
+            status_code=502, detail=f"Nepodařilo se načíst {desk.display} trady: {exc}"
+        ) from exc
 
 
-@router.get("/btc/footprint")
-async def btc_footprint(
+@router.get("/desk/{desk_id}/footprint")
+async def desk_footprint(
+    desk_id: str,
     interval: str = "1m",
     lookback: str = "1d",
     user: AuthUser = Depends(get_current_user),
 ):
-    from app.services.oil_footprint import snapshot_btc_footprint
+    from app.services.oil_footprint import snapshot_desk_footprint
 
-    return await snapshot_btc_footprint(interval, lookback)
+    _require_desk(desk_id)
+    try:
+        return await snapshot_desk_footprint(desk_id, interval, lookback)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Neznámý desk") from None
 
 
-@router.get("/btc/live")
-async def btc_live(
+@router.get("/desk/{desk_id}/live")
+async def desk_live(
+    desk_id: str,
     interval: str = "1m",
     user: AuthUser = Depends(get_current_user),
 ):
     from app.services.market_data import normalize_interval
-    from app.services.oil_bybit import BTC_DESK, fetch_linear_tail
+    from app.services.oil_bybit import fetch_linear_tail
+    from app.services.oil_footprint import ENGINES
 
-    allowed_iv = {"1m", "5m", "15m", "30m", "1h", "4h", "1d", "1wk"}
+    desk = _require_desk(desk_id)
     iv = normalize_interval(interval)
-    if iv not in allowed_iv:
+    if iv not in _DESK_IV:
         iv = "1m"
-    bars = await fetch_linear_tail(BTC_DESK, iv, n=4)
+    engine = ENGINES.get(desk.id)
+    bars = []
+    source = desk.source
+    if engine is not None:
+        bars = await engine.tail_ohlcv(iv, n=4)
+        if bars:
+            source = bars[-1].source or f"{desk.source}:ticks"
+    if not bars and iv != "1s":
+        bars = await fetch_linear_tail(desk, iv, n=4)
+        source = desk.source
     if not bars:
-        raise HTTPException(status_code=502, detail="Nepodařilo se načíst BTC live")
-    return _desk_live_payload(bars, symbol="BTC", iv=iv, source=BTC_DESK.source)
+        raise HTTPException(status_code=502, detail=f"Nepodařilo se načíst {desk.display} live")
+    return _desk_live_payload(bars, symbol=desk.display, iv=iv, source=source)
 
 
-@router.websocket("/btc/ws/ohlcv")
-async def btc_ws_ohlcv(websocket: WebSocket, interval: str = "1m"):
-    """Realtime BTC candles from Bybit linear BTCUSDT public kline stream."""
+async def _run_desk_kline_ws(websocket: WebSocket, desk, interval: str) -> None:
     from app.services.market_data import normalize_interval
-    from app.services.oil_bybit import BTC_DESK, iter_linear_klines
+    from app.services.oil_bybit import iter_linear_klines
+    from app.services.oil_footprint import ENGINES
 
-    await websocket.accept()
-    allowed_iv = {"1m", "5m", "15m", "30m", "1h", "4h", "1d", "1wk"}
     iv = normalize_interval(interval)
-    if iv not in allowed_iv:
+    if iv not in _DESK_IV:
         iv = "1m"
+    engine = ENGINES.get(desk.id)
+    source = f"{desk.source}:ticks" if engine is not None else f"{desk.source}:ws"
     await websocket.send_json(
         {
             "type": "hello",
-            "symbol": BTC_DESK.symbol,
+            "symbol": desk.symbol,
             "interval": iv,
-            "source": f"{BTC_DESK.source}:ws",
+            "source": source,
         }
     )
     try:
         while True:
             try:
-                async for bar in iter_linear_klines(BTC_DESK, iv):
-                    await websocket.send_json(bar)
+                if engine is not None:
+                    last = None
+                    while True:
+                        bar = engine.current_ohlcv_bar(iv)
+                        if bar is not None:
+                            key = (bar.ts, bar.open, bar.high, bar.low, bar.close, bar.volume)
+                            if key != last:
+                                last = key
+                                await websocket.send_json(
+                                    {
+                                        "type": "kline",
+                                        "symbol": desk.symbol,
+                                        "interval": iv,
+                                        "ts": bar.ts.isoformat(),
+                                        "open": bar.open,
+                                        "high": bar.high,
+                                        "low": bar.low,
+                                        "close": bar.close,
+                                        "volume": bar.volume,
+                                        "source": f"{desk.source}:ticks",
+                                    }
+                                )
+                        await asyncio.sleep(0.1)
+                else:
+                    async for bar in iter_linear_klines(desk, iv):
+                        await websocket.send_json(bar)
             except WebSocketDisconnect:
                 raise
             except Exception as exc:
@@ -1227,6 +1183,103 @@ async def btc_ws_ohlcv(websocket: WebSocket, interval: str = "1m"):
                 await asyncio.sleep(1.5)
     except WebSocketDisconnect:
         return
+
+
+@router.websocket("/desk/{desk_id}/ws/ohlcv")
+async def desk_ws_ohlcv(websocket: WebSocket, desk_id: str, interval: str = "1m"):
+    from app.services.oil_bybit import get_desk
+
+    desk = get_desk(desk_id)
+    await websocket.accept()
+    if desk is None:
+        await websocket.send_json({"type": "error", "detail": "Neznámý desk"})
+        await websocket.close(code=1008)
+        return
+    await _run_desk_kline_ws(websocket, desk, interval)
+
+
+@router.get("/oil/chart")
+async def oil_chart(
+    lookback: str = "6mo",
+    interval: str = "1d",
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _desk_chart_impl("oil", lookback, interval, db)
+
+
+@router.get("/oil/orderbook")
+async def oil_orderbook(limit: int = 200, user: AuthUser = Depends(get_current_user)):
+    return await desk_orderbook("oil", limit, user)
+
+
+@router.get("/oil/trades")
+async def oil_trades(limit: int = 80, user: AuthUser = Depends(get_current_user)):
+    return await desk_trades("oil", limit, user)
+
+
+@router.get("/oil/footprint")
+async def oil_footprint(
+    interval: str = "1m",
+    lookback: str = "1d",
+    user: AuthUser = Depends(get_current_user),
+):
+    return await desk_footprint("oil", interval, lookback, user)
+
+
+@router.get("/oil/live")
+async def oil_live(interval: str = "1m", user: AuthUser = Depends(get_current_user)):
+    return await desk_live("oil", interval, user)
+
+
+@router.websocket("/oil/ws/ohlcv")
+async def oil_ws_ohlcv(websocket: WebSocket, interval: str = "1m"):
+    from app.services.oil_bybit import OIL_DESK
+
+    await websocket.accept()
+    await _run_desk_kline_ws(websocket, OIL_DESK, interval)
+
+
+@router.get("/btc/chart")
+async def btc_chart(
+    lookback: str = "1d",
+    interval: str = "1m",
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _desk_chart_impl("btc", lookback, interval, db)
+
+
+@router.get("/btc/orderbook")
+async def btc_orderbook(limit: int = 200, user: AuthUser = Depends(get_current_user)):
+    return await desk_orderbook("btc", limit, user)
+
+
+@router.get("/btc/trades")
+async def btc_trades(limit: int = 80, user: AuthUser = Depends(get_current_user)):
+    return await desk_trades("btc", limit, user)
+
+
+@router.get("/btc/footprint")
+async def btc_footprint(
+    interval: str = "1m",
+    lookback: str = "1d",
+    user: AuthUser = Depends(get_current_user),
+):
+    return await desk_footprint("btc", interval, lookback, user)
+
+
+@router.get("/btc/live")
+async def btc_live(interval: str = "1m", user: AuthUser = Depends(get_current_user)):
+    return await desk_live("btc", interval, user)
+
+
+@router.websocket("/btc/ws/ohlcv")
+async def btc_ws_ohlcv(websocket: WebSocket, interval: str = "1m"):
+    from app.services.oil_bybit import BTC_DESK
+
+    await websocket.accept()
+    await _run_desk_kline_ws(websocket, BTC_DESK, interval)
 
 
 @router.websocket("/crypto/ws/ohlcv")

@@ -17,14 +17,14 @@ import {
   navIcons,
 } from "@/components/NavIcons";
 import { applyTheme, ColorMode, getStoredTheme } from "@/lib/theme";
+import { LINEAR_DESKS, deskHref } from "@/lib/desks";
 
-const links = [
+const links: { href: string; label: string }[] = [
   { href: "/", label: "Home" },
   { href: "/cryptosense", label: "Crypto" },
-  { href: "/btc", label: "BTC" },
+  ...LINEAR_DESKS.map((d) => ({ href: deskHref(d.id), label: d.navLabel })),
   { href: "/gold", label: "Gold" },
-  { href: "/oil", label: "ROPA WTI" },
-] as const;
+];
 
 const RAIL_KEY = "stocksense-rail-collapsed";
 const DESKTOP_MQ = "(min-width: 768px)";
@@ -38,11 +38,11 @@ function NavLabel({
   label,
   size = NAV_ICON_SIZE,
 }: {
-  href: (typeof links)[number]["href"];
+  href: string;
   label: string;
   size?: number;
 }) {
-  const Icon = navIcons[href];
+  const Icon = navIcons[href] ?? navIcons["/"];
   return (
     <span className="nav-item">
       <Icon size={size} />

@@ -8,6 +8,7 @@ import { HeaderExtra } from "@/components/HeaderExtra";
 import { FootprintChart, type FootprintData, type FpVizSettings, DEFAULT_FP_VIZ } from "@/components/FootprintChart";
 import { OrderBookPanel, type OrderBookData } from "@/components/OrderBookPanel";
 import { TradesTapePanel, type TradesTapeData } from "@/components/TradesTapePanel";
+import type { LinearDeskInfo } from "@/lib/desks";
 
 type DeskChartResponse = {
   symbol: string;
@@ -24,19 +25,12 @@ type DeskChartResponse = {
   bars: ChartBar[];
 };
 
-export type BybitDeskConfig = {
-  title: string;
-  fallbackSymbol: string;
-  apiBase: string;
-  storagePrefix: string;
-  liveTitle: string;
-  priceDigits: number;
-  loadError: string;
-  loadingLabel: string;
-  tickFallback: number;
-};
+export type BybitDeskConfig = LinearDeskInfo;
+
+const DESK_STORE = "stocksense-desk";
 
 const TIMEFRAMES = [
+  { id: "1s", label: "1 S", defaultLookback: "1h" },
   { id: "1m", label: "1 M", defaultLookback: "1d" },
   { id: "5m", label: "5 M", defaultLookback: "5d" },
   { id: "15m", label: "15 M", defaultLookback: "5d" },
@@ -48,6 +42,11 @@ const TIMEFRAMES = [
 ] as const;
 
 const LOOKBACKS_BY_TF: Record<string, { id: string; label: string }[]> = {
+  "1s": [
+    { id: "15m", label: "15 M" },
+    { id: "1h", label: "1 H" },
+    { id: "4h", label: "4 H" },
+  ],
   "1m": [
     { id: "1d", label: "1 D" },
     { id: "5d", label: "5 D" },
@@ -377,21 +376,28 @@ function usePersistedOpen(key: string, fallback = true) {
       /* ignore */
     }
   }, [key]);
-  const toggle = useCallback(() => {
-    setOpen((v) => {
-      const next = !v;
-      try {
-        window.localStorage.setItem(key, next ? "1" : "0");
-      } catch {
-        /* ignore */
-      }
-      return next;
-    });
-  }, [key]);
-  return [open, toggle] as const;
+  const set = useCallback(
+    (next: boolean | ((v: boolean) => boolean)) => {
+      setOpen((v) => {
+        const val = typeof next === "function" ? next(v) : next;
+        try {
+          window.localStorage.setItem(key, val ? "1" : "0");
+        } catch {
+          /* ignore */
+        }
+        return val;
+      });
+    },
+    [key]
+  );
+  const toggle = useCallback(() => set((v) => !v), [set]);
+  return [open, toggle, set] as const;
 }
 
 export function BybitDesk({ config }: { config: BybitDeskConfig }) {
+  const apiBase = `/desk/${config.id}`;
+  const loadError = `Načtení ${config.fallbackSymbol} selhalo`;
+  const loadingLabel = `Stahuji ${config.fallbackSymbol}…`;
   const [data, setData] = useState<DeskChartResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -400,21 +406,46 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
   const [live, setLive] = useState(false);
   const [orderBook, setOrderBook] = useState<OrderBookData | null>(null);
   const [tradesTape, setTradesTape] = useState<TradesTapeData | null>(null);
-  const [bookOpen, toggleBook] = usePersistedOpen(`${config.storagePrefix}-ob`, true);
-  const [tapeOpen, toggleTape] = usePersistedOpen(`${config.storagePrefix}-tape`, true);
-  const [showHeatmap, setShowHeatmap] = useState(true);
+  const [bookOpen, toggleBook] = usePersistedOpen(`${DESK_STORE}-ob`, true);
+  const [tapeOpen, toggleTape] = usePersistedOpen(`${DESK_STORE}-tape`, true);
+  const [showHeatmap, , setShowHeatmap] = usePersistedOpen(`${DESK_STORE}-heat`, true);
   const [heatmapLevels, setHeatmapLevels] = useState<HeatmapLevel[]>([]);
   const [heatOpacity, setHeatOpacity] = useState(0.55);
-  const [footprint, setFootprint] = useState(false);
+  const [footprint, , setFootprint] = usePersistedOpen(`${DESK_STORE}-fp`, false);
   const [fpData, setFpData] = useState<FootprintData | null>(null);
   const [heatViz, setHeatViz, resetHeatViz] = usePersistedJson<HeatVizSettings>(
-    `${config.storagePrefix}-l2-viz`,
+    `${DESK_STORE}-l2-viz`,
     DEFAULT_HEAT_VIZ
   );
   const [fpViz, setFpViz, resetFpViz] = usePersistedJson<FpVizSettings>(
-    `${config.storagePrefix}-fp-viz`,
+    `${DESK_STORE}-fp-viz`,
     DEFAULT_FP_VIZ
   );
+
+  const [deskPrefsReady, setDeskPrefsReady] = useState(false);
+
+  useEffect(() => {
+    try {
+      const tfRaw = window.localStorage.getItem(`${DESK_STORE}-tf`);
+      const lbRaw = window.localStorage.getItem(`${DESK_STORE}-lb`);
+      const alpha = window.localStorage.getItem(`${DESK_STORE}-alpha`);
+      const tfOk = TIMEFRAMES.some((t) => t.id === tfRaw) ? tfRaw! : "1m";
+      const allowed = LOOKBACKS_BY_TF[tfOk] || LOOKBACKS_BY_TF["1d"];
+      const tfMeta = TIMEFRAMES.find((t) => t.id === tfOk);
+      const lbOk = allowed.some((r) => r.id === lbRaw)
+        ? lbRaw!
+        : tfMeta?.defaultLookback || "1d";
+      setTimeframe(tfOk);
+      setLookback(lbOk);
+      if (alpha) {
+        const n = Number(alpha);
+        if (Number.isFinite(n)) setHeatOpacity(Math.min(1, Math.max(0.15, n)));
+      }
+    } catch {
+      /* ignore */
+    }
+    setDeskPrefsReady(true);
+  }, []);
 
   const applyHeatLevels = useCallback((res: OrderBookData) => {
     const priceMap = new Map<number, { bid: number; ask: number }>();
@@ -435,39 +466,39 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
     async (forHeatmap: boolean) => {
       try {
         const depth = forHeatmap ? 400 : 200;
-        const res = await apiFetch<OrderBookData>(`${config.apiBase}/orderbook?limit=${depth}`);
+        const res = await apiFetch<OrderBookData>(`${apiBase}/orderbook?limit=${depth}`);
         setOrderBook(res);
         if (forHeatmap) applyHeatLevels(res);
       } catch {
         /* keep last book */
       }
     },
-    [applyHeatLevels, config.apiBase]
+    [applyHeatLevels, apiBase]
   );
 
   const loadTrades = useCallback(async () => {
     try {
-      const res = await apiFetch<TradesTapeData>(`${config.apiBase}/trades?limit=90`);
+      const res = await apiFetch<TradesTapeData>(`${apiBase}/trades?limit=90`);
       setTradesTape(res);
     } catch {
       /* keep last tape */
     }
-  }, [config.apiBase]);
+  }, [apiBase]);
 
   const load = useCallback(async (iv: string, lb: string, silent = false) => {
     if (!silent) setLoading(true);
     try {
       const res = await apiFetch<DeskChartResponse>(
-        `${config.apiBase}/chart?interval=${encodeURIComponent(iv)}&lookback=${encodeURIComponent(lb)}`
+        `${apiBase}/chart?interval=${encodeURIComponent(iv)}&lookback=${encodeURIComponent(lb)}`
       );
       setData(res);
       setError(null);
     } catch (err) {
-      if (!silent) setError(err instanceof Error ? err.message : config.loadError);
+      if (!silent) setError(err instanceof Error ? err.message : loadError);
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [config.apiBase, config.loadError]);
+  }, [apiBase, loadError]);
 
   useEffect(() => {
     void load(timeframe, lookback);
@@ -494,7 +525,7 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
     const tick = async () => {
       try {
         const res = await apiFetch<FootprintData>(
-          `${config.apiBase}/footprint?interval=${encodeURIComponent(timeframe)}&lookback=${encodeURIComponent(lookback)}`
+          `${apiBase}/footprint?interval=${encodeURIComponent(timeframe)}&lookback=${encodeURIComponent(lookback)}`
         );
         if (!cancelled) setFpData(res);
       } catch {
@@ -507,7 +538,7 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [footprint, timeframe, lookback, config.apiBase]);
+  }, [footprint, timeframe, lookback, apiBase]);
 
   useEffect(() => {
     if (loading || !data?.source?.startsWith("bybit")) return;
@@ -518,7 +549,7 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
 
     const connect = () => {
       if (closed) return;
-      const url = apiWsUrl(`${config.apiBase}/ws/ohlcv?interval=${encodeURIComponent(tf)}`);
+      const url = apiWsUrl(`${apiBase}/ws/ohlcv?interval=${encodeURIComponent(tf)}`);
       ws = new WebSocket(url);
       ws.onopen = () => setLive(true);
       ws.onclose = () => {
@@ -569,7 +600,7 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
         /* ignore */
       }
     };
-  }, [timeframe, loading, data?.source, config.apiBase]);
+  }, [timeframe, loading, data?.source, apiBase]);
 
   useEffect(() => {
     if (loading || live) return;
@@ -581,7 +612,7 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
       inflight = true;
       try {
         const snap = await apiFetch<OilLiveResponse>(
-          `${config.apiBase}/live?interval=${encodeURIComponent(timeframe)}`
+          `${apiBase}/live?interval=${encodeURIComponent(timeframe)}`
         );
         if (cancelled) return;
         setData((prev) => (prev ? applyLiveBar(prev, snap.bar, { change_pct: snap.change_pct }) : prev));
@@ -598,7 +629,7 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
       window.clearTimeout(first);
       window.clearInterval(id);
     };
-  }, [timeframe, loading, live, config.apiBase]);
+  }, [timeframe, loading, live, apiBase]);
 
   function selectTimeframe(tfId: string) {
     const tf = TIMEFRAMES.find((t) => t.id === tfId);
@@ -608,6 +639,24 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
     setTimeframe(tfId);
     setLookback(nextLb);
   }
+
+  useEffect(() => {
+    if (!deskPrefsReady) return;
+    try {
+      window.localStorage.setItem(`${DESK_STORE}-tf`, timeframe);
+      window.localStorage.setItem(`${DESK_STORE}-lb`, lookback);
+    } catch {
+      /* ignore */
+    }
+  }, [deskPrefsReady, timeframe, lookback]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(`${DESK_STORE}-alpha`, String(heatOpacity));
+    } catch {
+      /* ignore */
+    }
+  }, [heatOpacity]);
 
   const up = (data?.change_pct ?? data?.change_pct_window ?? 0) >= 0;
   const ranges = LOOKBACKS_BY_TF[timeframe] || LOOKBACKS_BY_TF["1d"];
@@ -635,6 +684,7 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
               {data && (
                 <span className="header-desk__bars">
                   {data.interval} · {data.lookback} · {data.bars_count}
+                  {data.source?.includes("ticks") ? " · tick" : ""}
                 </span>
               )}
             </p>
@@ -845,7 +895,7 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
             footprint ? (
               <FootprintChart
                 key={timeframe}
-                data={fpData || { interval: timeframe, tick: config.tickFallback, bars: [] }}
+                data={fpData || { interval: timeframe, tick: config.tick, bars: [] }}
                 viz={fpViz}
               />
             ) : (
@@ -853,7 +903,7 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
                 bars={data.bars}
                 realtime
                 showMa={false}
-                secondsVisible={timeframe === "1m"}
+                secondsVisible={timeframe === "1m" || timeframe === "1s"}
                 heatmapLevels={heatmapLevels}
                 showHeatmap={showHeatmap}
                 heatOpacity={heatOpacity}
@@ -862,7 +912,7 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
             )
           ) : (
             <div className="muted p-6 text-sm">
-              {loading ? config.loadingLabel : "Žádná OHLCV data."}
+              {loading ? loadingLabel : "Žádná OHLCV data."}
             </div>
           )}
           {loading && data?.bars?.length ? (

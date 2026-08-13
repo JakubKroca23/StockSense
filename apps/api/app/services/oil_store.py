@@ -39,6 +39,9 @@ FRESH_AFTER: dict[str, timedelta] = {
 }
 
 LOOKBACK_DELTA: dict[str, timedelta] = {
+    "15m": timedelta(minutes=15),
+    "1h": timedelta(hours=1),
+    "4h": timedelta(hours=4),
     "1d": timedelta(days=1),
     "5d": timedelta(days=5),
     "7d": timedelta(days=7),

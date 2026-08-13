@@ -168,10 +168,12 @@ export function IconMoon(p: IconProps) {
   );
 }
 
-export const navIcons = {
+export const navIcons: Record<string, (p: IconProps) => ReactNode> = {
   "/": IconHome,
   "/cryptosense": IconCrypto,
+  "/desk/btc": IconBtc,
   "/btc": IconBtc,
   "/gold": IconGold,
+  "/desk/oil": IconOil,
   "/oil": IconOil,
-} as const;
+};

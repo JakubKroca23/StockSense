@@ -100,6 +100,9 @@ def _ensure_aware(ts: datetime) -> datetime:
 def normalize_interval(interval: str) -> str:
     raw = (interval or "1d").lower().strip()
     aliases = {
+        "1s": "1s",
+        "1sec": "1s",
+        "s": "1s",
         "5min": "5m",
         "15min": "15m",
         "30min": "30m",
@@ -122,6 +125,7 @@ def clamp_lookback(interval: str, lookback: str) -> str:
     """Yahoo/yfinance reject long ranges for intraday intervals."""
     iv = normalize_interval(interval)
     allowed = {
+        "1s": ("15m", "1h", "4h"),
         "1m": ("1d", "5d", "7d"),
         "5m": ("5d", "1mo"),
         "15m": ("5d", "1mo"),

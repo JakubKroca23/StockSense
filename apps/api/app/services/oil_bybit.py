@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from app.models import DataQuality
+from app.models import AssetClass, DataQuality
 from app.services.crypto_stream import BYBIT_INTERVAL, parse_bybit_kline
 from app.services.market_data import OhlcvBar, normalize_interval
 from app.services.oil_store import LOOKBACK_DELTA
@@ -25,18 +25,59 @@ _HEADERS = {"User-Agent": "Mozilla/5.0 StockSense/1.0"}
 
 @dataclass(frozen=True)
 class LinearDesk:
+    id: str
     symbol: str
+    display: str
+    title: str
+    label: str
+    note: str
     tick: float
     tick_decimals: int
     source: str
+    name: str
+    asset_class: AssetClass
+    yahoo_fallback: bool = False
 
 
-OIL_DESK = LinearDesk("CLUSDT", 0.01, 2, "bybit:CLUSDT")
-BTC_DESK = LinearDesk("BTCUSDT", 0.1, 1, "bybit:BTCUSDT")
+DESKS: dict[str, LinearDesk] = {
+    "oil": LinearDesk(
+        id="oil",
+        symbol="CLUSDT",
+        display="WTI",
+        title="ROPA WTI",
+        label="WTI Crude",
+        note="Bybit CLUSDT — live WTI perp, stejná třída jako XTB CFD.",
+        tick=0.01,
+        tick_decimals=2,
+        source="bybit:CLUSDT",
+        name="WTI Crude (Bybit CLUSDT)",
+        asset_class=AssetClass.commodity,
+        yahoo_fallback=True,
+    ),
+    "btc": LinearDesk(
+        id="btc",
+        symbol="BTCUSDT",
+        display="BTC",
+        title="BITCOIN",
+        label="Bitcoin",
+        note="Bybit BTCUSDT — live linear perp.",
+        tick=0.1,
+        tick_decimals=1,
+        source="bybit:BTCUSDT",
+        name="Bitcoin (Bybit BTCUSDT)",
+        asset_class=AssetClass.crypto,
+    ),
+}
 
+OIL_DESK = DESKS["oil"]
+BTC_DESK = DESKS["btc"]
 OIL_BYBIT_SYMBOL = OIL_DESK.symbol
 BTC_BYBIT_SYMBOL = BTC_DESK.symbol
 _TICK = OIL_DESK.tick
+
+
+def get_desk(desk_id: str) -> LinearDesk | None:
+    return DESKS.get((desk_id or "").strip().lower())
 
 
 def _bybit_interval(interval: str) -> str:

@@ -11,11 +11,23 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.database import AsyncSessionLocal
-from app.models import AssetClass, FootprintBar, Instrument
+from app.models import DataQuality, FootprintBar, Instrument
 from app.services.instruments import get_or_create_instrument
-from app.services.market_data import clamp_lookback, normalize_interval
-from app.services.oil_bybit import BTC_DESK, OIL_DESK, LinearDesk, _WS_URL, fetch_linear_trades
+from app.services.market_data import OhlcvBar, clamp_lookback, normalize_interval
+from app.services.oil_bybit import DESKS, LinearDesk, _WS_URL, fetch_linear_trades
 from app.services.oil_store import LOOKBACK_DELTA
+from app.services.tick_ohlcv import (
+    CHART_INTERVAL_MS,
+    MAX_OUT as TICK_MAX_OUT,
+    SEC_MEM_MS,
+    aggregate_sec,
+    backfill_archive_1s,
+    load_sec_map,
+    merge_klines_and_ticks,
+    persist_sec_bars,
+    prune_sec_bars,
+    to_ohlcv_bars,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,18 +61,11 @@ MAX_OUT: dict[str, int] = {
 
 
 class FootprintEngine:
-    def __init__(
-        self,
-        desk: LinearDesk,
-        *,
-        display: str,
-        name: str,
-        asset_class: AssetClass,
-    ) -> None:
+    def __init__(self, desk: LinearDesk) -> None:
         self.desk = desk
-        self.display = display
-        self.name = name
-        self.asset_class = asset_class
+        self.display = desk.display
+        self.name = desk.name
+        self.asset_class = desk.asset_class
         self._levels: dict[int, dict[float, list[float]]] = {}
         self._ohlc: dict[int, list[float]] = {}
         self._dirty: set[int] = set()
@@ -68,6 +73,11 @@ class FootprintEngine:
         self._seen: set[str] = set()
         self._seen_cap = 8_000
         self._last_prune: datetime | None = None
+        self._last_sec_prune: datetime | None = None
+        self._sec: dict[int, list[float]] = {}
+        self._sec_dirty: set[int] = set()
+        self._live: dict[str, list[float]] = {}
+        self._live_kline: set[str] = set()
 
     def _tick(self, price: float) -> float:
         t = self.desk.tick
@@ -102,6 +112,28 @@ class FootprintEngine:
             ohlc[2] = min(ohlc[2], p)
             ohlc[3] = p
         self._dirty.add(bar_ts)
+        sec_ts = (ts_ms // 1000) * 1000
+        sec = self._sec.get(sec_ts)
+        if sec is None:
+            self._sec[sec_ts] = [price, price, price, price, size]
+        else:
+            sec[1] = max(sec[1], price)
+            sec[2] = min(sec[2], price)
+            sec[3] = price
+            sec[4] += size
+        self._sec_dirty.add(sec_ts)
+        for iv, width in CHART_INTERVAL_MS.items():
+            bucket = (ts_ms // width) * width
+            cur = self._live.get(iv)
+            if cur is None or int(cur[0]) != bucket:
+                self._live[iv] = [float(bucket), price, price, price, price, size]
+                self._live_kline.discard(iv)
+            else:
+                cur[2] = max(cur[2], price)
+                cur[3] = min(cur[3], price)
+                cur[4] = price
+                if iv not in self._live_kline:
+                    cur[5] += size
 
     def _trim_memory(self) -> None:
         keys = sorted(self._levels)
@@ -111,6 +143,10 @@ class FootprintEngine:
                 continue
             self._levels.pop(k, None)
             self._ohlc.pop(k, None)
+        cutoff = int(datetime.now(timezone.utc).timestamp() * 1000) - SEC_MEM_MS
+        for k in list(self._sec):
+            if k < cutoff and k not in self._sec_dirty:
+                self._sec.pop(k, None)
 
     def _pack_bar(self, ts_ms: int, levels: dict[float, list[float]], ohlc: list[float]) -> dict:
         rows: list[dict] = []
@@ -189,7 +225,10 @@ class FootprintEngine:
                 payload.append((ts, {p: [b, s] for p, (b, s) in lvls.items()}, list(ohlc)))
             self._dirty.difference_update(dirty)
         if not payload:
-            return 0
+            n_sec = await self._persist_seconds()
+            async with self._lock:
+                self._trim_memory()
+            return n_sec
         now = datetime.now(timezone.utc)
         try:
             async with AsyncSessionLocal() as db:
@@ -245,9 +284,29 @@ class FootprintEngine:
             async with self._lock:
                 self._dirty.update(ts for ts, _, _ in payload)
             raise
+        n_sec = await self._persist_seconds()
         async with self._lock:
             self._trim_memory()
-        return len(payload)
+        return len(payload) + n_sec
+
+    async def _persist_seconds(self) -> int:
+        async with self._lock:
+            dirty = sorted(self._sec_dirty)
+            payload = {ts: list(self._sec[ts]) for ts in dirty if ts in self._sec}
+            self._sec_dirty.difference_update(dirty)
+        if not payload:
+            return 0
+        try:
+            n = await persist_sec_bars(self.desk, payload, overwrite=True)
+            now = datetime.now(timezone.utc)
+            if self._last_sec_prune is None or now - self._last_sec_prune >= PRUNE_EVERY:
+                await prune_sec_bars(self.desk)
+                self._last_sec_prune = now
+            return n
+        except Exception:
+            async with self._lock:
+                self._sec_dirty.update(payload)
+            raise
 
     async def _load_db(
         self, since: datetime, until: datetime
@@ -329,6 +388,123 @@ class FootprintEngine:
             "bars": bars,
         }
 
+    def current_ohlcv_bar(self, interval: str) -> OhlcvBar | None:
+        iv = normalize_interval(interval)
+        if iv not in CHART_INTERVAL_MS:
+            iv = NATIVE
+        cur = self._live.get(iv)
+        if not cur:
+            return None
+        width = CHART_INTERVAL_MS[iv]
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        bucket = (now_ms // width) * width
+        if int(cur[0]) < bucket:
+            return None
+        return OhlcvBar(
+            ts=datetime.fromtimestamp(cur[0] / 1000, tz=timezone.utc),
+            open=cur[1],
+            high=cur[2],
+            low=cur[3],
+            close=cur[4],
+            volume=cur[5],
+            source=f"{self.desk.source}:ticks",
+            data_quality=DataQuality.high,
+        )
+
+    async def ohlcv_from_ticks(
+        self, interval: str, lookback: str = "1d", *, since: datetime | None = None
+    ) -> tuple[list[OhlcvBar], list[int]]:
+        iv = normalize_interval(interval)
+        if iv not in CHART_INTERVAL_MS:
+            iv = NATIVE
+        lb = clamp_lookback(iv, lookback)
+        now = datetime.now(timezone.utc)
+        width = CHART_INTERVAL_MS[iv]
+        max_out = TICK_MAX_OUT.get(iv, 600)
+        delta = LOOKBACK_DELTA.get(lb, timedelta(days=1))
+        if since is None:
+            since = max(now - delta, now - timedelta(milliseconds=max_out * width * 2))
+        sec = await load_sec_map(self.desk, since)
+        since_ms = int(since.timestamp() * 1000)
+        async with self._lock:
+            for ts, ohlcv in self._sec.items():
+                if ts >= since_ms:
+                    sec[ts] = list(ohlcv)
+        if not sec:
+            return [], []
+        agg = aggregate_sec(sec, width)
+        bars = to_ohlcv_bars(agg, f"{self.desk.source}:ticks", max_out=max_out)
+        cur = self.current_ohlcv_bar(iv)
+        if cur:
+            if bars and int(bars[-1].ts.timestamp()) == int(cur.ts.timestamp()):
+                bars[-1] = cur
+            elif not bars or cur.ts > bars[-1].ts:
+                bars.append(cur)
+        return bars, list(sec)
+
+    async def chart_ohlcv(
+        self, interval: str, lookback: str, klines: list[OhlcvBar]
+    ) -> tuple[list[OhlcvBar], str]:
+        iv = normalize_interval(interval)
+        if iv not in CHART_INTERVAL_MS:
+            iv = NATIVE
+        tick_bars, sec_keys = await self.ohlcv_from_ticks(iv, lookback)
+        if iv == "1s":
+            return tick_bars, f"{self.desk.source}:ticks"
+        width = CHART_INTERVAL_MS[iv]
+        merged = merge_klines_and_ticks(klines, tick_bars, sec_keys, width)
+        tick_n = sum(1 for b in merged if ":ticks" in (b.source or ""))
+        if tick_n and tick_n < len(merged):
+            return merged, f"{self.desk.source}:ticks+kline"
+        if tick_n:
+            return merged, f"{self.desk.source}:ticks"
+        return merged, self.desk.source
+
+    async def tail_ohlcv(self, interval: str, n: int = 4) -> list[OhlcvBar]:
+        iv = normalize_interval(interval)
+        width = CHART_INTERVAL_MS.get(iv, INTERVAL_MS[NATIVE])
+        since = datetime.now(timezone.utc) - timedelta(milliseconds=width * max(n, 4) * 3)
+        bars, _ = await self.ohlcv_from_ticks(iv, "1d", since=since)
+        return bars[-n:] if bars else []
+
+    async def seed_live_from_klines(self) -> None:
+        from app.services.oil_bybit import fetch_linear_tail
+
+        for iv in CHART_INTERVAL_MS:
+            if iv == "1s":
+                continue
+            try:
+                bars = await fetch_linear_tail(self.desk, iv, n=1)
+            except Exception:
+                continue
+            if not bars:
+                continue
+            b = bars[-1]
+            ts_ms = int(b.ts.timestamp() * 1000)
+            async with self._lock:
+                existing = self._live.get(iv)
+                if existing and int(existing[0]) == ts_ms:
+                    existing[2] = max(existing[2], b.high)
+                    existing[3] = min(existing[3], b.low)
+                else:
+                    self._live[iv] = [float(ts_ms), b.open, b.high, b.low, b.close, b.volume]
+                    self._live_kline.add(iv)
+
+    async def _archive_loop(self, stop: asyncio.Event) -> None:
+        while not stop.is_set():
+            try:
+                n = await backfill_archive_1s(self.desk)
+                if n:
+                    logger.info("%s tick archive stored %s 1s bars", self.desk.symbol, n)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("%s tick archive backfill failed", self.desk.symbol)
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=6 * 3600)
+            except TimeoutError:
+                pass
+
     async def _backfill(self) -> None:
         try:
             payload = await fetch_linear_trades(self.desk, limit=1000)
@@ -346,6 +522,8 @@ class FootprintEngine:
                     str(t.get("id") or ""),
                 )
         logger.info("%s footprint backfill %s trades", self.desk.symbol, len(rows))
+        async with self._lock:
+            self._live_kline.clear()
         try:
             n = await self.persist_dirty()
             if n:
@@ -415,34 +593,35 @@ class FootprintEngine:
 
     async def run(self, stop: asyncio.Event) -> None:
         await asyncio.sleep(1.5)
+        await self.seed_live_from_klines()
         await self._backfill()
         flusher = asyncio.create_task(self._flush_loop(stop))
+        archiver = asyncio.create_task(self._archive_loop(stop))
         try:
             await self._ws_loop(stop)
         finally:
-            flusher.cancel()
-            try:
-                await flusher
-            except asyncio.CancelledError:
-                pass
+            for task in (flusher, archiver):
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
             try:
                 await self.persist_dirty()
             except Exception:
                 logger.exception("%s footprint final flush failed", self.desk.symbol)
 
 
-OIL_FP = FootprintEngine(
-    OIL_DESK,
-    display="WTI",
-    name="WTI Crude (Bybit CLUSDT)",
-    asset_class=AssetClass.commodity,
-)
-BTC_FP = FootprintEngine(
-    BTC_DESK,
-    display="BTC",
-    name="Bitcoin (Bybit BTCUSDT)",
-    asset_class=AssetClass.crypto,
-)
+ENGINES: dict[str, FootprintEngine] = {desk.id: FootprintEngine(desk) for desk in DESKS.values()}
+OIL_FP = ENGINES["oil"]
+BTC_FP = ENGINES["btc"]
+
+
+async def snapshot_desk_footprint(desk_id: str, interval: str, lookback: str = "1d") -> dict:
+    engine = ENGINES.get((desk_id or "").strip().lower())
+    if engine is None:
+        raise KeyError(desk_id)
+    return await engine.snapshot(interval, lookback)
 
 
 async def snapshot_footprint(interval: str, lookback: str = "1d") -> dict:
@@ -454,5 +633,5 @@ async def snapshot_btc_footprint(interval: str, lookback: str = "1d") -> dict:
 
 
 async def run_oil_footprint(stop: asyncio.Event) -> None:
-    """Backfill + stream for WTI and BTC footprints."""
-    await asyncio.gather(OIL_FP.run(stop), BTC_FP.run(stop))
+    """Backfill + stream footprint for every linear desk."""
+    await asyncio.gather(*(engine.run(stop) for engine in ENGINES.values()))
