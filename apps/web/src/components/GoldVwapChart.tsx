@@ -101,10 +101,12 @@ export function GoldVwapChart({
   const outerRef = useRef(showOuterBands);
   const fillRef = useRef(fillOpacity);
 
-  anchorsRef.current = anchors;
-  showRef.current = showMidas;
-  outerRef.current = showOuterBands;
-  fillRef.current = Math.min(0.12, Math.max(0.01, fillOpacity));
+  useEffect(() => {
+    anchorsRef.current = anchors;
+    showRef.current = showMidas;
+    outerRef.current = showOuterBands;
+    fillRef.current = Math.min(0.12, Math.max(0.01, fillOpacity));
+  }, [anchors, showMidas, showOuterBands, fillOpacity]);
 
   const drawMidas = () => {
     const canvas = overlayRef.current;
