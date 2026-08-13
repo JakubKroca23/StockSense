@@ -23,7 +23,7 @@ export function rowsToCsv(headers: string[], rows: (string | number | null | und
 
 /** Download CSV from API (open access). */
 export async function downloadApiCsv(path: string, filename: string) {
-  const base = process.env.NEXT_PUBLIC_API_URL || "/api";
+  const base = process.env.NEXT_PUBLIC_API_URL || "https://stocksense.propoj.app/api";
   const res = await fetch(`${base.replace(/\/$/, "")}${path.startsWith("/") ? path : `/${path}`}`);
   if (!res.ok) {
     const text = await res.text();

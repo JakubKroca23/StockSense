@@ -26,6 +26,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://stocksense:stocksense@db:5432/stocksense
       DATABASE_URL_SYNC: postgresql://stocksense:stocksense@db:5432/stocksense
       OLLAMA_BASE_URL: http://ollama:11434
+      CORS_ORIGINS: https://stocksense.propoj.app,http://localhost:3000,http://127.0.0.1:3000
     depends_on:
       db:
         condition: service_healthy

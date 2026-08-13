@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     auth_display_name: str = "Jakub"
     auth_email: str = ""
 
-    cors_origins: str = "https://stocksense.propoj.app,http://localhost:3000"
+    cors_origins: str = "https://stocksense.propoj.app,http://localhost:3000,http://127.0.0.1:3000"
 
     ollama_base_url: str = "http://ollama:11434"
     ollama_model: str = "qwen2.5:1.5b"
