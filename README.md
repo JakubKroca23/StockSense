@@ -67,8 +67,8 @@ uvicorn app.main:app --reload --port 8000
 - Portfolio (ruční), watchlist, home (portfolio + tipy)
 - Instrument detail (cena, sparkline, fundament, SEC filings, tip + feedback)
 - Scoring engine (fundament/makro/flow/TA) několikrát denně
-- Hybrid LLM router (Ollama + Anthropic/OpenAI/Gemini)
-- AI chat, denní report, alerty (nový tip, price levels, report)
+- Hybrid LLM (Gemini) pro denní report a narativy
+- Denní report, alerty (nový tip, price levels, report)
 
 ## Poznámky k datům
 

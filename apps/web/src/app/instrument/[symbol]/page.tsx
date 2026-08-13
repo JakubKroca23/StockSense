@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -518,12 +517,6 @@ export default function InstrumentPage() {
             >
               Přidat paper pozici
             </button>
-            <Link
-              href={`/chat?symbol=${encodeURIComponent(symbol)}&fresh=1`}
-              className="btn"
-            >
-              Analyzovat v Sense
-            </Link>
             <button
               className="btn"
               disabled={feedbackBusy}

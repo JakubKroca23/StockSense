@@ -6,7 +6,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.models import (
     AssetClass,
-    ChatSessionStatus,
     CloseReason,
     DataQuality,
     FeedbackResult,
@@ -203,52 +202,6 @@ class HomeOut(BaseModel):
     briefing_at: datetime | None = None
     tip_stats: dict[str, Any] | None = None
     equity: list[dict[str, Any]] = []
-
-
-class ChatRequest(BaseModel):
-    message: str
-    symbol: str | None = None
-    session_id: int | None = None
-    # UI screen snapshot so the bot can react to what the user sees.
-    screen_context: str | None = None
-    # "bot" (floating Sense bot) | "analysis" (legacy structured reply)
-    mode: str | None = None
-
-
-class ChatMessageOut(ORMModel):
-    id: int
-    role: str
-    content: str
-    created_at: datetime
-    session_id: int | None = None
-
-
-class ChatSessionOut(ORMModel):
-    id: int
-    title: str
-    symbol: str | None = None
-    status: ChatSessionStatus
-    preview: str | None = None
-    message_count: int
-    created_at: datetime
-    updated_at: datetime
-
-
-class ChatSessionCreate(BaseModel):
-    title: str | None = None
-    symbol: str | None = None
-
-
-class ChatSessionUpdate(BaseModel):
-    title: str | None = None
-    symbol: str | None = None
-    status: ChatSessionStatus | None = None
-
-
-class ChatTurnOut(BaseModel):
-    session: ChatSessionOut
-    user_message: ChatMessageOut
-    assistant_message: ChatMessageOut
 
 
 class ReportOut(ORMModel):

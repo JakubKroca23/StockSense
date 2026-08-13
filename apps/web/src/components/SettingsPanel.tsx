@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { RiskProfile, UserSettings, riskLabel } from "@/lib/types";
+import { IconClose, IconSettings } from "@/components/NavIcons";
 
 type SystemStats = {
   as_of: string;
@@ -21,7 +22,6 @@ type SystemStats = {
     price_bars_rows: number;
     price_bars_size: string;
     instruments: number;
-    chat_messages: number;
     tables_total_human: string;
   };
   tables: {
@@ -42,152 +42,19 @@ type SystemStats = {
     cloud_provider: string;
     scheduler: boolean;
     tip_scoring: boolean;
-    liq_intel?: boolean;
   };
 };
-
-type LiqIntelStatus = {
-  enabled: boolean;
-  symbols: string[];
-  sample_seconds: number;
-  llm_minutes: number;
-  snapshots: number;
-  feature_bars: number;
-  hypotheses_alive: number;
-  last_snapshot_at: string | null;
-  last_analysis_at: string | null;
-  last_summary: string | null;
-  age_seconds: number | null;
-  hypotheses: {
-    slug: string;
-    title: string;
-    symbol: string;
-    direction: string;
-    status: string;
-    trials: number;
-    wins: number;
-    winrate: number | null;
-  }[];
-};
-
-function LiqIntelPanel() {
-  const [st, setSt] = useState<LiqIntelStatus | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      setErr(null);
-      setSt(await apiFetch<LiqIntelStatus>("/crypto/liq-intel/status"));
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Liq intel nedostupné");
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const runNow = async () => {
-    setBusy(true);
-    setErr(null);
-    try {
-      await apiFetch("/crypto/liq-intel/run-now", { method: "POST" });
-      await load();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Run selhal");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const [copyMsg, setCopyMsg] = useState<string | null>(null);
-
-  const copyBriefing = async () => {
-    setBusy(true);
-    setErr(null);
-    setCopyMsg(null);
-    try {
-      const pack = await apiFetch<{ text: string; chars: number; hours: number }>(
-        "/crypto/liq-intel/briefing?hours=48"
-      );
-      await navigator.clipboard.writeText(pack.text);
-      setCopyMsg(`Zkopírováno (${pack.chars.toLocaleString("cs-CZ")} znaků, ${pack.hours}h)`);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Kopírování selhalo");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="settings-liq mt-3">
-      <p className="settings-tables__title muted">Liquidity intel (24/7)</p>
-      {err && <p className="text-[var(--danger)] text-xs mb-1">{err}</p>}
-      {st && (
-        <>
-          <div className="settings-meta muted text-xs">
-            <span>{st.enabled ? "běží" : "vypnuto"}</span>
-            <span>·</span>
-            <span>sample {st.sample_seconds}s</span>
-            <span>·</span>
-            <span>LLM /{st.llm_minutes}m</span>
-            <span>·</span>
-            <span>{st.snapshots} snap</span>
-            <span>·</span>
-            <span>{st.feature_bars}×1m</span>
-            <span>·</span>
-            <span>{st.hypotheses_alive} hyp</span>
-          </div>
-          {st.last_summary && (
-            <p className="text-xs mt-1" style={{ color: "var(--text)", opacity: 0.85 }}>
-              {(st.last_summary || "").slice(0, 280)}
-              {(st.last_summary || "").length > 280 ? "…" : ""}
-            </p>
-          )}
-          {st.hypotheses?.length > 0 && (
-            <ul className="settings-tables mt-2">
-              {st.hypotheses.slice(0, 5).map((h) => (
-                <li key={h.slug}>
-                  <span className="settings-tables__name">
-                    {h.symbol} {h.direction} · {h.title}
-                  </span>
-                  <span className="settings-tables__rows">
-                    {h.wins}/{h.trials}
-                    {h.winrate != null ? ` (${Math.round(h.winrate * 100)}%)` : ""}
-                  </span>
-                  <span className="settings-tables__size">{h.status}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-          <div className="flex flex-wrap gap-2 mt-2">
-            <button
-              type="button"
-              className="chart-chip chart-chip--soft"
-              disabled={busy}
-              onClick={() => void runNow()}
-            >
-              {busy ? "Běží…" : "Spustit analýzu teď"}
-            </button>
-            <button
-              type="button"
-              className="chart-chip chart-chip--soft"
-              disabled={busy}
-              onClick={() => void copyBriefing()}
-              title="Zkopíruje prompt + data za 48h pro ChatGPT / Claude / Gemini"
-            >
-              Zkopírovat briefing
-            </button>
-          </div>
-          {copyMsg && <p className="muted text-xs mt-1">{copyMsg}</p>}
-        </>
-      )}
-    </div>
-  );
-}
 
 const CURRENCIES = ["USD", "EUR", "CZK"] as const;
+const RISKS = Object.keys(riskLabel) as RiskProfile[];
+
+function fmtNum(n: number | null | undefined) {
+  return (n ?? 0).toLocaleString("cs-CZ");
+}
+
+function StatusDot({ on }: { on: boolean }) {
+  return <span className={`settings-dot ${on ? "is-on" : "is-off"}`} aria-hidden />;
+}
 
 type Props = {
   open: boolean;
@@ -279,24 +146,93 @@ export function SettingsPanel({ open, onClose }: Props) {
   return (
     <div className="settings-modal" role="dialog" aria-modal="true" aria-label="Nastavení">
       <button type="button" className="settings-modal__backdrop" aria-label="Zavřít" onClick={onClose} />
-      <div ref={panelRef} className="settings-modal__panel card">
+      <div ref={panelRef} className="settings-modal__panel">
+        <div className="settings-modal__handle" aria-hidden />
         <header className="settings-modal__head">
-          <div>
-            <p className="settings-modal__title">Nastavení</p>
-            <p className="muted text-xs">Server · data · preference</p>
+          <div className="settings-modal__brand">
+            <span className="settings-modal__icon">
+              <IconSettings size={18} />
+            </span>
+            <div>
+              <p className="settings-modal__title">Nastavení</p>
+              <p className="settings-modal__kicker">Preference · server</p>
+            </div>
           </div>
           <button type="button" className="settings-modal__close" onClick={onClose} aria-label="Zavřít">
-            ✕
+            <IconClose size={18} />
           </button>
         </header>
 
-        <div className="settings-modal__body">
-          {error && <p className="text-[var(--danger)] text-sm mb-3">{error}</p>}
+        {stats && (
+          <div className="settings-pills">
+            <span className="settings-pill">
+              <StatusDot on={stats.environment === "production"} />
+              {stats.environment}
+            </span>
+            <span className="settings-pill">↑ {stats.uptime_human}</span>
+            <span className="settings-pill">Gemini</span>
+          </div>
+        )}
 
-          <section className="settings-modal__section">
-            <div className="settings-modal__section-head">
-              <h2>Server &amp; data</h2>
-              <button type="button" className="chart-chip chart-chip--soft" onClick={() => void load()}>
+        <div className="settings-modal__body">
+          {error && <p className="settings-alert">{error}</p>}
+
+          <section className="settings-block">
+            <div className="settings-block__head">
+              <div>
+                <h2>Preference</h2>
+                <p className="settings-block__sub">Zobrazení a rizikový profil</p>
+              </div>
+            </div>
+            <form className="settings-form" onSubmit={onSave}>
+              <div className="settings-field">
+                <span className="settings-field__label">Měna</span>
+                <div className="settings-seg" role="group" aria-label="Zobrazená měna">
+                  {CURRENCIES.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      className={currency === c ? "is-active" : ""}
+                      onClick={() => setCurrency(c)}
+                      disabled={!settings}
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="settings-field">
+                <span className="settings-field__label">Risk profil</span>
+                <div className="settings-seg" role="group" aria-label="Risk profil">
+                  {RISKS.map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      className={risk === k ? "is-active" : ""}
+                      onClick={() => setRisk(k)}
+                      disabled={!settings}
+                    >
+                      {riskLabel[k]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="settings-actions">
+                <button className="btn btn-primary settings-btn" type="submit" disabled={busy || !settings}>
+                  {busy ? "Ukládám…" : "Uložit"}
+                </button>
+                {message && <span className="settings-ok">{message}</span>}
+              </div>
+            </form>
+          </section>
+
+          <section className="settings-block">
+            <div className="settings-block__head">
+              <div>
+                <h2>Server &amp; data</h2>
+                <p className="settings-block__sub">Paměť, databáze, trhy</p>
+              </div>
+              <button type="button" className="settings-icon-btn" onClick={() => void load()} aria-label="Obnovit">
                 ↻
               </button>
             </div>
@@ -307,132 +243,55 @@ export function SettingsPanel({ open, onClose }: Props) {
               <>
                 <div className="settings-stats">
                   <div className="settings-stat">
-                    <span className="settings-stat__label">RAM procesu</span>
+                    <span className="settings-stat__label">RAM</span>
                     <span className="settings-stat__value">{stats.process.rss_human}</span>
+                    <span className="settings-stat__hint">proces API</span>
                   </div>
                   <div className="settings-stat">
-                    <span className="settings-stat__label">DB celkem</span>
+                    <span className="settings-stat__label">Databáze</span>
                     <span className="settings-stat__value">{stats.database.size_human}</span>
-                  </div>
-                  <div className="settings-stat">
-                    <span className="settings-stat__label">price_bars</span>
-                    <span className="settings-stat__value">
-                      {stats.highlights.price_bars_rows.toLocaleString("cs-CZ")}
-                      <span className="muted text-xs font-normal">
-                        {" "}
-                        · {stats.highlights.price_bars_size}
-                      </span>
-                    </span>
+                    <span className="settings-stat__hint">{stats.highlights.tables_total_human} tabulek</span>
                   </div>
                   <div className="settings-stat">
                     <span className="settings-stat__label">Uptime</span>
                     <span className="settings-stat__value">{stats.uptime_human}</span>
+                    <span className="settings-stat__hint">{stats.host.system} {stats.host.machine}</span>
+                  </div>
+                  <div className="settings-stat">
+                    <span className="settings-stat__label">Price bars</span>
+                    <span className="settings-stat__value">{fmtNum(stats.highlights.price_bars_rows)}</span>
+                    <span className="settings-stat__hint">{stats.highlights.price_bars_size}</span>
                   </div>
                   <div className="settings-stat">
                     <span className="settings-stat__label">Instrumenty</span>
-                    <span className="settings-stat__value">
-                      {stats.highlights.instruments.toLocaleString("cs-CZ")}
-                    </span>
-                  </div>
-                  <div className="settings-stat">
-                    <span className="settings-stat__label">Chat zprávy</span>
-                    <span className="settings-stat__value">
-                      {stats.highlights.chat_messages.toLocaleString("cs-CZ")}
-                    </span>
+                    <span className="settings-stat__value">{fmtNum(stats.highlights.instruments)}</span>
+                    <span className="settings-stat__hint">v katalogu</span>
                   </div>
                 </div>
 
-                <div className="settings-meta muted text-xs">
-                  <span>{stats.environment}</span>
-                  <span>·</span>
-                  <span>
-                    {stats.host.system} {stats.host.machine}
-                  </span>
-                  <span>·</span>
+                <div className="settings-tags">
+                  <span>{(stats.crypto.exchanges || []).join(" + ") || "crypto —"}</span>
+                  {stats.crypto.execution_exchange && <span>exec {stats.crypto.execution_exchange}</span>}
                   <span>Python {stats.host.python}</span>
-                  <span>·</span>
                   <span>pid {stats.process.pid}</span>
                 </div>
 
-              <div className="settings-meta muted text-xs mt-1">
-                  <span>
-                    Crypto: {(stats.crypto.exchanges || []).join(" + ") || "—"}
-                    {stats.crypto.execution_exchange
-                      ? ` · exec ${stats.crypto.execution_exchange}`
-                      : ""}
-                  </span>
-                  <span>·</span>
-                  <span>LLM Gemini</span>
-                  {stats.llm.liq_intel != null && (
-                    <>
-                      <span>·</span>
-                      <span>Liq intel {stats.llm.liq_intel ? "ON" : "off"}</span>
-                    </>
-                  )}
-                </div>
-
-                <LiqIntelPanel />
-
                 {stats.tables.length > 0 && (
-                  <div className="settings-tables">
-                    <p className="settings-tables__title muted">Tabulky (velikost na disku)</p>
-                    <ul>
-                      {stats.tables.slice(0, 10).map((t) => (
+                  <details className="settings-details">
+                    <summary>Tabulky na disku</summary>
+                    <ul className="settings-tables">
+                      {stats.tables.slice(0, 12).map((t) => (
                         <li key={t.name}>
                           <span className="settings-tables__name">{t.name}</span>
-                          <span className="settings-tables__rows">
-                            {t.rows.toLocaleString("cs-CZ")}
-                          </span>
+                          <span className="settings-tables__rows">{fmtNum(t.rows)}</span>
                           <span className="settings-tables__size">{t.total_human}</span>
                         </li>
                       ))}
                     </ul>
-                  </div>
+                  </details>
                 )}
               </>
             )}
-          </section>
-
-          <section className="settings-modal__section">
-            <h2>Preference</h2>
-            <form className="settings-form" onSubmit={onSave}>
-              <label className="block space-y-1">
-                <span className="text-sm muted">Zobrazená měna</span>
-                <select
-                  className="input"
-                  value={currency}
-                  onChange={(e) => setCurrency(e.target.value)}
-                  disabled={!settings}
-                >
-                  {CURRENCIES.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block space-y-1">
-                <span className="text-sm muted">Risk profil</span>
-                <select
-                  className="input"
-                  value={risk}
-                  onChange={(e) => setRisk(e.target.value as RiskProfile)}
-                  disabled={!settings}
-                >
-                  {(Object.keys(riskLabel) as RiskProfile[]).map((k) => (
-                    <option key={k} value={k}>
-                      {riskLabel[k]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="flex flex-wrap items-center gap-2 pt-1">
-                <button className="btn btn-primary" type="submit" disabled={busy || !settings}>
-                  {busy ? "Ukládám…" : "Uložit"}
-                </button>
-                {message && <span className="text-[var(--ok)] text-sm">{message}</span>}
-              </div>
-            </form>
           </section>
         </div>
       </div>

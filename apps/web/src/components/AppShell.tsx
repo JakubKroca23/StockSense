@@ -4,9 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { StockSenseLogo } from "@/components/StockSenseLogo";
-import { SenseBot } from "@/components/SenseBot";
 import { SettingsPanel } from "@/components/SettingsPanel";
-import { ScreenContextProvider } from "@/components/ScreenContext";
 import {
   IconClose,
   IconMenu,
@@ -34,10 +32,10 @@ function NavLabel({
 }) {
   const Icon = navIcons[href];
   return (
-    <span className="nav-item">
-      <Icon size={NAV_ICON_SIZE} />
-      <span className="nav-item__label">{label}</span>
-    </span>
+  <span className="nav-item">
+    <Icon size={NAV_ICON_SIZE} />
+    <span className="nav-item__label">{label}</span>
+  </span>
   );
 }
 
@@ -108,7 +106,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [menuOpen]);
 
   return (
-    <ScreenContextProvider>
       <div className={`app-shell min-h-screen pb-8 ${menuOpen ? "is-menu-open" : ""}`}>
         <header className="app-header sticky top-0 z-40">
           <div className="app-header__inner mx-auto grid max-w-6xl items-center gap-2 px-4 py-2">
@@ -169,10 +166,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
 
-        <div className="app-fab-dock">
-          <SenseBot />
-        </div>
-
         {menuOpen && (
           <div className="nav-sheet" role="dialog" aria-modal="true" aria-label="Menu">
             <button
@@ -219,6 +212,5 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <SettingsPanel open={settingsOpen} onClose={closeSettings} />
       </div>
-    </ScreenContextProvider>
   );
 }

@@ -1,6 +1,5 @@
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
@@ -12,14 +11,6 @@ from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal, Base, engine
 from app.models import UserSettings
 from app.services.instruments import ensure_discovery_universe
-from app.services.liquidity_intel import (
-    open_hypothesis_trials,
-    purge_old_snapshots,
-    resolve_hypothesis_trials,
-    roll_feature_bars,
-    run_ingest_cycle,
-    run_llm_review,
-)
 from app.workers.jobs import (
     check_price_alerts,
     generate_daily_report,
@@ -33,50 +24,23 @@ settings = get_settings()
 scheduler = AsyncIOScheduler()
 
 
-async def _ensure_chat_schema(conn) -> None:
-    """create_all does not ALTER existing tables — patch chat sessions safely."""
-    await conn.execute(
-        text(
-            """
-            DO $$ BEGIN
-                CREATE TYPE chatsessionstatus AS ENUM ('open', 'minimized', 'saved', 'closed');
-            EXCEPTION
-                WHEN duplicate_object THEN NULL;
-            END $$;
-            """
-        )
-    )
-    await conn.execute(
-        text(
-            """
-            CREATE TABLE IF NOT EXISTS chat_sessions (
-                id SERIAL PRIMARY KEY,
-                user_id VARCHAR(64) NOT NULL,
-                title VARCHAR(255) NOT NULL DEFAULT 'Nový chat',
-                symbol VARCHAR(32),
-                status chatsessionstatus NOT NULL DEFAULT 'open',
-                preview VARCHAR(280),
-                message_count INTEGER NOT NULL DEFAULT 0,
-                created_at TIMESTAMPTZ DEFAULT now(),
-                updated_at TIMESTAMPTZ DEFAULT now()
-            );
-            """
-        )
-    )
-    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_chat_sessions_user_id ON chat_sessions (user_id);"))
-    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_chat_sessions_status ON chat_sessions (status);"))
-    await conn.execute(
-        text(
-            """
-            ALTER TABLE chat_messages
-            ADD COLUMN IF NOT EXISTS session_id INTEGER
-            REFERENCES chat_sessions(id) ON DELETE CASCADE;
-            """
-        )
-    )
-    await conn.execute(
-        text("CREATE INDEX IF NOT EXISTS ix_chat_messages_session_id ON chat_messages (session_id);")
-    )
+async def _drop_retired_bot_schema(conn) -> None:
+    """Drop Sense bot / chat / liquidity-intel tables and reclaim space."""
+    for table in (
+        "hypothesis_trials",
+        "trading_hypotheses",
+        "liq_analyses",
+        "liq_feature_bars",
+        "liq_snapshots",
+        "chat_messages",
+        "chat_sessions",
+    ):
+        await conn.execute(text(f"DROP TABLE IF EXISTS {table} CASCADE"))
+    await conn.execute(text("DROP TYPE IF EXISTS chatsessionstatus"))
+
+
+async def _ensure_schema(conn) -> None:
+    """create_all does not ALTER existing tables — patch leftover columns safely."""
     await conn.execute(
         text("ALTER TABLE tips ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'proposed'")
     )
@@ -217,8 +181,9 @@ async def _ensure_tip_action_enum(conn) -> None:
 
 async def _init_db() -> None:
     async with engine.begin() as conn:
+        await _drop_retired_bot_schema(conn)
         await conn.run_sync(Base.metadata.create_all)
-        await _ensure_chat_schema(conn)
+        await _ensure_schema(conn)
         try:
             await _ensure_tip_action_enum(conn)
         except Exception as exc:
@@ -290,133 +255,21 @@ async def job_macro() -> None:
             logger.warning("macro job failed: %s", exc)
 
 
-async def job_liq_ingest() -> None:
-    async with AsyncSessionLocal() as db:
-        try:
-            result = await run_ingest_cycle(db)
-            logger.debug("liq ingest: %s", result)
-        except Exception as exc:
-            logger.warning("liq ingest failed: %s", exc)
-
-
-async def job_liq_features() -> None:
-    async with AsyncSessionLocal() as db:
-        try:
-            n = await roll_feature_bars(db, lookback_minutes=8)
-            opened = await open_hypothesis_trials(db)
-            resolved = await resolve_hypothesis_trials(db)
-            logger.debug("liq features written=%s opened=%s resolved=%s", n, opened, resolved)
-        except Exception as exc:
-            logger.warning("liq features failed: %s", exc)
-
-
-async def job_liq_llm() -> None:
-    async with AsyncSessionLocal() as db:
-        try:
-            result = await run_llm_review(db)
-            logger.info(
-                "liq LLM review: touched=%s summary=%s",
-                result.get("hypotheses_touched"),
-                (result.get("summary") or "")[:160],
-            )
-        except Exception as exc:
-            logger.warning("liq LLM review failed: %s", exc)
-
-
-async def job_liq_purge() -> None:
-    async with AsyncSessionLocal() as db:
-        try:
-            n = await purge_old_snapshots(db)
-            if n:
-                logger.info("liq purge deleted %s snapshots", n)
-        except Exception as exc:
-            logger.warning("liq purge failed: %s", exc)
-
-
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await _init_db()
 
-    start_scheduler = settings.enable_scheduler or settings.enable_liq_intel
-    if start_scheduler:
-        if settings.enable_scheduler:
-            scoring_hours = ",".join(
-                str(int(h.strip())) for h in settings.scoring_cron_hours.split(",") if h.strip()
-            ) or "7,12,17,21"
-            scheduler.add_job(
-                job_price_poll, "interval", minutes=settings.price_poll_minutes, id="price_poll"
-            )
-            scheduler.add_job(job_scoring, "cron", hour=scoring_hours, minute=10, id="scoring")
-            scheduler.add_job(job_daily_report, "cron", hour=6, minute=30, id="daily_report")
-            scheduler.add_job(job_equity_snapshot, "cron", hour=21, minute=5, id="equity_snapshot")
-            scheduler.add_job(job_macro, "cron", hour="*/6", minute=5, id="macro")
-
-        if settings.enable_liq_intel:
-            sample_s = max(4, int(settings.liq_intel_sample_seconds))
-            llm_m = max(10, int(settings.liq_intel_llm_minutes))
-            scheduler.add_job(
-                job_liq_ingest,
-                "interval",
-                seconds=sample_s,
-                id="liq_ingest",
-                replace_existing=True,
-                max_instances=1,
-                coalesce=True,
-            )
-            scheduler.add_job(
-                job_liq_features,
-                "interval",
-                minutes=1,
-                id="liq_features",
-                replace_existing=True,
-                max_instances=1,
-                coalesce=True,
-            )
-            scheduler.add_job(
-                job_liq_llm,
-                "interval",
-                minutes=llm_m,
-                id="liq_llm",
-                replace_existing=True,
-                max_instances=1,
-                coalesce=True,
-            )
-            scheduler.add_job(
-                job_liq_purge,
-                "cron",
-                hour=3,
-                minute=20,
-                id="liq_purge",
-                replace_existing=True,
-            )
-            # kick first cycles soon after boot
-            scheduler.add_job(
-                job_liq_ingest,
-                "date",
-                run_date=datetime.now(timezone.utc) + timedelta(seconds=3),
-                id="liq_ingest_boot",
-                replace_existing=True,
-            )
-            scheduler.add_job(
-                job_liq_features,
-                "date",
-                run_date=datetime.now(timezone.utc) + timedelta(seconds=25),
-                id="liq_features_boot",
-                replace_existing=True,
-            )
-            scheduler.add_job(
-                job_liq_llm,
-                "date",
-                run_date=datetime.now(timezone.utc) + timedelta(seconds=90),
-                id="liq_llm_boot",
-                replace_existing=True,
-            )
-            logger.info(
-                "Liquidity intel ON (sample=%ss, llm every %s min)",
-                sample_s,
-                llm_m,
-            )
-
+    if settings.enable_scheduler:
+        scoring_hours = ",".join(
+            str(int(h.strip())) for h in settings.scoring_cron_hours.split(",") if h.strip()
+        ) or "7,12,17,21"
+        scheduler.add_job(
+            job_price_poll, "interval", minutes=settings.price_poll_minutes, id="price_poll"
+        )
+        scheduler.add_job(job_scoring, "cron", hour=scoring_hours, minute=10, id="scoring")
+        scheduler.add_job(job_daily_report, "cron", hour=6, minute=30, id="daily_report")
+        scheduler.add_job(job_equity_snapshot, "cron", hour=21, minute=5, id="equity_snapshot")
+        scheduler.add_job(job_macro, "cron", hour="*/6", minute=5, id="macro")
         scheduler.start()
         logger.info("APScheduler started (jobs enabled)")
     else:

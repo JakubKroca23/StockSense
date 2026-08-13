@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { GoldVwapChart, MidasAnchor } from "@/components/GoldVwapChart";
 import type { ChartBar } from "@/components/PriceChart";
-import { useScreenContext } from "@/components/ScreenContext";
 
 type GoldMidasResponse = {
   symbol: string;
@@ -34,7 +33,6 @@ function fmtPct(n: number | null | undefined) {
 }
 
 export default function GoldPage() {
-  const { setScreen } = useScreenContext();
   const [data, setData] = useState<GoldMidasResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -59,17 +57,6 @@ export default function GoldPage() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  useEffect(() => {
-    setScreen({
-      page: "gold",
-      title: "Gold — Anchored VWAP Midas",
-      symbol: data?.symbol || "GC=F",
-      detail: data
-        ? `1m × ${data.lookback}, ${data.anchors_count} hodinových kotev VWAP, Fib σ 0.618 / 1.618 / 2.618`
-        : "Heatmapa ukotvených VWAP pásem na zlatě",
-    });
-  }, [setScreen, data]);
 
   useEffect(() => {
     if (!chartExpanded) return;

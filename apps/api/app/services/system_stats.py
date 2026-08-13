@@ -132,7 +132,6 @@ async def collect_system_stats(db: AsyncSession) -> dict:
     uptime = max(0.0, time.time() - _STARTED_AT)
 
     price_bars = next((t for t in tables if t["name"] == "price_bars"), None)
-    chat_msgs = next((t for t in tables if t["name"] == "chat_messages"), None)
     instruments = next((t for t in tables if t["name"] == "instruments"), None)
 
     try:
@@ -160,7 +159,6 @@ async def collect_system_stats(db: AsyncSession) -> dict:
             "price_bars_rows": price_bars["rows"] if price_bars else 0,
             "price_bars_size": price_bars["total_human"] if price_bars else "—",
             "instruments": instruments["rows"] if instruments else 0,
-            "chat_messages": chat_msgs["rows"] if chat_msgs else 0,
             "tables_total_bytes": sum(t["total_bytes"] for t in tables),
             "tables_total_human": _bytes_human(sum(t["total_bytes"] for t in tables)),
         },
@@ -171,7 +169,6 @@ async def collect_system_stats(db: AsyncSession) -> dict:
             "ollama_model": None,
             "scheduler": cfg.enable_scheduler,
             "tip_scoring": cfg.enable_tip_scoring,
-            "liq_intel": cfg.enable_liq_intel,
         },
     }
 

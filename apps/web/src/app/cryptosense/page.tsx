@@ -5,7 +5,6 @@ import { apiFetch, apiWsUrl } from "@/lib/api";
 import { PriceChart, ChartBar, HeatmapLevel } from "@/components/PriceChart";
 import { OrderBookData } from "@/components/OrderBookPanel";
 import { TradesTapePanel, TradesTapeData } from "@/components/TradesTapePanel";
-import { useScreenContext } from "@/components/ScreenContext";
 
 type AggregatedQuote = {
   symbol: string;
@@ -146,7 +145,6 @@ function Sparkline({
 }
 
 export default function CryptoSensePage() {
-  const { setScreen } = useScreenContext();
   const [data, setData] = useState<CryptoOverview | null>(null);
   const [selected, setSelected] = useState("BTC/USDT");
   const [interval, setIntervalTf] = useState<(typeof TIMEFRAMES)[number]["id"]>("1m");
@@ -415,51 +413,6 @@ export default function CryptoSensePage() {
     ? data.exchanges
     : orderBook?.exchanges || ["binance", "bybit"];
   const execution = data?.execution_exchange || orderBook?.execution_exchange || "bybit";
-
-  useEffect(() => {
-    const last = ohlcv?.ohlcv?.[ohlcv.ohlcv.length - 1];
-    const coinList = (data?.quotes || []).map((q) => q.symbol.split("/")[0]).join(", ");
-    const detail = [
-      `Timeframe grafu: ${interval}`,
-      live ? "Stream: LIVE (agregace Binance+Bybit)" : "Stream: offline",
-      `Burzy grafu: ${exchanges.join(" + ")}`,
-      `Execution: ${execution}`,
-      activeQuote?.primary_price != null
-        ? `Cena (agg): ${activeQuote.primary_price}`
-        : null,
-      activeQuote?.change_pct != null ? `Denní změna: ${activeQuote.change_pct.toFixed(2)}%` : null,
-      orderBook?.spread_pct != null
-        ? `Spread: ${orderBook.spread_pct.toFixed(4)}%`
-        : null,
-      last
-        ? `Poslední svíčka: o=${last.open} h=${last.high} l=${last.low} c=${last.close}`
-        : null,
-      `Dostupné coiny: ${coinList || "—"}`,
-      showHeatmap ? "Heatmapa order book: zapnuto" : null,
-    ]
-      .filter(Boolean)
-      .join("\n");
-
-    setScreen({
-      page: "cryptosense",
-      title: "Crypto — live graf",
-      symbol: selected,
-      detail,
-    });
-  }, [
-    selected,
-    interval,
-    live,
-    activeQuote?.primary_price,
-    activeQuote?.change_pct,
-    ohlcv,
-    data?.quotes,
-    exchanges,
-    execution,
-    orderBook?.spread_pct,
-    showHeatmap,
-    setScreen,
-  ]);
 
   return (
     <div className="cryptosense">

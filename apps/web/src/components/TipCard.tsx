@@ -151,12 +151,6 @@ export function TipCard({
             >
               Paper pozice
             </button>
-            <Link
-              href={`/chat?symbol=${encodeURIComponent(tip.instrument.symbol)}&fresh=1`}
-              className="btn text-xs px-2 py-1"
-            >
-              Analýza
-            </Link>
             <button
               type="button"
               className="btn text-xs px-2 py-1"
