@@ -21,6 +21,7 @@ import { applyTheme, ColorMode, getStoredTheme } from "@/lib/theme";
 const links = [
   { href: "/", label: "Home" },
   { href: "/cryptosense", label: "Crypto" },
+  { href: "/btc", label: "BTC" },
   { href: "/gold", label: "Gold" },
   { href: "/oil", label: "ROPA WTI" },
 ] as const;

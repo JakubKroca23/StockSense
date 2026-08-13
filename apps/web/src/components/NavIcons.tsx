@@ -103,6 +103,19 @@ export function IconOil(p: IconProps) {
   );
 }
 
+/** BTC — bitcoin desk */
+export function IconBtc(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="12" cy="12" r="8.4" />
+      <path d="M10.8 6.4v1.5M13.5 6.4v1.5M10.8 16.1v1.5M13.5 16.1v1.5" />
+      <path d="M9.4 8.15h3.55c1.72 0 2.8.88 2.8 2.18 0 1.18-.82 1.95-2.22 2.18" />
+      <path d="M9.4 12.5h4.25c1.88 0 3 .95 3 2.28 0 1.42-1.22 2.28-3.18 2.28H9.4" />
+      <path d="M9.4 8.15v9" />
+    </Svg>
+  );
+}
+
 /** Nastavení — plné zelené ozubené kolo */
 export function IconSettings({ size = NAV_ICON_SIZE, className = "" }: IconProps) {
   return (
@@ -158,6 +171,7 @@ export function IconMoon(p: IconProps) {
 export const navIcons = {
   "/": IconHome,
   "/cryptosense": IconCrypto,
+  "/btc": IconBtc,
   "/gold": IconGold,
   "/oil": IconOil,
 } as const;

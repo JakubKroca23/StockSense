@@ -1,9 +1,10 @@
-"""Live WTI via Bybit linear perp CLUSDT — same class of feed as an XTB CFD, not delayed NYMEX."""
+"""Bybit USDT linear perps — klines, L2, public trades, live kline WS."""
 
 from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import httpx
@@ -15,13 +16,27 @@ from app.services.oil_store import LOOKBACK_DELTA
 
 logger = logging.getLogger(__name__)
 
-OIL_BYBIT_SYMBOL = "CLUSDT"
 _KLINE_URL = "https://api.bybit.com/v5/market/kline"
 _BOOK_URL = "https://api.bybit.com/v5/market/orderbook"
 _TRADES_URL = "https://api.bybit.com/v5/market/recent-trade"
 _WS_URL = "wss://stream.bybit.com/v5/public/linear"
 _HEADERS = {"User-Agent": "Mozilla/5.0 StockSense/1.0"}
-_TICK = 0.01
+
+
+@dataclass(frozen=True)
+class LinearDesk:
+    symbol: str
+    tick: float
+    tick_decimals: int
+    source: str
+
+
+OIL_DESK = LinearDesk("CLUSDT", 0.01, 2, "bybit:CLUSDT")
+BTC_DESK = LinearDesk("BTCUSDT", 0.1, 1, "bybit:BTCUSDT")
+
+OIL_BYBIT_SYMBOL = OIL_DESK.symbol
+BTC_BYBIT_SYMBOL = BTC_DESK.symbol
+_TICK = OIL_DESK.tick
 
 
 def _bybit_interval(interval: str) -> str:
@@ -29,7 +44,7 @@ def _bybit_interval(interval: str) -> str:
     return BYBIT_INTERVAL.get(iv) or "1"
 
 
-def _parse_kline_row(row: list) -> OhlcvBar | None:
+def _parse_kline_row(row: list, source: str) -> OhlcvBar | None:
     if not row or len(row) < 6:
         return None
     try:
@@ -42,14 +57,15 @@ def _parse_kline_row(row: list) -> OhlcvBar | None:
             low=float(row[3]),
             close=close,
             volume=float(row[5] or 0),
-            source="bybit:CLUSDT",
+            source=source,
             data_quality=DataQuality.high,
         )
     except (TypeError, ValueError, IndexError):
         return None
 
 
-async def fetch_clusdt_klines(
+async def fetch_linear_klines(
+    desk: LinearDesk,
     interval: str,
     lookback: str = "1d",
     *,
@@ -68,7 +84,7 @@ async def fetch_clusdt_klines(
         for _ in range(16):
             params: dict[str, str | int] = {
                 "category": "linear",
-                "symbol": OIL_BYBIT_SYMBOL,
+                "symbol": desk.symbol,
                 "interval": iv,
                 "limit": 1000,
             }
@@ -76,14 +92,14 @@ async def fetch_clusdt_klines(
                 params["end"] = end
             resp = await client.get(_KLINE_URL, params=params)
             if resp.status_code != 200:
-                logger.warning("bybit kline http %s", resp.status_code)
+                logger.warning("bybit kline %s http %s", desk.symbol, resp.status_code)
                 break
             rows = ((resp.json().get("result") or {}).get("list") or [])
             if not rows:
                 break
             page: list[OhlcvBar] = []
             for row in rows:
-                bar = _parse_kline_row(row)
+                bar = _parse_kline_row(row, desk.source)
                 if bar is None:
                     continue
                 ts_ms = int(bar.ts.timestamp() * 1000)
@@ -115,14 +131,13 @@ def _levels(rows: list[list[float]], side: str) -> list[dict]:
     return out
 
 
-async def fetch_clusdt_orderbook(limit: int = 200) -> dict:
-    """Bybit linear L2 book for CLUSDT (public orderbook, max 500)."""
+async def fetch_linear_orderbook(desk: LinearDesk, limit: int = 200) -> dict:
     lim = max(1, min(int(limit), 500))
-    params = {"category": "linear", "symbol": OIL_BYBIT_SYMBOL, "limit": lim}
+    params = {"category": "linear", "symbol": desk.symbol, "limit": lim}
     async with httpx.AsyncClient(timeout=12.0, headers=_HEADERS) as client:
         resp = await client.get(_BOOK_URL, params=params)
         if resp.status_code != 200:
-            logger.warning("bybit orderbook http %s", resp.status_code)
+            logger.warning("bybit orderbook %s http %s", desk.symbol, resp.status_code)
             raise RuntimeError(f"Bybit orderbook HTTP {resp.status_code}")
         payload = resp.json()
     result = payload.get("result") or {}
@@ -143,8 +158,8 @@ async def fetch_clusdt_orderbook(limit: int = 200) -> dict:
         if best_bid:
             spread_pct = (spread / best_bid) * 100.0
     return {
-        "symbol": OIL_BYBIT_SYMBOL,
-        "tick": _TICK,
+        "symbol": desk.symbol,
+        "tick": desk.tick,
         "mid": mid,
         "best_bid": best_bid,
         "best_ask": best_ask,
@@ -168,14 +183,13 @@ async def fetch_clusdt_orderbook(limit: int = 200) -> dict:
     }
 
 
-async def fetch_clusdt_trades(limit: int = 80) -> dict:
-    """Bybit linear public prints for CLUSDT."""
+async def fetch_linear_trades(desk: LinearDesk, limit: int = 80) -> dict:
     lim = max(10, min(int(limit), 1000))
-    params = {"category": "linear", "symbol": OIL_BYBIT_SYMBOL, "limit": lim}
+    params = {"category": "linear", "symbol": desk.symbol, "limit": lim}
     async with httpx.AsyncClient(timeout=12.0, headers=_HEADERS) as client:
         resp = await client.get(_TRADES_URL, params=params)
         if resp.status_code != 200:
-            logger.warning("bybit trades http %s", resp.status_code)
+            logger.warning("bybit trades %s http %s", desk.symbol, resp.status_code)
             raise RuntimeError(f"Bybit trades HTTP {resp.status_code}")
         payload = resp.json()
     rows = ((payload.get("result") or {}).get("list") or [])
@@ -212,7 +226,7 @@ async def fetch_clusdt_trades(limit: int = 80) -> dict:
     trades.sort(key=lambda t: t["ts_ms"], reverse=True)
     buy_n = sum(1 for t in trades if t["side"] == "buy")
     return {
-        "symbol": OIL_BYBIT_SYMBOL,
+        "symbol": desk.symbol,
         "exchanges": ["bybit"],
         "execution_exchange": "bybit",
         "trades": trades[:lim],
@@ -225,11 +239,11 @@ async def fetch_clusdt_trades(limit: int = 80) -> dict:
     }
 
 
-async def fetch_clusdt_tail(interval: str, n: int = 8) -> list[OhlcvBar]:
+async def fetch_linear_tail(desk: LinearDesk, interval: str, n: int = 8) -> list[OhlcvBar]:
     iv = _bybit_interval(interval)
     params = {
         "category": "linear",
-        "symbol": OIL_BYBIT_SYMBOL,
+        "symbol": desk.symbol,
         "interval": iv,
         "limit": max(2, min(n, 200)),
     }
@@ -240,13 +254,13 @@ async def fetch_clusdt_tail(interval: str, n: int = 8) -> list[OhlcvBar]:
         rows = ((resp.json().get("result") or {}).get("list") or [])
     bars: list[OhlcvBar] = []
     for row in reversed(rows):
-        bar = _parse_kline_row(row)
+        bar = _parse_kline_row(row, desk.source)
         if bar:
             bars.append(bar)
     return bars
 
 
-async def iter_clusdt_klines(interval: str):
+async def iter_linear_klines(desk: LinearDesk, interval: str):
     """Yield live forming-candle updates from Bybit linear public websocket."""
     import websockets
 
@@ -255,8 +269,8 @@ async def iter_clusdt_klines(interval: str):
     if not bybit_iv:
         bybit_iv = "1"
         iv = "1m"
-    topic = f"kline.{bybit_iv}.{OIL_BYBIT_SYMBOL}"
-    logger.info("oil ws bybit linear → %s (%s)", _WS_URL, topic)
+    topic = f"kline.{bybit_iv}.{desk.symbol}"
+    logger.info("%s ws bybit linear → %s (%s)", desk.symbol, _WS_URL, topic)
     async with websockets.connect(_WS_URL, ping_interval=20, ping_timeout=20, max_queue=64) as ws:
         await ws.send(json.dumps({"op": "subscribe", "args": [topic]}))
         async for raw in ws:
@@ -268,5 +282,26 @@ async def iter_clusdt_klines(interval: str):
                 continue
             bar = parse_bybit_kline(data, iv)
             if bar:
-                bar["symbol"] = OIL_BYBIT_SYMBOL
+                bar["symbol"] = desk.symbol
                 yield bar
+
+
+async def fetch_clusdt_klines(interval: str, lookback: str = "1d", *, max_bars: int = 12_000) -> list[OhlcvBar]:
+    return await fetch_linear_klines(OIL_DESK, interval, lookback, max_bars=max_bars)
+
+
+async def fetch_clusdt_orderbook(limit: int = 200) -> dict:
+    return await fetch_linear_orderbook(OIL_DESK, limit=limit)
+
+
+async def fetch_clusdt_trades(limit: int = 80) -> dict:
+    return await fetch_linear_trades(OIL_DESK, limit=limit)
+
+
+async def fetch_clusdt_tail(interval: str, n: int = 8) -> list[OhlcvBar]:
+    return await fetch_linear_tail(OIL_DESK, interval, n=n)
+
+
+async def iter_clusdt_klines(interval: str):
+    async for bar in iter_linear_klines(OIL_DESK, interval):
+        yield bar

@@ -1084,6 +1084,151 @@ async def oil_ws_ohlcv(websocket: WebSocket, interval: str = "1m"):
         return
 
 
+def _desk_live_payload(bars, *, symbol: str, iv: str, source: str) -> dict:
+    last = bars[-1]
+    prev = bars[-2] if len(bars) > 1 else last
+    change_pct = ((last.close - prev.close) / prev.close * 100.0) if prev.close else None
+    return {
+        "symbol": symbol,
+        "interval": iv,
+        "price": last.close,
+        "change_pct": change_pct,
+        "as_of": last.ts.isoformat(),
+        "source": source,
+        "bar": {
+            "ts": last.ts.isoformat(),
+            "open": last.open,
+            "high": last.high,
+            "low": last.low,
+            "close": last.close,
+            "volume": last.volume,
+        },
+    }
+
+
+@router.get("/btc/chart")
+async def btc_chart(
+    lookback: str = "1d",
+    interval: str = "1m",
+    user: AuthUser = Depends(get_current_user),
+):
+    """BTC chart from Bybit linear BTCUSDT."""
+    from app.services.market_data import clamp_lookback, normalize_interval
+    from app.services.oil_bybit import BTC_DESK, fetch_linear_klines
+
+    allowed_lb = {"1d", "5d", "7d", "1mo", "3mo", "6mo", "1y", "2y", "5y"}
+    allowed_iv = {"1m", "5m", "15m", "30m", "1h", "4h", "1d", "1wk"}
+    iv = normalize_interval(interval)
+    if iv not in allowed_iv:
+        iv = "1m"
+    lb_raw = lookback if lookback in allowed_lb else "1d"
+    lb = clamp_lookback(iv, lb_raw)
+
+    bars = await fetch_linear_klines(BTC_DESK, iv, lookback=lb)
+    if not bars:
+        raise HTTPException(status_code=502, detail="Nepodařilo se načíst BTC")
+    return _oil_payload(
+        bars,
+        iv=iv,
+        lb=lb,
+        source=BTC_DESK.source,
+        symbol="BTC",
+        label="Bitcoin",
+        note="Bybit BTCUSDT — live linear perp.",
+    )
+
+
+@router.get("/btc/orderbook")
+async def btc_orderbook(
+    limit: int = 200,
+    user: AuthUser = Depends(get_current_user),
+):
+    from app.services.oil_bybit import BTC_DESK, fetch_linear_orderbook
+
+    try:
+        return await fetch_linear_orderbook(BTC_DESK, limit=limit)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Nepodařilo se načíst BTC L2: {exc}") from exc
+
+
+@router.get("/btc/trades")
+async def btc_trades(
+    limit: int = 80,
+    user: AuthUser = Depends(get_current_user),
+):
+    from app.services.oil_bybit import BTC_DESK, fetch_linear_trades
+
+    try:
+        return await fetch_linear_trades(BTC_DESK, limit=limit)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Nepodařilo se načíst BTC trady: {exc}") from exc
+
+
+@router.get("/btc/footprint")
+async def btc_footprint(
+    interval: str = "1m",
+    lookback: str = "1d",
+    user: AuthUser = Depends(get_current_user),
+):
+    from app.services.oil_footprint import snapshot_btc_footprint
+
+    return await snapshot_btc_footprint(interval, lookback)
+
+
+@router.get("/btc/live")
+async def btc_live(
+    interval: str = "1m",
+    user: AuthUser = Depends(get_current_user),
+):
+    from app.services.market_data import normalize_interval
+    from app.services.oil_bybit import BTC_DESK, fetch_linear_tail
+
+    allowed_iv = {"1m", "5m", "15m", "30m", "1h", "4h", "1d", "1wk"}
+    iv = normalize_interval(interval)
+    if iv not in allowed_iv:
+        iv = "1m"
+    bars = await fetch_linear_tail(BTC_DESK, iv, n=4)
+    if not bars:
+        raise HTTPException(status_code=502, detail="Nepodařilo se načíst BTC live")
+    return _desk_live_payload(bars, symbol="BTC", iv=iv, source=BTC_DESK.source)
+
+
+@router.websocket("/btc/ws/ohlcv")
+async def btc_ws_ohlcv(websocket: WebSocket, interval: str = "1m"):
+    """Realtime BTC candles from Bybit linear BTCUSDT public kline stream."""
+    from app.services.market_data import normalize_interval
+    from app.services.oil_bybit import BTC_DESK, iter_linear_klines
+
+    await websocket.accept()
+    allowed_iv = {"1m", "5m", "15m", "30m", "1h", "4h", "1d", "1wk"}
+    iv = normalize_interval(interval)
+    if iv not in allowed_iv:
+        iv = "1m"
+    await websocket.send_json(
+        {
+            "type": "hello",
+            "symbol": BTC_DESK.symbol,
+            "interval": iv,
+            "source": f"{BTC_DESK.source}:ws",
+        }
+    )
+    try:
+        while True:
+            try:
+                async for bar in iter_linear_klines(BTC_DESK, iv):
+                    await websocket.send_json(bar)
+            except WebSocketDisconnect:
+                raise
+            except Exception as exc:
+                try:
+                    await websocket.send_json({"type": "error", "detail": str(exc)[:200]})
+                except Exception:
+                    break
+                await asyncio.sleep(1.5)
+    except WebSocketDisconnect:
+        return
+
+
 @router.websocket("/crypto/ws/ohlcv")
 async def crypto_ws_ohlcv(websocket: WebSocket, symbol: str = "BTC/USDT", interval: str = "1m"):
     """Realtime aggregated candles (Binance + Bybit public kline streams)."""
