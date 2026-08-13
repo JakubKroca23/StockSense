@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { RiskProfile, UserSettings, riskLabel } from "@/lib/types";
 import { IconClose, IconSettings } from "@/components/NavIcons";
+import { getStoredTheme } from "@/lib/theme";
 
 type SystemStats = {
   as_of: string;
@@ -129,6 +130,7 @@ export function SettingsPanel({ open, onClose }: Props) {
           preferences: {
             ...(settings.preferences || {}),
             display_currency: currency,
+            theme: getStoredTheme(),
           },
         }),
       });

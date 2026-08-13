@@ -12,6 +12,7 @@ import {
   Time,
   createChart,
 } from "lightweight-charts";
+import { useThemeRevision } from "@/lib/theme";
 
 export type ChartBar = {
   ts: string;
@@ -174,6 +175,7 @@ export function PriceChart({
   const showHeatRef = useRef(showHeatmap);
   const heatOpacityRef = useRef(heatOpacity);
   const fill = height == null;
+  const themeRev = useThemeRevision();
 
   heatLevelsRef.current = heatmapLevels;
   showHeatRef.current = showHeatmap;
@@ -523,7 +525,7 @@ export function PriceChart({
       linesRef.current = [];
       themeRef.current = null;
     };
-  }, [height, fill, secondsVisible]);
+  }, [height, fill, secondsVisible, themeRev]);
 
   useEffect(() => {
     chartRef.current?.timeScale().applyOptions({

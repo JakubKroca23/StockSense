@@ -12,6 +12,7 @@ import {
   createChart,
 } from "lightweight-charts";
 import type { ChartBar } from "@/components/PriceChart";
+import { useThemeRevision } from "@/lib/theme";
 
 /** Flat band packing: t, vwap, u0618, l0618, u1618, l1618, u2618, l2618 */
 export type MidasAnchor = {
@@ -100,6 +101,7 @@ export function GoldVwapChart({
   const showRef = useRef(showMidas);
   const outerRef = useRef(showOuterBands);
   const fillRef = useRef(fillOpacity);
+  const themeRev = useThemeRevision();
 
   useEffect(() => {
     anchorsRef.current = anchors;
@@ -349,7 +351,7 @@ export function GoldVwapChart({
       volumeRef.current = null;
       themeRef.current = null;
     };
-  }, []);
+  }, [themeRev]);
 
   useEffect(() => {
     if (!seriesRef.current || !volumeRef.current || !chartRef.current) return;

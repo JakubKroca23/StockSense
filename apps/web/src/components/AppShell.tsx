@@ -8,16 +8,22 @@ import { SettingsPanel } from "@/components/SettingsPanel";
 import {
   IconClose,
   IconMenu,
+  IconMoon,
   IconSettings,
+  IconSun,
   NAV_ICON_SIZE,
   navIcons,
 } from "@/components/NavIcons";
+import { applyTheme, ColorMode, getStoredTheme } from "@/lib/theme";
 
 const links = [
   { href: "/", label: "Home" },
   { href: "/cryptosense", label: "Crypto" },
   { href: "/gold", label: "Gold" },
 ] as const;
+
+const RAIL_KEY = "stocksense-rail-collapsed";
+const DESKTOP_MQ = "(min-width: 768px)";
 
 function isActive(pathname: string, href: string) {
   return pathname === href || (href !== "/" && pathname.startsWith(href));
@@ -32,10 +38,10 @@ function NavLabel({
 }) {
   const Icon = navIcons[href];
   return (
-  <span className="nav-item">
-    <Icon size={NAV_ICON_SIZE} />
-    <span className="nav-item__label">{label}</span>
-  </span>
+    <span className="nav-item">
+      <Icon size={NAV_ICON_SIZE} />
+      <span className="nav-item__label">{label}</span>
+    </span>
   );
 }
 
@@ -56,10 +62,7 @@ function useLockPageZoom() {
       if (e.touches.length <= 1) return;
       if (isChartTouch(e.target)) return;
       for (let i = 0; i < e.touches.length; i++) {
-        const node = document.elementFromPoint(
-          e.touches[i].clientX,
-          e.touches[i].clientY
-        );
+        const node = document.elementFromPoint(e.touches[i].clientX, e.touches[i].clientY);
         if (isChartTouch(node)) return;
       }
       e.preventDefault();
@@ -82,9 +85,29 @@ function useLockPageZoom() {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [railCollapsed, setRailCollapsed] = useState(false);
+  const [desktop, setDesktop] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [theme, setTheme] = useState<ColorMode>(() => getStoredTheme());
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
   useLockPageZoom();
+
+  useEffect(() => {
+    applyTheme(getStoredTheme());
+    try {
+      setRailCollapsed(window.localStorage.getItem(RAIL_KEY) === "1");
+    } catch {
+      /* ignore */
+    }
+    const mq = window.matchMedia(DESKTOP_MQ);
+    const sync = () => {
+      setDesktop(mq.matches);
+      if (mq.matches) setMenuOpen(false);
+    };
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
 
   const activeLink = links.find((l) => isActive(pathname, l.href)) || links[0];
 
@@ -105,112 +128,146 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, [menuOpen]);
 
+  function toggleNav() {
+    setSettingsOpen(false);
+    if (window.matchMedia(DESKTOP_MQ).matches) {
+      setRailCollapsed((v) => {
+        const next = !v;
+        try {
+          window.localStorage.setItem(RAIL_KEY, next ? "1" : "0");
+        } catch {
+          /* ignore */
+        }
+        return next;
+      });
+      return;
+    }
+    setMenuOpen((v) => !v);
+  }
+
   return (
-      <div className={`app-shell min-h-screen pb-8 ${menuOpen ? "is-menu-open" : ""}`}>
-        <header className="app-header sticky top-0 z-40">
-          <div className="app-header__inner mx-auto grid max-w-6xl items-center gap-2 px-4 py-2">
-            <Link href="/" className="brand-logo app-no-drag shrink-0 justify-self-start" aria-label="StockSense">
-              <StockSenseLogo height={36} />
-            </Link>
-
-            <nav className="app-nav app-nav--desktop app-no-drag justify-self-center" aria-label="Hlavní navigace">
-              {links.map((l) => {
-                const active = isActive(pathname, l.href);
-                return (
-                  <Link
-                    key={l.href}
-                    href={l.href}
-                    className={`nav-link ${active ? "nav-link--active" : ""}`}
-                    aria-current={active ? "page" : undefined}
-                  >
-                    <NavLabel href={l.href} label={l.label} />
-                  </Link>
-                );
-              })}
-            </nav>
-
-            <p className="app-page-title app-no-drag" aria-current="page">
-              <NavLabel href={activeLink.href} label={activeLink.label} />
-            </p>
-
-            <div className="app-header__actions app-no-drag justify-self-end">
-              <button
-                type="button"
-                className={`header-menu-btn ${menuOpen ? "is-open" : ""}`}
-                aria-label={menuOpen ? "Zavřít menu" : "Otevřít menu"}
-                aria-expanded={menuOpen}
-                title="Menu"
-                onClick={() => {
-                  setSettingsOpen(false);
-                  setMenuOpen((v) => !v);
-                }}
-              >
-                {menuOpen ? <IconClose size={22} /> : <IconMenu size={22} />}
-              </button>
-              <button
-                type="button"
-                className={`settings-gear ${settingsOpen ? "settings-gear--active" : ""}`}
-                aria-label="Nastavení"
-                aria-expanded={settingsOpen}
-                title="Nastavení"
-                onClick={() => {
-                  setMenuOpen(false);
-                  setSettingsOpen((v) => !v);
-                }}
-              >
-                <IconSettings size={22} />
-              </button>
-            </div>
-          </div>
-        </header>
-
-        <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
-
-        {menuOpen && (
-          <div className="nav-sheet" role="dialog" aria-modal="true" aria-label="Menu">
+    <div
+      className={`app-shell min-h-screen pb-8 ${menuOpen ? "is-menu-open" : ""} ${
+        railCollapsed ? "is-rail-collapsed" : ""
+      }`}
+    >
+      <header className="app-header sticky top-0 z-40">
+        <div className="app-header__inner mx-auto grid max-w-6xl items-center gap-2 px-4 py-2">
+          <div className="app-header__brand app-no-drag">
             <button
               type="button"
-              className="nav-sheet__backdrop"
-              aria-label="Zavřít"
-              onClick={() => setMenuOpen(false)}
-            />
-            <div className="nav-sheet__panel">
-              <div className="nav-sheet__handle" aria-hidden />
-              <p className="nav-sheet__title">Menu</p>
-              <nav className="nav-sheet__nav" aria-label="Mobilní navigace">
-                {links.map((l) => {
-                  const active = isActive(pathname, l.href);
-                  return (
-                    <Link
-                      key={l.href}
-                      href={l.href}
-                      className={`nav-sheet__link ${active ? "is-active" : ""}`}
-                      aria-current={active ? "page" : undefined}
-                      onClick={() => setMenuOpen(false)}
-                    >
-                      <NavLabel href={l.href} label={l.label} />
-                    </Link>
-                  );
-                })}
-                <button
-                  type="button"
-                  className={`nav-sheet__link ${settingsOpen ? "is-active" : ""}`}
-                  onClick={() => {
-                    setMenuOpen(false);
-                    setSettingsOpen(true);
-                  }}
-                >
-                  <span className="nav-item">
-                    <IconSettings size={NAV_ICON_SIZE} />
-                    <span className="nav-item__label">Nastavení</span>
-                  </span>
-                </button>
-              </nav>
-            </div>
+              className={`header-menu-btn ${menuOpen ? "is-open" : ""}`}
+              aria-label={
+                desktop
+                  ? railCollapsed
+                    ? "Rozbalit menu"
+                    : "Sbalit menu"
+                  : menuOpen
+                    ? "Zavřít menu"
+                    : "Otevřít menu"
+              }
+              aria-expanded={desktop ? !railCollapsed : menuOpen}
+              title="Menu"
+              onClick={toggleNav}
+            >
+              {menuOpen ? <IconClose size={22} /> : <IconMenu size={22} />}
+            </button>
+            <Link href="/" className="brand-logo shrink-0" aria-label="StockSense">
+              <StockSenseLogo height={36} />
+            </Link>
           </div>
-        )}
 
-        <SettingsPanel open={settingsOpen} onClose={closeSettings} />
-      </div>
+          <p className="app-page-title app-no-drag" aria-current="page">
+            <NavLabel href={activeLink.href} label={activeLink.label} />
+          </p>
+
+          <div className="app-header__actions app-no-drag justify-self-end">
+            <button
+              type="button"
+              className="theme-toggle"
+              aria-label={theme === "light" ? "Přepnout na tmavý režim" : "Přepnout na světlý režim"}
+              title={theme === "light" ? "Tmavý režim" : "Světlý režim"}
+              onClick={() => {
+                const next = theme === "light" ? "dark" : "light";
+                setTheme(next);
+                applyTheme(next);
+              }}
+            >
+              {theme === "light" ? <IconMoon size={22} /> : <IconSun size={22} />}
+            </button>
+            <button
+              type="button"
+              className={`settings-gear ${settingsOpen ? "settings-gear--active" : ""}`}
+              aria-label="Nastavení"
+              aria-expanded={settingsOpen}
+              title="Nastavení"
+              onClick={() => {
+                setMenuOpen(false);
+                setSettingsOpen((v) => !v);
+              }}
+            >
+              <IconSettings size={22} />
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <aside className="app-rail" aria-label="Hlavní navigace">
+        <button
+          type="button"
+          className="app-rail__backdrop"
+          aria-label="Zavřít"
+          onClick={() => setMenuOpen(false)}
+        />
+        <div className="app-rail__panel">
+          <div className="app-rail__head">
+            <p className="app-rail__title">Menu</p>
+            <button
+              type="button"
+              className="app-rail__close"
+              aria-label="Zavřít menu"
+              onClick={() => setMenuOpen(false)}
+            >
+              <IconClose size={18} />
+            </button>
+          </div>
+          <nav className="app-rail__nav">
+            {links.map((l) => {
+              const active = isActive(pathname, l.href);
+              return (
+                <Link
+                  key={l.href}
+                  href={l.href}
+                  className={`app-rail__link ${active ? "is-active" : ""}`}
+                  aria-current={active ? "page" : undefined}
+                  title={l.label}
+                  onClick={() => setMenuOpen(false)}
+                >
+                  <NavLabel href={l.href} label={l.label} />
+                </Link>
+              );
+            })}
+            <button
+              type="button"
+              className={`app-rail__link app-rail__link--settings ${settingsOpen ? "is-active" : ""}`}
+              title="Nastavení"
+              onClick={() => {
+                setMenuOpen(false);
+                setSettingsOpen(true);
+              }}
+            >
+              <span className="nav-item">
+                <IconSettings size={NAV_ICON_SIZE} />
+                <span className="nav-item__label">Nastavení</span>
+              </span>
+            </button>
+          </nav>
+        </div>
+      </aside>
+
+      <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+
+      <SettingsPanel open={settingsOpen} onClose={closeSettings} />
+    </div>
   );
 }

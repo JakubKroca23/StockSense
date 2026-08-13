@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import { Caveat_Brush, IBM_Plex_Sans, Source_Serif_4, Space_Grotesk } from "next/font/google";
 import { AppShell } from "@/components/AppShell";
 import "./globals.css";
@@ -59,10 +60,17 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="cs">
+    <html lang="cs" suppressHydrationWarning>
       <body
         className={`${body.variable} ${display.variable} ${brand.variable} ${logoHand.variable} antialiased`}
       >
+        <Script
+          id="theme-boot"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem("stocksense-theme");if(t==="light"||t==="dark"){document.documentElement.setAttribute("data-theme",t);document.documentElement.style.colorScheme=t;}}catch(e){}})();`,
+          }}
+        />
         <style>{`
           :root {
             --font-body: var(--font-body-loaded), "IBM Plex Sans", sans-serif;
@@ -73,17 +81,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           }
         `}</style>
         <AppShell>{children}</AppShell>
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              if ('serviceWorker' in navigator) {
-                window.addEventListener('load', () => {
-                  navigator.serviceWorker.register('/sw.js').catch(() => {});
-                });
-              }
-            `,
-          }}
-        />
+        <Script id="sw-register" strategy="afterInteractive">
+          {`if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js').catch(function(){}); }`}
+        </Script>
       </body>
     </html>
   );

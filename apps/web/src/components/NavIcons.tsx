@@ -123,6 +123,23 @@ export function IconClose({ size = NAV_ICON_SIZE, className = "" }: IconProps) {
   );
 }
 
+export function IconSun(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="12" cy="12" r="3.6" />
+      <path d="M12 3.2v1.8M12 19v1.8M4.9 4.9l1.3 1.3M17.8 17.8l1.3 1.3M3.2 12h1.8M19 12h1.8M4.9 19.1l1.3-1.3M17.8 6.2l1.3-1.3" />
+    </Svg>
+  );
+}
+
+export function IconMoon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M16.4 13.6A6.2 6.2 0 0 1 10.2 5.2 6.4 6.4 0 1 0 18.8 14a6.1 6.1 0 0 1-2.4-.4Z" />
+    </Svg>
+  );
+}
+
 export const navIcons = {
   "/": IconHome,
   "/cryptosense": IconCrypto,
