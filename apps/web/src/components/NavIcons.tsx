@@ -4,7 +4,8 @@ import type { ReactNode } from "react";
 type IconProps = { size?: number; className?: string };
 
 /** Default size matches Analýza eye width */
-export const NAV_ICON_SIZE = 20;
+export const NAV_ICON_SIZE = 22;
+export const RAIL_ICON_SIZE = 28;
 
 function Svg({
   size = NAV_ICON_SIZE,
@@ -18,7 +19,7 @@ function Svg({
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.85"
+      strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
       className={`nav-item__icon ${className}`}
@@ -29,12 +30,13 @@ function Svg({
   );
 }
 
-/** Home — trh / denní přehled */
+/** Home — dům / přehled */
 export function IconHome(p: IconProps) {
   return (
     <Svg {...p}>
-      <path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5Z" />
-      <path d="M8.5 14.5h3M13 12.2l1.6 2.3H17" />
+      <path d="M3.5 11.2 12 3.8l8.5 7.4" />
+      <path d="M6 10.6V20h12V10.6" />
+      <path d="M10 20v-5.2h4V20" />
     </Svg>
   );
 }
@@ -67,23 +69,36 @@ export function IconTips(p: IconProps) {
   );
 }
 
-/** CryptoSense — mince / crypto */
+/** CryptoSense — mince s Bitcoin symbolem */
 export function IconCrypto(p: IconProps) {
   return (
     <Svg {...p}>
-      <circle cx="12" cy="12" r="8.2" />
-      <path d="M12 7.2v9.6M9.2 9.2c.7-.55 1.55-.85 2.8-.85 1.7 0 2.85.7 2.85 1.95S13.7 12.2 12 12.2 9.15 12.85 9.15 14.1c0 1.25 1.2 2 2.95 2 1.25 0 2.15-.35 2.8-.95" />
+      <circle cx="12" cy="12" r="8.4" />
+      <path d="M10.8 6.4v1.5M13.5 6.4v1.5M10.8 16.1v1.5M13.5 16.1v1.5" />
+      <path d="M9.4 8.15h3.55c1.72 0 2.8.88 2.8 2.18 0 1.18-.82 1.95-2.22 2.18" />
+      <path d="M9.4 12.5h4.25c1.88 0 3 .95 3 2.28 0 1.42-1.22 2.28-3.18 2.28H9.4" />
+      <path d="M9.4 8.15v9" />
     </Svg>
   );
 }
 
-/** Gold — ingot / kov */
+/** Gold — slitek / hromada cihel */
 export function IconGold(p: IconProps) {
   return (
     <Svg {...p}>
-      <path d="M4.5 16.5 7.2 8.5h9.6l2.7 8H4.5Z" />
-      <path d="M7.2 8.5 9 5.5h6l1.8 3" />
-      <path d="M6.2 13h11.6" />
+      <path d="M6.2 9.2 8 6.4h8l1.8 2.8H6.2Z" />
+      <path d="M4.8 13.4 6.8 10.6h10.4l2 2.8H4.8Z" />
+      <path d="M3.4 18.2 5.6 15h12.8l2.2 3.2H3.4Z" />
+    </Svg>
+  );
+}
+
+/** Oil — kapka WTI */
+export function IconOil(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M12 3.2s-6.2 7.1-6.2 11.1A6.2 6.2 0 0 0 12 20.5a6.2 6.2 0 0 0 6.2-6.2C18.2 10.3 12 3.2 12 3.2Z" />
+      <path d="M10.2 14.6c.45 1.35 1.55 2 2.7 2" />
     </Svg>
   );
 }
@@ -144,4 +159,5 @@ export const navIcons = {
   "/": IconHome,
   "/cryptosense": IconCrypto,
   "/gold": IconGold,
+  "/oil": IconOil,
 } as const;

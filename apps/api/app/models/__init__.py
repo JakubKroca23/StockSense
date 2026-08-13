@@ -32,26 +32,6 @@ class AssetClass(str, enum.Enum):
     other = "other"
 
 
-class TipAction(str, enum.Enum):
-    long = "long"
-    short = "short"
-    hold = "hold"
-    sell = "sell"
-
-
-class TipHorizon(str, enum.Enum):
-    intraday = "intraday"
-    swing = "swing"
-    position = "position"
-    long_term = "long_term"
-
-
-class RiskProfile(str, enum.Enum):
-    conservative = "conservative"
-    balanced = "balanced"
-    aggressive = "aggressive"
-
-
 class DataQuality(str, enum.Enum):
     high = "high"
     medium = "medium"
@@ -60,28 +40,10 @@ class DataQuality(str, enum.Enum):
     unavailable = "unavailable"
 
 
-class FeedbackResult(str, enum.Enum):
-    hit = "hit"
-    miss = "miss"
-    partial = "partial"
-
-
-class CloseReason(str, enum.Enum):
-    """Why a tip was closed — distinguishes TP vs SL from other exits."""
-
-    stop = "stop"
-    target_1 = "target_1"
-    target_2 = "target_2"
-    ttl = "ttl"
-    score_flip = "score_flip"
-    manual = "manual"
-
-
-class TipStatus(str, enum.Enum):
-    proposed = "proposed"
-    accepted = "accepted"
-    rejected = "rejected"
-    closed = "closed"
+class RiskProfile(str, enum.Enum):
+    conservative = "conservative"
+    balanced = "balanced"
+    aggressive = "aggressive"
 
 
 class Instrument(Base):
@@ -98,7 +60,6 @@ class Instrument(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     prices: Mapped[list["PriceBar"]] = relationship(back_populates="instrument")
-    tips: Mapped[list["Tip"]] = relationship(back_populates="instrument")
 
 
 class PriceBar(Base):
@@ -122,6 +83,30 @@ class PriceBar(Base):
     as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     instrument: Mapped[Instrument] = relationship(back_populates="prices")
+
+
+class FootprintBar(Base):
+    """Persisted 1m volume-at-price (Bybit CLUSDT public trades)."""
+
+    __tablename__ = "footprint_bars"
+    __table_args__ = (
+        UniqueConstraint("instrument_id", "interval", "ts", name="uq_footprint_bar"),
+        Index("ix_footprint_bars_lookup", "instrument_id", "interval", "ts"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id", ondelete="CASCADE"))
+    interval: Mapped[str] = mapped_column(String(16), default="1m")
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    open: Mapped[float] = mapped_column(Float)
+    high: Mapped[float] = mapped_column(Float)
+    low: Mapped[float] = mapped_column(Float)
+    close: Mapped[float] = mapped_column(Float)
+    volume: Mapped[float] = mapped_column(Float, default=0.0)
+    delta: Mapped[float] = mapped_column(Float, default=0.0)
+    poc: Mapped[float | None] = mapped_column(Float, nullable=True)
+    levels: Mapped[list] = mapped_column(JSONB, default=list)
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Watchlist(Base):
@@ -170,55 +155,6 @@ class PortfolioPosition(Base):
     instrument: Mapped[Instrument] = relationship()
 
 
-class Tip(Base):
-    __tablename__ = "tips"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[str] = mapped_column(String(64), index=True)
-    instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id", ondelete="CASCADE"))
-    action: Mapped[TipAction] = mapped_column(Enum(TipAction))
-    horizon: Mapped[TipHorizon] = mapped_column(Enum(TipHorizon))
-    entry_low: Mapped[float | None] = mapped_column(Float, nullable=True)
-    entry_high: Mapped[float | None] = mapped_column(Float, nullable=True)
-    stop: Mapped[float | None] = mapped_column(Float, nullable=True)
-    target_1: Mapped[float | None] = mapped_column(Float, nullable=True)
-    target_2: Mapped[float | None] = mapped_column(Float, nullable=True)
-    score: Mapped[float] = mapped_column(Float, default=0.0)
-    confidence: Mapped[float] = mapped_column(Float, default=0.0)
-    scenario_bull: Mapped[str | None] = mapped_column(Text, nullable=True)
-    scenario_base: Mapped[str | None] = mapped_column(Text, nullable=True)
-    scenario_bear: Mapped[str | None] = mapped_column(Text, nullable=True)
-    rationale: Mapped[dict] = mapped_column(JSONB, default=dict)
-    risks: Mapped[str | None] = mapped_column(Text, nullable=True)
-    narrative_cs: Mapped[str | None] = mapped_column(Text, nullable=True)
-    entry_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    data_quality: Mapped[DataQuality] = mapped_column(Enum(DataQuality), default=DataQuality.medium)
-    risk_profile: Mapped[RiskProfile] = mapped_column(Enum(RiskProfile), default=RiskProfile.balanced)
-    suggested_size_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    status: Mapped[str] = mapped_column(String(32), default=TipStatus.proposed.value, index=True)
-    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-    instrument: Mapped[Instrument] = relationship(back_populates="tips")
-    feedback: Mapped["TipFeedback | None"] = relationship(back_populates="tip", uselist=False)
-
-
-class TipFeedback(Base):
-    __tablename__ = "tip_feedback"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    tip_id: Mapped[int] = mapped_column(ForeignKey("tips.id", ondelete="CASCADE"), unique=True)
-    user_id: Mapped[str] = mapped_column(String(64), index=True)
-    result: Mapped[FeedbackResult] = mapped_column(Enum(FeedbackResult))
-    close_reason: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
-    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-    tip: Mapped[Tip] = relationship(back_populates="feedback")
-
-
 class UserSettings(Base):
     __tablename__ = "user_settings"
 
@@ -234,18 +170,6 @@ class UserSettings(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
-
-
-class Report(Base):
-    __tablename__ = "reports"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[str] = mapped_column(String(64), index=True)
-    kind: Mapped[str] = mapped_column(String(32), default="daily")  # daily | weekly
-    title: Mapped[str] = mapped_column(String(255))
-    content_md: Mapped[str] = mapped_column(Text)
-    meta: Mapped[dict] = mapped_column(JSONB, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Alert(Base):

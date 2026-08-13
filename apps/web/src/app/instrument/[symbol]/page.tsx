@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { PriceChart, ChartBar, ChartLevel } from "@/components/PriceChart";
 import { DataQualityBadge } from "@/components/DataQualityBadge";
-import { PortfolioPosition, Tip, TipStatus, actionLabel, horizonLabel, tipStatusLabel } from "@/lib/types";
+import { PortfolioPosition } from "@/lib/types";
 
 interface Detail {
   instrument: { symbol: string; name: string; asset_class: string; currency?: string };
@@ -21,18 +21,6 @@ interface Detail {
   filings: { form: string; filing_date: string; url?: string | null }[];
   headlines?: { title: string; publisher?: string; link?: string; published?: string }[];
   macro?: { series_id: string; name: string; value: number; as_of?: string }[];
-  analysis?: {
-    action: string;
-    horizon: string;
-    score: number;
-    confidence: number;
-    components?: Record<string, number>;
-    features?: Record<string, number | string | null>;
-    notes?: Record<string, string[]>;
-    scenarios?: { bull: string; base: string; bear: string };
-    levels?: Record<string, number | null>;
-  } | null;
-  tip: Tip | null;
   interval?: string;
   lookback?: string;
 }
@@ -128,11 +116,9 @@ export default function InstrumentPage() {
   const symbol = decodeURIComponent(params.symbol);
   const [data, setData] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [feedbackBusy, setFeedbackBusy] = useState(false);
   const [timeframe, setTimeframe] = useState<string>("1d");
   const [lookback, setLookback] = useState<string>("6mo");
   const [chartBusy, setChartBusy] = useState(false);
-  const [actionMsg, setActionMsg] = useState<string | null>(null);
 
   const load = useCallback(
     async (iv: string, lb: string) => {
@@ -165,34 +151,6 @@ export default function InstrumentPage() {
     setLookback(nextLb);
   }
 
-  async function sendFeedback(result: "hit" | "miss" | "partial") {
-    if (!data?.tip) return;
-    setFeedbackBusy(true);
-    try {
-      await apiFetch(`/tips/${data.tip.id}/feedback`, {
-        method: "POST",
-        body: JSON.stringify({ result }),
-      });
-      await load(timeframe, lookback);
-    } finally {
-      setFeedbackBusy(false);
-    }
-  }
-
-  async function setTipLifecycle(status: TipStatus, result?: "hit" | "miss" | "partial") {
-    if (!data?.tip) return;
-    setFeedbackBusy(true);
-    try {
-      await apiFetch(`/tips/${data.tip.id}/lifecycle`, {
-        method: "POST",
-        body: JSON.stringify({ status, result: result || null }),
-      });
-      await load(timeframe, lookback);
-    } finally {
-      setFeedbackBusy(false);
-    }
-  }
-
   const positions = data?.positions ?? [];
   const chartLevels = useMemo((): ChartLevel[] => {
     const levels: ChartLevel[] = [];
@@ -211,20 +169,8 @@ export default function InstrumentPage() {
         style: "dashed",
       });
     });
-    const tip = data?.tip;
-    if (tip?.stop != null && Number(tip.stop) > 0) {
-      levels.push({ price: Number(tip.stop), title: "Stop", color: "#ff6b7a", style: "dotted" });
-    }
-    if (tip?.target_1 != null && Number(tip.target_1) > 0) {
-      levels.push({
-        price: Number(tip.target_1),
-        title: "Cíl",
-        color: "#5dde8a",
-        style: "dotted",
-      });
-    }
     return levels;
-  }, [positions, data?.tip]);
+  }, [positions]);
 
   if (error && !data) return <div className="card p-4 text-[var(--danger)]">{error}</div>;
   if (!data) return <div className="muted">Načítám {symbol}…</div>;
@@ -285,87 +231,7 @@ export default function InstrumentPage() {
         <div className="instrument-chart__stage">
           <PriceChart bars={data.bars} levels={chartLevels} showMa />
         </div>
-        {data.analysis?.features && (
-          <div className="instrument-chart__stats">
-            {data.analysis.features.rsi != null && (
-              <span>RSI {Number(data.analysis.features.rsi).toFixed(0)}</span>
-            )}
-            {data.analysis.features.atr != null && (
-              <span>ATR {Number(data.analysis.features.atr).toFixed(2)}</span>
-            )}
-            {data.analysis.features.rs_vs_bench != null && (
-              <span>
-                RS{" "}
-                {Number(data.analysis.features.rs_vs_bench) >= 0 ? "+" : ""}
-                {(Number(data.analysis.features.rs_vs_bench) * 100).toFixed(1)}%
-              </span>
-            )}
-            {data.analysis.features.vol_ratio != null && (
-              <span>Vol {Number(data.analysis.features.vol_ratio).toFixed(1)}×</span>
-            )}
-            <span className="muted">SMA20 · SMA50</span>
-          </div>
-        )}
       </section>
-
-      {data.analysis && (
-        <section className="card p-4 space-y-3">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h2 className="display text-xl">Analýza</h2>
-            <div className="flex flex-wrap gap-2 text-sm">
-              <span className="badge">{actionLabel[data.analysis.action as Tip["action"]] || data.analysis.action}</span>
-              <span className="badge">
-                {horizonLabel[data.analysis.horizon as Tip["horizon"]] || data.analysis.horizon}
-              </span>
-              <span className="font-semibold tabular-nums">
-                Score {data.analysis.score} · {(data.analysis.confidence * 100).toFixed(0)}%
-              </span>
-            </div>
-          </div>
-          {data.analysis.components && (
-            <div className="score-bars">
-              {Object.entries(data.analysis.components).map(([k, v]) => (
-                <div key={k} className="score-bars__row">
-                  <span className="muted text-xs">{k}</span>
-                  <div className="score-bars__track">
-                    <div
-                      className={`score-bars__fill ${v >= 0 ? "is-pos" : "is-neg"}`}
-                      style={{ width: `${Math.min(100, Math.abs(v) * 100)}%` }}
-                    />
-                  </div>
-                  <span className="tabular-nums text-xs">{v.toFixed(2)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-          {data.analysis.notes && (
-            <ul className="text-sm space-y-1 muted">
-              {Object.values(data.analysis.notes)
-                .flat()
-                .slice(0, 8)
-                .map((n, i) => (
-                  <li key={`${n}-${i}`}>· {n}</li>
-                ))}
-            </ul>
-          )}
-          {data.analysis.scenarios && (
-            <div className="grid sm:grid-cols-3 gap-2 text-sm">
-              <div className="rounded-xl border border-[var(--line)] p-3">
-                <div className="text-xs text-[var(--ok)] mb-1">Bull</div>
-                {data.analysis.scenarios.bull}
-              </div>
-              <div className="rounded-xl border border-[var(--line)] p-3">
-                <div className="text-xs muted mb-1">Base</div>
-                {data.analysis.scenarios.base}
-              </div>
-              <div className="rounded-xl border border-[var(--line)] p-3">
-                <div className="text-xs text-[var(--danger)] mb-1">Bear</div>
-                {data.analysis.scenarios.bear}
-              </div>
-            </div>
-          )}
-        </section>
-      )}
 
       {data.macro && data.macro.length > 0 && (
         <section className="card p-3">
@@ -380,190 +246,6 @@ export default function InstrumentPage() {
         </section>
       )}
 
-      {data.tip && (
-        <section className="card p-5 space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="display text-2xl">Aktivní tip</h2>
-            <span className={`badge ${data.tip.action}`}>{actionLabel[data.tip.action]}</span>
-            <span className="badge">{horizonLabel[data.tip.horizon]}</span>
-            <span className="badge">
-              {tipStatusLabel[data.tip.status || "proposed"] || data.tip.status}
-            </span>
-          </div>
-          <p className="text-sm">
-            Score {data.tip.score} · confidence {(data.tip.confidence * 100).toFixed(0)}%
-          </p>
-          {data.tip.narrative_cs && <p className="leading-relaxed">{data.tip.narrative_cs}</p>}
-          <div className="grid sm:grid-cols-3 gap-3 text-sm">
-            <div className="card p-3">Bull: {data.tip.scenario_bull}</div>
-            <div className="card p-3">Base: {data.tip.scenario_base}</div>
-            <div className="card p-3">Bear: {data.tip.scenario_bear}</div>
-          </div>
-          {data.tip.rationale && typeof data.tip.rationale === "object" && (
-            <div className="text-sm space-y-1">
-              {(["fundament", "money_flow", "technicka", "makro"] as const).map((key) => {
-                const notes = (data.tip!.rationale as Record<string, unknown>)[key];
-                if (!Array.isArray(notes) || !notes.length) return null;
-                return (
-                  <p key={key} className="muted">
-                    <span className="text-[var(--text)]">{key}: </span>
-                    {notes.join(" · ")}
-                  </p>
-                );
-              })}
-            </div>
-          )}
-          <p className="text-sm text-[var(--warn)]">{data.tip.risks}</p>
-          {(data.tip.entry_notes || data.tip.feedback?.notes) && (
-            <div className="text-sm muted space-y-1">
-              {data.tip.entry_notes && <p>Vstup: {data.tip.entry_notes}</p>}
-              {data.tip.feedback?.notes && <p>Výstup: {data.tip.feedback.notes}</p>}
-            </div>
-          )}
-          <div className="tip-journal space-y-2">
-            <label className="block space-y-1">
-              <span className="text-xs muted">Journal — proč vstupuji</span>
-              <textarea
-                className="input"
-                defaultValue={data.tip.entry_notes || ""}
-                id="tip-entry-notes"
-                placeholder="Krátký zápis k vstupu…"
-              />
-            </label>
-            <label className="block space-y-1">
-              <span className="text-xs muted">Journal — proč vycházím</span>
-              <textarea
-                className="input"
-                defaultValue={data.tip.feedback?.notes || ""}
-                id="tip-exit-notes"
-                placeholder="Krátký zápis k výstupu…"
-              />
-            </label>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              className="btn"
-              disabled={feedbackBusy}
-              onClick={async () => {
-                if (!data.tip) return;
-                const entry = (document.getElementById("tip-entry-notes") as HTMLTextAreaElement)?.value || "";
-                const exit = (document.getElementById("tip-exit-notes") as HTMLTextAreaElement)?.value || "";
-                setFeedbackBusy(true);
-                try {
-                  await apiFetch(`/tips/${data.tip.id}/journal`, {
-                    method: "PATCH",
-                    body: JSON.stringify({
-                      entry_notes: entry,
-                      exit_notes: exit || null,
-                      result: data.tip.feedback?.result || (exit ? "partial" : null),
-                    }),
-                  });
-                  await load(timeframe, lookback);
-                } finally {
-                  setFeedbackBusy(false);
-                }
-              }}
-            >
-              Uložit journal
-            </button>
-            {(data.tip.status || "proposed") === "proposed" && (
-              <>
-                <button
-                  className="btn btn-primary"
-                  disabled={feedbackBusy}
-                  onClick={() => {
-                    const entry = (document.getElementById("tip-entry-notes") as HTMLTextAreaElement)?.value;
-                    void setTipLifecycle("accepted").then(() => {
-                      if (entry) {
-                        void apiFetch(`/tips/${data.tip!.id}/journal`, {
-                          method: "PATCH",
-                          body: JSON.stringify({ entry_notes: entry }),
-                        }).then(() => load(timeframe, lookback));
-                      }
-                    });
-                  }}
-                >
-                  Přijmout
-                </button>
-                <button
-                  className="btn"
-                  disabled={feedbackBusy}
-                  onClick={() => setTipLifecycle("rejected")}
-                >
-                  Odmítnout
-                </button>
-              </>
-            )}
-            <button
-              className="btn btn-primary"
-              disabled={feedbackBusy}
-              onClick={async () => {
-                if (!data.tip) return;
-                setFeedbackBusy(true);
-                try {
-                  const res = await apiFetch<{
-                    preview: { quantity: number; avg_cost: number; size_pct: number };
-                  }>(`/tips/${data.tip.id}/paper-position`, { method: "POST" });
-                  setActionMsg(
-                    `Paper: ${res.preview.quantity} @ ${res.preview.avg_cost} (${res.preview.size_pct}%)`
-                  );
-                  await load(timeframe, lookback);
-                } catch (err) {
-                  setActionMsg(err instanceof Error ? err.message : "Paper selhal");
-                } finally {
-                  setFeedbackBusy(false);
-                }
-              }}
-            >
-              Přidat paper pozici
-            </button>
-            <button
-              className="btn"
-              disabled={feedbackBusy}
-              onClick={() => {
-                const exit = (document.getElementById("tip-exit-notes") as HTMLTextAreaElement)?.value;
-                void apiFetch(`/tips/${data.tip!.id}/feedback`, {
-                  method: "POST",
-                  body: JSON.stringify({ result: "hit", notes: exit || null }),
-                }).then(() => load(timeframe, lookback));
-              }}
-            >
-              Tip vyšel
-            </button>
-            <button
-              className="btn"
-              disabled={feedbackBusy}
-              onClick={() => {
-                const exit = (document.getElementById("tip-exit-notes") as HTMLTextAreaElement)?.value;
-                void apiFetch(`/tips/${data.tip!.id}/feedback`, {
-                  method: "POST",
-                  body: JSON.stringify({ result: "partial", notes: exit || null }),
-                }).then(() => load(timeframe, lookback));
-              }}
-            >
-              Částečně
-            </button>
-            <button
-              className="btn"
-              disabled={feedbackBusy}
-              onClick={() => {
-                const exit = (document.getElementById("tip-exit-notes") as HTMLTextAreaElement)?.value;
-                void apiFetch(`/tips/${data.tip!.id}/feedback`, {
-                  method: "POST",
-                  body: JSON.stringify({ result: "miss", notes: exit || null }),
-                }).then(() => load(timeframe, lookback));
-              }}
-            >
-              Nevyšel
-            </button>
-            {data.tip.feedback && (
-              <span className="badge">uloženo: {data.tip.feedback.result}</span>
-            )}
-            <DataQualityBadge quality={data.tip.data_quality} />
-          </div>
-          {actionMsg && <p className="muted text-sm">{actionMsg}</p>}
-        </section>
-      )}
 
       <section className="card p-4">
         <h2 className="display text-xl mb-3">Fundament</h2>

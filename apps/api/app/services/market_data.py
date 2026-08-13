@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Protocol
+from urllib.parse import quote as quote_path
 
 import httpx
 import pandas as pd
@@ -99,13 +100,17 @@ def _ensure_aware(ts: datetime) -> datetime:
 def normalize_interval(interval: str) -> str:
     raw = (interval or "1d").lower().strip()
     aliases = {
+        "5min": "5m",
         "15min": "15m",
+        "30min": "30m",
         "60m": "1h",
         "60min": "1h",
         "1hour": "1h",
         "4hour": "4h",
+        "d": "1d",
         "1day": "1d",
         "day": "1d",
+        "w": "1wk",
         "1w": "1wk",
         "1week": "1wk",
         "week": "1wk",
@@ -117,7 +122,10 @@ def clamp_lookback(interval: str, lookback: str) -> str:
     """Yahoo/yfinance reject long ranges for intraday intervals."""
     iv = normalize_interval(interval)
     allowed = {
+        "1m": ("1d", "5d", "7d"),
+        "5m": ("5d", "1mo"),
         "15m": ("5d", "1mo"),
+        "30m": ("5d", "1mo"),
         "1h": ("5d", "1mo", "3mo", "6mo"),
         "4h": ("1mo", "3mo", "6mo", "1y"),
         "1d": ("5d", "1mo", "3mo", "6mo", "1y", "2y", "5y"),
@@ -388,7 +396,9 @@ class YahooChartProvider:
         iv = normalize_interval(interval)
         lb = clamp_lookback(iv, lookback)
         range_map = {
+            "1d": "1d",
             "5d": "5d",
+            "7d": "7d",
             "1mo": "1mo",
             "3mo": "3mo",
             "6mo": "6mo",
@@ -398,8 +408,17 @@ class YahooChartProvider:
         }
         rng = range_map.get(lb, "6mo")
         # Yahoo has no native 4h — pull 60m and aggregate.
-        yahoo_iv = {"15m": "15m", "1h": "60m", "4h": "60m", "1d": "1d", "1wk": "1wk"}.get(iv, "1d")
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+        yahoo_iv = {
+            "1m": "1m",
+            "5m": "5m",
+            "15m": "15m",
+            "30m": "30m",
+            "1h": "60m",
+            "4h": "60m",
+            "1d": "1d",
+            "1wk": "1wk",
+        }.get(iv, "1d")
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{quote_path(symbol, safe='')}"
         params = {"range": rng, "interval": yahoo_iv}
         headers = {"User-Agent": "Mozilla/5.0 StockSense/1.0"}
         async with httpx.AsyncClient(timeout=30.0, headers=headers) as client:

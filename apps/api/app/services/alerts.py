@@ -16,23 +16,14 @@ logger = logging.getLogger(__name__)
 
 # Preference keys under UserSettings.preferences
 DEFAULT_ALERT_KINDS = {
-    "new_tip": True,
-    "daily_report": True,
     "price_stop": True,
     "price_target": True,
     "price_rule": True,
-    "tip_invalidated": True,
 }
 
 
 def normalize_alert_kind(kind: str) -> str:
     """Map concrete alert kind → preference bucket."""
-    if kind == "new_tip":
-        return "new_tip"
-    if kind == "daily_report":
-        return "daily_report"
-    if kind == "tip_invalidated":
-        return "tip_invalidated"
     if kind.startswith("price_stop") or kind == "price_stop":
         return "price_stop"
     if kind.startswith("price_target") or kind in ("price_target_1", "price_target_2"):
@@ -79,11 +70,9 @@ def _in_quiet_hours(prefs: dict | None, now: datetime | None = None) -> bool:
 
 def _push_url_for_kind(kind: str, payload: dict) -> str:
     symbol = (payload or {}).get("symbol")
-    if symbol and (kind.startswith("price_") or kind.startswith("rule_") or kind == "new_tip"):
+    if symbol and (kind.startswith("price_") or kind.startswith("rule_")):
         return f"/instrument/{symbol}"
-    if kind == "daily_report":
-        return "/reports"
-    return "/alerts"
+    return "/"
 
 
 async def create_alert(

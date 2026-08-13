@@ -41,11 +41,9 @@ class Settings(BaseSettings):
 
     default_risk_profile: str = "balanced"
     price_poll_minutes: int = 5
-    scoring_cron_hours: str = "7,12,17,21"
 
-    # Background jobs + tip scoring off while tips pipeline is being rebuilt.
+    # Background jobs (price alerts, equity snapshot, macro).
     enable_scheduler: bool = False
-    enable_tip_scoring: bool = False
 
     # CryptoSense / CCXT — public market data (no API keys required for quotes)
     # Charts/quotes: aggregate across ccxt_exchanges. Execution venue: ccxt_execution.

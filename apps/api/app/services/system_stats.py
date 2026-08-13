@@ -168,7 +168,6 @@ async def collect_system_stats(db: AsyncSession) -> dict:
             "cloud_provider": "gemini",
             "ollama_model": None,
             "scheduler": cfg.enable_scheduler,
-            "tip_scoring": cfg.enable_tip_scoring,
         },
     }
 

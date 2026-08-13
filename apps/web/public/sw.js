@@ -3,7 +3,7 @@ const ASSETS = ["/", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png", 
 
 function shouldBypass(url) {
   // Never cache API / Next data — avoids stale responses.
-  // Offline home/tips live in IndexedDB (apps/web/src/lib/offline.ts).
+  // Offline snapshots live in IndexedDB (apps/web/src/lib/offline.ts).
   return (
     url.pathname.startsWith("/api") ||
     url.pathname.startsWith("/_next")

@@ -6,13 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.models import (
     AssetClass,
-    CloseReason,
     DataQuality,
-    FeedbackResult,
     RiskProfile,
-    TipAction,
-    TipHorizon,
-    TipStatus,
 )
 
 
@@ -107,70 +102,6 @@ class PortfolioPositionOut(ORMModel):
     pnl_pct: float | None = None
 
 
-class TipFeedbackOut(ORMModel):
-    id: int
-    tip_id: int
-    result: FeedbackResult
-    close_reason: str | None = None
-    notes: str | None
-    created_at: datetime
-
-
-class TipOut(ORMModel):
-    id: int
-    instrument: InstrumentOut
-    action: TipAction
-    horizon: TipHorizon
-    entry_low: float | None
-    entry_high: float | None
-    stop: float | None
-    target_1: float | None
-    target_2: float | None
-    score: float
-    confidence: float
-    scenario_bull: str | None
-    scenario_base: str | None
-    scenario_bear: str | None
-    rationale: dict[str, Any]
-    risks: str | None
-    narrative_cs: str | None
-    entry_notes: str | None = None
-    data_quality: DataQuality
-    risk_profile: RiskProfile
-    suggested_size_pct: float | None
-    is_active: bool
-    status: str = TipStatus.proposed.value
-    as_of: datetime
-    closed_at: datetime | None = None
-    created_at: datetime
-    feedback: TipFeedbackOut | None = None
-
-
-class TipFeedbackCreate(BaseModel):
-    result: FeedbackResult
-    notes: str | None = None
-    close_reason: CloseReason | None = None
-
-
-class TipLifecycleUpdate(BaseModel):
-    status: TipStatus
-    result: FeedbackResult | None = None
-    notes: str | None = None
-    close_reason: CloseReason | None = None
-
-
-class TipJournalUpdate(BaseModel):
-    entry_notes: str | None = None
-    exit_notes: str | None = None
-    result: FeedbackResult | None = None
-    close_reason: CloseReason | None = None
-
-
-class TipHistoryOut(BaseModel):
-    stats: dict[str, Any]
-    tips: list[TipOut]
-
-
 class UserSettingsOut(ORMModel):
     risk_profile: RiskProfile
     max_position_pct: float
@@ -190,27 +121,6 @@ class UserSettingsUpdate(BaseModel):
     email: str | None = None
     preferences: dict[str, Any] | None = None
     push_subscription: dict[str, Any] | None = None
-
-
-class HomeOut(BaseModel):
-    portfolio: list[PortfolioPositionOut]
-    tips: list[TipOut]
-    alerts_unread: int
-    risk_profile: RiskProfile
-    briefing_cs: str | None = None
-    briefing_title: str | None = None
-    briefing_at: datetime | None = None
-    tip_stats: dict[str, Any] | None = None
-    equity: list[dict[str, Any]] = []
-
-
-class ReportOut(ORMModel):
-    id: int
-    kind: str
-    title: str
-    content_md: str
-    meta: dict[str, Any]
-    created_at: datetime
 
 
 class AlertOut(ORMModel):
@@ -267,7 +177,6 @@ class WatchlistDigestItem(BaseModel):
     asset_class: AssetClass
     price: float | None = None
     change_pct: float | None = None
-    tip: TipOut | None = None
     flags: list[str] = []
 
 
@@ -275,20 +184,3 @@ class WatchlistDigestOut(BaseModel):
     digest_cs: str
     movers: list[WatchlistDigestItem]
     as_of: datetime
-
-
-class PaperPositionPreview(BaseModel):
-    tip_id: int
-    symbol: str
-    quantity: float
-    avg_cost: float
-    size_pct: float
-    notional: float
-    portfolio_equity: float
-    is_paper: bool = True
-    notes: str
-
-
-class PaperPositionOut(BaseModel):
-    preview: PaperPositionPreview
-    position: PortfolioPositionOut

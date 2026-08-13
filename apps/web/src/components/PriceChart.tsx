@@ -38,6 +38,33 @@ export type HeatmapLevel = {
   ask: number;
 };
 
+export type HeatVizSettings = {
+  /** Percentile below which size is treated as noise (0–1). */
+  noisePct: number;
+  /** Percentile where walls start (0–1). */
+  wallPct: number;
+  /** Percentile for the strongest S/R walls (0–1). */
+  srPct: number;
+  /** Profile lane width as a fraction of the plot (0–1). */
+  profileWidth: number;
+  /** Target number of profile rows. */
+  rows: number;
+  /** Horizontal liquidity guides across the chart. */
+  guides: boolean;
+  /** Contrast curve — lower = more punchy walls. */
+  gamma: number;
+};
+
+export const DEFAULT_HEAT_VIZ: HeatVizSettings = {
+  noisePct: 0.4,
+  wallPct: 0.88,
+  srPct: 0.96,
+  profileWidth: 0.24,
+  rows: 95,
+  guides: true,
+  gamma: 0.85,
+};
+
 /** @deprecated use HeatmapLevel[] — kept for type aliases */
 export type HeatmapColumn = {
   ts: number;
@@ -61,6 +88,7 @@ type Props = {
   showHeatmap?: boolean;
   /** Global heatmap opacity 0–1 (default 0.55). */
   heatOpacity?: number;
+  heatViz?: Partial<HeatVizSettings>;
 };
 
 type Theme = {
@@ -159,6 +187,7 @@ export function PriceChart({
   heatmapLevels = [],
   showHeatmap = false,
   heatOpacity = 0.55,
+  heatViz,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -174,12 +203,14 @@ export function PriceChart({
   const heatLevelsRef = useRef<HeatmapLevel[]>(heatmapLevels);
   const showHeatRef = useRef(showHeatmap);
   const heatOpacityRef = useRef(heatOpacity);
+  const heatVizRef = useRef<HeatVizSettings>({ ...DEFAULT_HEAT_VIZ, ...heatViz });
   const fill = height == null;
   const themeRev = useThemeRevision();
 
   heatLevelsRef.current = heatmapLevels;
   showHeatRef.current = showHeatmap;
   heatOpacityRef.current = Math.min(1, Math.max(0.1, heatOpacity));
+  heatVizRef.current = { ...DEFAULT_HEAT_VIZ, ...heatViz };
 
   const drawHeatmap = () => {
     const canvas = heatRef.current;
@@ -212,6 +243,7 @@ export function PriceChart({
 
     const theme = themeRef.current || readTheme();
     const opacityMul = heatOpacityRef.current;
+    const viz = heatVizRef.current;
     const isNarrow =
       w < 720 ||
       (typeof window !== "undefined" && window.matchMedia("(max-width: 1099px)").matches);
@@ -219,10 +251,10 @@ export function PriceChart({
     const leftPad = 2;
     const rightPad = isNarrow ? 54 : 68;
     const plotW = Math.max(48, w - leftPad - rightPad);
-    // Profile lane ~half of previous width
+    const profileFrac = Math.min(0.42, Math.max(0.1, viz.profileWidth));
     const profileW = isNarrow
-      ? Math.max(44, Math.min(plotW * 0.21, 85))
-      : Math.max(60, Math.min(plotW * 0.24, 120));
+      ? Math.max(36, Math.min(plotW * Math.min(profileFrac, 0.28), 95))
+      : Math.max(48, Math.min(plotW * profileFrac, 160));
     const profileRight = leftPad + plotW;
     const profileLeft = profileRight - profileW;
 
@@ -238,10 +270,13 @@ export function PriceChart({
     const pct = (p: number) =>
       sizes[Math.min(sizes.length - 1, Math.floor(sizes.length * p))] || sizes[sizes.length - 1];
     const maxSize = sizes[sizes.length - 1];
-    const noiseFloor = Math.max(pct(0.4) * 0.7, maxSize * 0.015);
-    const lineCut = pct(0.72);
-    const wallCut = pct(0.88);
-    const srCut = pct(0.96);
+    const noisePct = Math.min(0.75, Math.max(0.05, viz.noisePct));
+    const wallPct = Math.min(0.99, Math.max(noisePct + 0.08, viz.wallPct));
+    const srPct = Math.min(0.995, Math.max(wallPct, viz.srPct));
+    const noiseFloor = Math.max(pct(noisePct) * 0.7, maxSize * 0.015);
+    const lineCut = pct(Math.min(wallPct - 0.12, 0.78));
+    const wallCut = pct(wallPct);
+    const srCut = pct(srPct);
     const visible = sides.filter((s) => s.size >= noiseFloor);
     if (!visible.length) return;
 
@@ -254,9 +289,8 @@ export function PriceChart({
       return ((topP - price) / (topP - botP)) * h;
     };
 
-    // Finer bins → more profile rows
-    const targetRows = isNarrow ? 72 : 95;
-    const rowH = Math.max(1.8, Math.min(4.2, h / targetRows));
+    const targetRows = Math.round(isNarrow ? viz.rows * 0.76 : viz.rows);
+    const rowH = Math.max(1.6, Math.min(5.2, h / Math.max(24, targetRows)));
     type Bucket = { y: number; bid: number; ask: number; price: number };
     const buckets = new Map<number, Bucket>();
     for (const s of visible) {
@@ -300,8 +334,8 @@ export function PriceChart({
     for (const r of rows) peak = Math.max(peak, r.bid, r.ask);
     if (peak <= 0) return;
 
-    // Stronger opacity contrast by volume (near-linear, not compressed)
-    const strength = (size: number) => Math.pow(size / peak, 0.85);
+    const gamma = Math.min(1.6, Math.max(0.35, viz.gamma));
+    const strength = (size: number) => Math.pow(size / peak, gamma);
     const widthOf = (size: number) => {
       const t = strength(size);
       return Math.max(2.5, profileW * (0.06 + t * 0.94));
@@ -332,17 +366,19 @@ export function PriceChart({
       (a, b) => Math.max(a.bid, a.ask) - Math.max(b.bid, b.ask)
     );
 
-    for (const r of bySize) {
-      const y = r.y;
-      if (y < -6 || y > h + 6) continue;
-      const wallSize = Math.max(r.bid, r.ask);
-      if (wallSize < lineCut) continue;
-      const color = r.bid >= r.ask ? theme.up : theme.down;
-      const th = lineThickness(wallSize);
-      const a = lineAlpha(wallSize);
-      const boost = wallSize >= srCut ? 1 : wallSize >= wallCut ? 0.78 : 0.42;
-      ctx.fillStyle = hexAlpha(color, a * boost);
-      ctx.fillRect(leftPad, y - th / 2, Math.max(0, profileRight - leftPad), th);
+    if (viz.guides) {
+      for (const r of bySize) {
+        const y = r.y;
+        if (y < -6 || y > h + 6) continue;
+        const wallSize = Math.max(r.bid, r.ask);
+        if (wallSize < lineCut) continue;
+        const color = r.bid >= r.ask ? theme.up : theme.down;
+        const th = lineThickness(wallSize);
+        const a = lineAlpha(wallSize);
+        const boost = wallSize >= srCut ? 1 : wallSize >= wallCut ? 0.78 : 0.42;
+        ctx.fillStyle = hexAlpha(color, a * boost);
+        ctx.fillRect(leftPad, y - th / 2, Math.max(0, profileRight - leftPad), th);
+      }
     }
 
     // Profile bars — thin rows, opacity strongly tied to volume
@@ -537,7 +573,7 @@ export function PriceChart({
   useEffect(() => {
     const id = requestAnimationFrame(() => drawHeatmap());
     return () => cancelAnimationFrame(id);
-  }, [heatmapLevels, showHeatmap, heatOpacity, bars]);
+  }, [heatmapLevels, showHeatmap, heatOpacity, bars, heatViz]);
 
   useEffect(() => {
     if (!seriesRef.current || !volumeRef.current || !chartRef.current) return;

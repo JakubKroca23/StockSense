@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -13,11 +14,11 @@ from app.models import UserSettings
 from app.services.instruments import ensure_discovery_universe
 from app.workers.jobs import (
     check_price_alerts,
-    generate_daily_report,
-    run_scoring_for_user,
     snapshot_portfolio,
     sync_macro,
 )
+from app.services.oil_store import sync_all_oil, sync_oil_interval
+from app.services.oil_footprint import run_oil_footprint
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -25,7 +26,7 @@ scheduler = AsyncIOScheduler()
 
 
 async def _drop_retired_bot_schema(conn) -> None:
-    """Drop Sense bot / chat / liquidity-intel tables and reclaim space."""
+    """Drop retired Sense bot / chat / tips / reports tables."""
     for table in (
         "hypothesis_trials",
         "trading_hypotheses",
@@ -34,160 +35,21 @@ async def _drop_retired_bot_schema(conn) -> None:
         "liq_snapshots",
         "chat_messages",
         "chat_sessions",
+        "tip_feedback",
+        "tips",
+        "reports",
     ):
         await conn.execute(text(f"DROP TABLE IF EXISTS {table} CASCADE"))
     await conn.execute(text("DROP TYPE IF EXISTS chatsessionstatus"))
-
-
-async def _ensure_schema(conn) -> None:
-    """create_all does not ALTER existing tables — patch leftover columns safely."""
-    await conn.execute(
-        text("ALTER TABLE tips ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'proposed'")
-    )
-    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tips_status ON tips (status)"))
-    await conn.execute(
-        text("UPDATE tips SET status = 'proposed' WHERE status IS NULL OR status = ''")
-    )
-    await conn.execute(
-        text("ALTER TABLE tips ADD COLUMN IF NOT EXISTS entry_notes TEXT")
-    )
-    await conn.execute(
-        text("ALTER TABLE tips ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ")
-    )
-    await conn.execute(
-        text(
-            "ALTER TABLE tip_feedback ADD COLUMN IF NOT EXISTS close_reason VARCHAR(32)"
-        )
-    )
-    await conn.execute(
-        text(
-            "CREATE INDEX IF NOT EXISTS ix_tip_feedback_close_reason "
-            "ON tip_feedback (close_reason)"
-        )
-    )
-    # Backfill structured close reasons from legacy free-text notes
-    await conn.execute(
-        text(
-            """
-            UPDATE tip_feedback SET close_reason = 'stop'
-            WHERE close_reason IS NULL
-              AND notes ILIKE '%zásahu stop%';
-            """
-        )
-    )
-    await conn.execute(
-        text(
-            """
-            UPDATE tip_feedback SET close_reason = 'target_2'
-            WHERE close_reason IS NULL
-              AND notes ILIKE '%zásahu target_2%';
-            """
-        )
-    )
-    await conn.execute(
-        text(
-            """
-            UPDATE tip_feedback SET close_reason = 'target_1'
-            WHERE close_reason IS NULL
-              AND (
-                notes ILIKE '%zásahu target_1%'
-                OR notes ILIKE '%zásahu target%'
-              );
-            """
-        )
-    )
-    await conn.execute(
-        text(
-            """
-            UPDATE tip_feedback SET close_reason = 'ttl'
-            WHERE close_reason IS NULL
-              AND notes ILIKE '%Expirace horizontu%';
-            """
-        )
-    )
-    await conn.execute(
-        text(
-            """
-            UPDATE tip_feedback SET close_reason = 'score_flip'
-            WHERE close_reason IS NULL
-              AND notes ILIKE '%změna scoringu%';
-            """
-        )
-    )
-    await conn.execute(
-        text(
-            """
-            UPDATE tip_feedback SET close_reason = 'manual'
-            WHERE close_reason IS NULL;
-            """
-        )
-    )
-    await conn.execute(
-        text(
-            """
-            UPDATE tips t
-            SET closed_at = fb.created_at
-            FROM tip_feedback fb
-            WHERE fb.tip_id = t.id
-              AND t.closed_at IS NULL
-              AND t.status = 'closed';
-            """
-        )
-    )
-
-
-async def _ensure_tip_action_enum(conn) -> None:
-    """Rename tip actions: buy→long, sell→short, trade→sell (hold unchanged)."""
-    # Detect Postgres tipaction labels; no-op on SQLite / fresh DBs without the type.
-    row = (
-        await conn.execute(
-            text(
-                """
-                SELECT EXISTS (
-                  SELECT 1 FROM pg_type WHERE typname = 'tipaction'
-                )
-                """
-            )
-        )
-    ).scalar()
-    if not row:
-        return
-
-    labels = (
-        await conn.execute(
-            text(
-                """
-                SELECT enumlabel
-                FROM pg_enum e
-                JOIN pg_type t ON t.oid = e.enumtypid
-                WHERE t.typname = 'tipaction'
-                """
-            )
-        )
-    ).scalars().all()
-    label_set = set(labels or [])
-
-    async def _rename(old: str, new: str) -> None:
-        if old in label_set and new not in label_set:
-            await conn.execute(text(f"ALTER TYPE tipaction RENAME VALUE '{old}' TO '{new}'"))
-            label_set.discard(old)
-            label_set.add(new)
-
-    # Order matters: sell→short before trade→sell
-    await _rename("buy", "long")
-    await _rename("sell", "short")
-    await _rename("trade", "sell")
+    await conn.execute(text("DROP TYPE IF EXISTS tipaction"))
+    await conn.execute(text("DROP TYPE IF EXISTS tiphorizon"))
+    await conn.execute(text("DROP TYPE IF EXISTS feedbackresult"))
 
 
 async def _init_db() -> None:
     async with engine.begin() as conn:
         await _drop_retired_bot_schema(conn)
         await conn.run_sync(Base.metadata.create_all)
-        await _ensure_schema(conn)
-        try:
-            await _ensure_tip_action_enum(conn)
-        except Exception as exc:
-            logger.warning("tipaction enum migrate skipped: %s", exc)
     async with AsyncSessionLocal() as db:
         await ensure_discovery_universe(db)
 
@@ -213,30 +75,6 @@ async def job_price_poll() -> None:
                 logger.warning("price alert job failed for %s: %s", uid, exc)
 
 
-async def job_scoring() -> None:
-    user_ids = await _user_ids()
-    async with AsyncSessionLocal() as db:
-        for uid in user_ids:
-            try:
-                await run_scoring_for_user(db, uid)
-            except Exception as exc:
-                logger.warning("scoring job failed for %s: %s", uid, exc)
-
-
-async def job_daily_report() -> None:
-    user_ids = await _user_ids()
-    async with AsyncSessionLocal() as db:
-        for uid in user_ids:
-            try:
-                await generate_daily_report(db, uid)
-            except Exception as exc:
-                logger.warning("daily report job failed for %s: %s", uid, exc)
-            try:
-                await snapshot_portfolio(db, uid)
-            except Exception as exc:
-                logger.warning("equity snapshot failed for %s: %s", uid, exc)
-
-
 async def job_equity_snapshot() -> None:
     user_ids = await _user_ids()
     async with AsyncSessionLocal() as db:
@@ -259,15 +97,36 @@ async def job_macro() -> None:
 async def lifespan(_: FastAPI):
     await _init_db()
 
+    oil_stop = asyncio.Event()
+
+    async def oil_loop() -> None:
+        await asyncio.sleep(2)
+        ticks = 0
+        while not oil_stop.is_set():
+            try:
+                async with AsyncSessionLocal() as db:
+                    if ticks == 0:
+                        await sync_all_oil(db, include_slow=True)
+                    elif ticks % 5 == 0:
+                        await sync_all_oil(db, include_slow=True)
+                    else:
+                        await sync_oil_interval(db, "1m")
+            except Exception as exc:
+                logger.warning("oil cache sync failed: %s", exc)
+            ticks += 1
+            try:
+                await asyncio.wait_for(oil_stop.wait(), timeout=60)
+            except TimeoutError:
+                pass
+
+    oil_task = asyncio.create_task(oil_loop())
+    fp_stop = asyncio.Event()
+    fp_task = asyncio.create_task(run_oil_footprint(fp_stop))
+
     if settings.enable_scheduler:
-        scoring_hours = ",".join(
-            str(int(h.strip())) for h in settings.scoring_cron_hours.split(",") if h.strip()
-        ) or "7,12,17,21"
         scheduler.add_job(
             job_price_poll, "interval", minutes=settings.price_poll_minutes, id="price_poll"
         )
-        scheduler.add_job(job_scoring, "cron", hour=scoring_hours, minute=10, id="scoring")
-        scheduler.add_job(job_daily_report, "cron", hour=6, minute=30, id="daily_report")
         scheduler.add_job(job_equity_snapshot, "cron", hour=21, minute=5, id="equity_snapshot")
         scheduler.add_job(job_macro, "cron", hour="*/6", minute=5, id="macro")
         scheduler.start()
@@ -275,6 +134,10 @@ async def lifespan(_: FastAPI):
     else:
         logger.warning("APScheduler disabled — no cron/interval jobs")
     yield
+    oil_stop.set()
+    fp_stop.set()
+    oil_task.cancel()
+    fp_task.cancel()
     if scheduler.running:
         scheduler.shutdown(wait=False)
     await engine.dispose()

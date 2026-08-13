@@ -37,13 +37,12 @@ type SystemStats = {
     chart_mode?: string;
     error?: string;
   };
-  llm: {
-    provider?: string;
-    ollama_model: string | null;
-    cloud_provider: string;
-    scheduler: boolean;
-    tip_scoring: boolean;
-  };
+    llm: {
+      provider?: string;
+      ollama_model: string | null;
+      cloud_provider: string;
+      scheduler: boolean;
+    };
 };
 
 const CURRENCIES = ["USD", "EUR", "CZK"] as const;

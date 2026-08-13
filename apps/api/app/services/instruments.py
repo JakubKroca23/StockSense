@@ -46,6 +46,7 @@ DISCOVERY_SEED = [
     ("XLE", "Energy Select Sector", AssetClass.etf),
     ("GLD", "SPDR Gold", AssetClass.commodity),
     ("SLV", "iShares Silver", AssetClass.commodity),
+    ("CL=F", "WTI Crude Oil", AssetClass.commodity),
     ("USO", "United States Oil", AssetClass.commodity),
     ("UNG", "United States Natural Gas", AssetClass.commodity),
     ("DBC", "Invesco DB Commodity", AssetClass.commodity),

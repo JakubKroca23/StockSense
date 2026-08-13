@@ -20,7 +20,7 @@ export function StockSenseLogo({
 }) {
   const eyeH = Math.round(height * 0.7);
   const eyeW = Math.round(eyeH * (229 / 108));
-  const stockSize = Math.round(height * 0.58);
+  const stockSize = Math.round(height * 0.46);
   const gap = Math.round(height * 0.1);
 
   return (
@@ -38,8 +38,8 @@ export function StockSenseLogo({
         className="brand-logo__eye"
         priority
       />
-      <span className="brand-logo__word">
-        <span className="brand-logo__stock" style={{ fontSize: stockSize }}>
+      <span className="brand-logo__word" style={{ fontSize: stockSize }}>
+        <span className="brand-logo__stock">
           {STOCK_LETTERS.map(({ ch, rotate }) => (
             <span
               key={`${ch}-${rotate}`}

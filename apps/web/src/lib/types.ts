@@ -1,6 +1,4 @@
 export type AssetClass = "stock" | "commodity" | "crypto" | "etf" | "index" | "other";
-export type TipAction = "long" | "short" | "hold" | "sell";
-export type TipHorizon = "intraday" | "swing" | "position" | "long_term";
 export type RiskProfile = "conservative" | "balanced" | "aggressive";
 export type DataQuality = "high" | "medium" | "low" | "proxy" | "unavailable";
 
@@ -28,137 +26,6 @@ export interface PortfolioPosition {
   pnl_pct?: number | null;
 }
 
-export type TipStatus = "proposed" | "accepted" | "rejected" | "closed";
-export type FeedbackResult = "hit" | "miss" | "partial";
-export type CloseReason =
-  | "stop"
-  | "target_1"
-  | "target_2"
-  | "ttl"
-  | "score_flip"
-  | "manual";
-
-export interface TipFeedback {
-  id: number;
-  tip_id: number;
-  result: FeedbackResult;
-  close_reason?: CloseReason | string | null;
-  notes?: string | null;
-  created_at: string;
-}
-
-export interface Tip {
-  id: number;
-  instrument: Instrument;
-  action: TipAction;
-  horizon: TipHorizon;
-  entry_low?: number | null;
-  entry_high?: number | null;
-  stop?: number | null;
-  target_1?: number | null;
-  target_2?: number | null;
-  score: number;
-  confidence: number;
-  scenario_bull?: string | null;
-  scenario_base?: string | null;
-  scenario_bear?: string | null;
-  rationale: Record<string, unknown>;
-  risks?: string | null;
-  narrative_cs?: string | null;
-  data_quality: DataQuality;
-  risk_profile: RiskProfile;
-  suggested_size_pct?: number | null;
-  is_active: boolean;
-  status?: TipStatus | string;
-  entry_notes?: string | null;
-  as_of: string;
-  closed_at?: string | null;
-  created_at: string;
-  feedback?: TipFeedback | null;
-}
-
-export interface TipStats {
-  total: number;
-  hits: number;
-  misses: number;
-  partials: number;
-  hit_rate: number | null;
-  tp_hits?: number;
-  sl_hits?: number;
-  tp_rate?: number | null;
-  by_close_reason?: Record<string, number>;
-  score_adj: number;
-  by_asset_class?: Record<string, unknown>;
-}
-
-export interface TipHistory {
-  stats: TipStats;
-  tips: Tip[];
-}
-
-export interface HomeData {
-  portfolio: PortfolioPosition[];
-  tips: Tip[];
-  alerts_unread: number;
-  risk_profile: RiskProfile;
-  briefing_cs?: string | null;
-  briefing_title?: string | null;
-  briefing_at?: string | null;
-  tip_stats?: TipStats | null;
-  equity?: {
-    as_of: string;
-    total_value: number;
-    total_cost: number;
-    pnl: number;
-    pnl_pct?: number | null;
-  }[];
-}
-
-export interface MarketBenchmark {
-  symbol: string;
-  name: string;
-  price: number | null;
-  change_pct: number | null;
-  source?: string | null;
-  ok: boolean;
-}
-
-export interface MarketCompositionSlice {
-  key: string;
-  label: string;
-  value: number;
-  change_pct: number | null;
-}
-
-export interface MarketSector {
-  id: string;
-  label: string;
-  href?: string | null;
-  bias: string;
-  bias_label: string;
-  summary: string;
-  summary_source?: string;
-  avg_change_pct: number | null;
-  benchmarks: MarketBenchmark[];
-  composition: MarketCompositionSlice[];
-  chart_symbol: string;
-  spark: {
-    ts: string;
-    open: number;
-    high: number;
-    low: number;
-    close: number;
-    volume?: number;
-  }[];
-  as_of: string;
-  data_quality: DataQuality;
-}
-
-export interface MarketsOverview {
-  as_of: string;
-  sectors: MarketSector[];
-}
-
 export interface Watchlist {
   id: number;
   name: string;
@@ -167,12 +34,9 @@ export interface Watchlist {
 
 export interface AlertPrefs {
   alert_kinds?: {
-    new_tip?: boolean;
-    daily_report?: boolean;
     price_stop?: boolean;
     price_target?: boolean;
     price_rule?: boolean;
-    tip_invalidated?: boolean;
   };
   quiet_hours?: {
     enabled?: boolean;
@@ -193,28 +57,6 @@ export interface UserSettings {
   vapid_public_key?: string | null;
 }
 
-export const tipStatusLabel: Record<string, string> = {
-  proposed: "Navržený",
-  accepted: "Přijatý",
-  rejected: "Odmítnutý",
-  closed: "Uzavřený",
-};
-
-export const closeReasonLabel: Record<string, string> = {
-  stop: "Stop loss",
-  target_1: "Take profit (TP1)",
-  target_2: "Take profit (TP2)",
-  ttl: "Expirace",
-  score_flip: "Změna scoringu",
-  manual: "Manuálně",
-};
-
-export const feedbackResultLabel: Record<FeedbackResult, string> = {
-  hit: "Hit",
-  miss: "Miss",
-  partial: "Partial",
-};
-
 export interface AlertItem {
   id: number;
   kind: string;
@@ -224,29 +66,6 @@ export interface AlertItem {
   is_read: boolean;
   created_at: string;
 }
-
-export interface Report {
-  id: number;
-  kind: string;
-  title: string;
-  content_md: string;
-  meta: Record<string, unknown>;
-  created_at: string;
-}
-
-export const actionLabel: Record<TipAction, string> = {
-  long: "Long",
-  short: "Short",
-  hold: "Držet",
-  sell: "Prodat",
-};
-
-export const horizonLabel: Record<TipHorizon, string> = {
-  intraday: "Intraday",
-  swing: "Swing",
-  position: "Position",
-  long_term: "Dlouhodobě",
-};
 
 export const riskLabel: Record<RiskProfile, string> = {
   conservative: "Konzervativní",

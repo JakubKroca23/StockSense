@@ -5,12 +5,14 @@ import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { StockSenseLogo } from "@/components/StockSenseLogo";
 import { SettingsPanel } from "@/components/SettingsPanel";
+import { HeaderExtraSlot } from "@/components/HeaderExtra";
 import {
   IconClose,
   IconMenu,
   IconMoon,
   IconSettings,
   IconSun,
+  RAIL_ICON_SIZE,
   NAV_ICON_SIZE,
   navIcons,
 } from "@/components/NavIcons";
@@ -20,6 +22,7 @@ const links = [
   { href: "/", label: "Home" },
   { href: "/cryptosense", label: "Crypto" },
   { href: "/gold", label: "Gold" },
+  { href: "/oil", label: "ROPA WTI" },
 ] as const;
 
 const RAIL_KEY = "stocksense-rail-collapsed";
@@ -32,14 +35,16 @@ function isActive(pathname: string, href: string) {
 function NavLabel({
   href,
   label,
+  size = NAV_ICON_SIZE,
 }: {
   href: (typeof links)[number]["href"];
   label: string;
+  size?: number;
 }) {
   const Icon = navIcons[href];
   return (
     <span className="nav-item">
-      <Icon size={NAV_ICON_SIZE} />
+      <Icon size={size} />
       <span className="nav-item__label">{label}</span>
     </span>
   );
@@ -99,6 +104,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     } catch {
       /* ignore */
     }
+    if ("serviceWorker" in navigator) {
+      void navigator.serviceWorker.register("/sw.js").catch(() => {});
+    }
     const mq = window.matchMedia(DESKTOP_MQ);
     const sync = () => {
       setDesktop(mq.matches);
@@ -108,8 +116,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     mq.addEventListener("change", sync);
     return () => mq.removeEventListener("change", sync);
   }, []);
-
-  const activeLink = links.find((l) => isActive(pathname, l.href)) || links[0];
 
   useEffect(() => {
     setMenuOpen(false);
@@ -152,7 +158,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       }`}
     >
       <header className="app-header sticky top-0 z-40">
-        <div className="app-header__inner mx-auto grid max-w-6xl items-center gap-2 px-4 py-2">
+        <div className="app-header__inner">
           <div className="app-header__brand app-no-drag">
             <button
               type="button"
@@ -177,11 +183,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Link>
           </div>
 
-          <p className="app-page-title app-no-drag" aria-current="page">
-            <NavLabel href={activeLink.href} label={activeLink.label} />
-          </p>
+          <HeaderExtraSlot />
 
-          <div className="app-header__actions app-no-drag justify-self-end">
+          <div className="app-header__actions app-no-drag">
             <button
               type="button"
               className="theme-toggle"
@@ -243,7 +247,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   title={l.label}
                   onClick={() => setMenuOpen(false)}
                 >
-                  <NavLabel href={l.href} label={l.label} />
+                  <NavLabel href={l.href} label={l.label} size={RAIL_ICON_SIZE} />
                 </Link>
               );
             })}
@@ -257,7 +261,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               }}
             >
               <span className="nav-item">
-                <IconSettings size={NAV_ICON_SIZE} />
+                <IconSettings size={RAIL_ICON_SIZE} />
                 <span className="nav-item__label">Nastavení</span>
               </span>
             </button>

@@ -51,12 +51,52 @@ function fmtTime(ts: string) {
   }
 }
 
-export function TradesTapePanel({ tape }: { tape: TradesTapeData | null }) {
+export function TradesTapePanel({
+  tape,
+  collapsed = false,
+  onToggle,
+}: {
+  tape: TradesTapeData | null;
+  collapsed?: boolean;
+  onToggle?: () => void;
+}) {
+  const title = (
+    <p className="trades-tape__title">
+      {onToggle ? <span className="desk-panel__caret">{collapsed ? "▸" : "▾"}</span> : null}
+      Trady
+    </p>
+  );
+
+  const head = onToggle ? (
+    <button
+      type="button"
+      className="desk-panel__toggle"
+      onClick={onToggle}
+      aria-expanded={!collapsed}
+    >
+      {title}
+      {!collapsed && tape && (
+        <p className="muted text-xs">
+          {tape.exchanges.join(" + ")} · {tape.count} prints
+        </p>
+      )}
+    </button>
+  ) : (
+    <div className="trades-tape__head">
+      {title}
+      {tape && (
+        <p className="muted text-xs">
+          {tape.exchanges.join(" + ")} · {tape.count} prints
+        </p>
+      )}
+    </div>
+  );
+
   if (!tape) {
     return (
-      <aside className="trades-tape">
-        <p className="trades-tape__title">Trady</p>
-        <p className="muted text-sm mt-2">Načítám obchody…</p>
+      <aside className={`trades-tape ${collapsed ? "is-collapsed" : ""}`}>
+        {head}
+        {!collapsed && <p className="muted text-sm mt-2">Načítám obchody…</p>}
       </aside>
     );
   }
@@ -68,58 +108,53 @@ export function TradesTapePanel({ tape }: { tape: TradesTapeData | null }) {
       : 0.5;
 
   return (
-    <aside className="trades-tape">
-      <div className="trades-tape__head">
-        <p className="trades-tape__title">Trady v čase</p>
-        <p className="muted text-xs">
-          {tape.exchanges.join(" + ")} · {tape.count} prints
-        </p>
-      </div>
+    <aside className={`trades-tape ${collapsed ? "is-collapsed" : ""}`}>
+      {head}
 
-      <div className="trades-tape__flow" aria-hidden>
-        <span
-          className="trades-tape__flow-buy"
-          style={{ width: `${Math.round(buyShare * 100)}%` }}
-        />
-        <span
-          className="trades-tape__flow-sell"
-          style={{ width: `${Math.round((1 - buyShare) * 100)}%` }}
-        />
-      </div>
-      <div className="trades-tape__flow-labels muted text-xs">
-        <span className="is-buy">buy {fmtAmt(tape.buy_volume)}</span>
-        <span className="is-sell">sell {fmtAmt(tape.sell_volume)}</span>
-      </div>
+      {!collapsed && (
+        <>
+          <div className="trades-tape__flow" aria-hidden>
+            <span
+              className="trades-tape__flow-buy"
+              style={{ width: `${Math.round(buyShare * 100)}%` }}
+            />
+            <span
+              className="trades-tape__flow-sell"
+              style={{ width: `${Math.round((1 - buyShare) * 100)}%` }}
+            />
+          </div>
+          <div className="trades-tape__flow-labels muted text-xs">
+            <span className="is-buy">buy {fmtAmt(tape.buy_volume)}</span>
+            <span className="is-sell">sell {fmtAmt(tape.sell_volume)}</span>
+          </div>
 
-      <div className="trades-tape__cols muted text-xs">
-        <span>Čas</span>
-        <span>Cena</span>
-        <span>Objem</span>
-      </div>
+          <div className="trades-tape__cols muted text-xs">
+            <span>Čas</span>
+            <span>Cena</span>
+            <span>Objem</span>
+          </div>
 
-      <div className="trades-tape__list">
-        {tape.trades.map((t) => {
-          const w = Math.max(8, Math.min(100, (t.amount / maxAmt) * 100));
-          return (
-            <div
-              key={`${t.exchange}-${t.id}-${t.ts_ms}`}
-              className={`trades-tape__row is-${t.side}`}
-            >
-              <span
-                className="trades-tape__bar"
-                style={{ width: `${w}%` }}
-                aria-hidden
-              />
-              <span className="trades-tape__time">{fmtTime(t.ts)}</span>
-              <span className="trades-tape__px">{fmtPrice(t.price)}</span>
-              <span className="trades-tape__amt">{fmtAmt(t.amount)}</span>
-            </div>
-          );
-        })}
-        {!tape.trades.length && (
-          <p className="muted text-sm px-1 py-2">Žádné recent trady.</p>
-        )}
-      </div>
+          <div className="trades-tape__list">
+            {tape.trades.map((t) => {
+              const w = Math.max(8, Math.min(100, (t.amount / maxAmt) * 100));
+              return (
+                <div
+                  key={`${t.exchange}-${t.id}-${t.ts_ms}`}
+                  className={`trades-tape__row is-${t.side}`}
+                >
+                  <span className="trades-tape__bar" style={{ width: `${w}%` }} aria-hidden />
+                  <span className="trades-tape__time">{fmtTime(t.ts)}</span>
+                  <span className="trades-tape__px">{fmtPrice(t.price)}</span>
+                  <span className="trades-tape__amt">{fmtAmt(t.amount)}</span>
+                </div>
+              );
+            })}
+            {!tape.trades.length && (
+              <p className="muted text-sm px-1 py-2">Žádné recent trady.</p>
+            )}
+          </div>
+        </>
+      )}
     </aside>
   );
 }
