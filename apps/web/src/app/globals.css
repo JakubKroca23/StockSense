@@ -418,7 +418,8 @@ a {
   }
 
   .cryptosense__chart.is-expanded ~ *,
-  .app-shell:has(.cryptosense__chart.is-expanded) .app-fab-dock {
+  .app-shell:has(.cryptosense__chart.is-expanded) .app-fab-dock,
+  .app-shell:has(.gold-page__chart.is-expanded) .app-fab-dock {
     visibility: hidden;
     pointer-events: none;
   }
@@ -949,7 +950,20 @@ textarea {
   padding-bottom: 0;
 }
 
+.app-shell:has(.gold-page) {
+  padding-bottom: 0;
+}
+
 .app-shell:has(.cryptosense) > main {
+  display: flex;
+  flex-direction: column;
+  max-width: none;
+  width: 100%;
+  padding: 0.5rem 0.65rem 0.65rem;
+  min-height: calc(100dvh - 3.5rem);
+}
+
+.app-shell:has(.gold-page) > main {
   display: flex;
   flex-direction: column;
   max-width: none;
@@ -4049,3 +4063,151 @@ textarea {
   flex-direction: column;
   gap: 0.75rem;
 }
+
+/* —— Gold / Anchored VWAP Midas —— */
+.gold-page {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+  gap: 0.65rem;
+}
+
+.gold-page__intro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  flex-shrink: 0;
+}
+
+.gold-page__title {
+  margin: 0;
+  font-size: 1.45rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.gold-page__sub {
+  margin: 0.25rem 0 0;
+  font-size: 0.88rem;
+  max-width: 42rem;
+  line-height: 1.45;
+}
+
+.gold-page__error {
+  color: var(--chart-down, #e05a8a);
+  padding: 0.75rem 1rem;
+  flex-shrink: 0;
+}
+
+.gold-page__chart.instrument-chart {
+  flex: 1 1 auto;
+  min-height: 420px;
+  display: flex;
+  flex-direction: column;
+}
+
+.gold-page__chart-pane {
+  flex: 1 1 auto;
+  min-height: 360px;
+}
+
+.gold-page__chart.is-expanded {
+  position: fixed;
+  inset: 0;
+  z-index: 72;
+  width: 100%;
+  height: 100dvh !important;
+  min-height: 100dvh !important;
+  max-height: none;
+  border-radius: 0;
+  border: none;
+  margin: 0;
+  padding: 0.35rem 0.4rem calc(0.45rem + env(safe-area-inset-bottom, 0px));
+  background: var(--bg);
+}
+
+.gold-page__chart.is-expanded .gold-page__chart-pane {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.gold-page__legend {
+  flex-shrink: 0;
+  padding: 0.85rem 1rem;
+}
+
+.gold-page__legend-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.gold-page__legend-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.gold-page__legend-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+}
+
+.gold-swatch {
+  flex-shrink: 0;
+  width: 1.1rem;
+  height: 0.7rem;
+  margin-top: 0.25rem;
+  border-radius: 2px;
+}
+
+.gold-swatch--fill {
+  background: rgba(40, 90, 255, 0.35);
+  border: 1px solid rgba(40, 90, 255, 0.55);
+}
+
+.gold-swatch--up {
+  background: transparent;
+  border-top: 2px solid rgba(61, 206, 122, 0.85);
+}
+
+.gold-swatch--down {
+  background: transparent;
+  border-top: 2px solid rgba(224, 90, 138, 0.85);
+}
+
+.gold-page__note {
+  margin: 0.65rem 0 0;
+  line-height: 1.4;
+}
+
+.app-shell:has(.gold-page) .app-fab-dock {
+  display: none;
+}
+
+@media (max-width: 1099px) {
+  .app-shell:has(.gold-page) > main {
+    padding: 0.4rem 0.45rem 0.55rem;
+  }
+
+  .gold-page__chart.instrument-chart {
+    min-height: 0;
+    height: auto;
+  }
+
+  .gold-page__chart-pane {
+    min-height: 52dvh;
+  }
+}
+

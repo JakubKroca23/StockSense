@@ -2170,6 +2170,25 @@ async def crypto_liq_intel_run_now(
     }
 
 
+@router.get("/gold/midas")
+async def gold_midas_heatmap(
+    lookback: str = "7d",
+    max_points: int = 160,
+    user: AuthUser = Depends(get_current_user),
+):
+    """Anchored VWAP Midas heatmap for gold (GC=F, 1m × ~7d, hourly anchors)."""
+    from app.services.gold_vwap import build_gold_midas_payload
+
+    lb = lookback if lookback in ("5d", "7d") else "7d"
+    pts = max(40, min(int(max_points or 160), 400))
+    payload = await build_gold_midas_payload(
+        lookback=lb, max_points_per_anchor=pts, use_cache=True
+    )
+    if not payload.get("ohlcv"):
+        raise HTTPException(status_code=502, detail="Nepodařilo se načíst 1m data zlata (Yahoo GC=F)")
+    return payload
+
+
 @router.websocket("/crypto/ws/ohlcv")
 async def crypto_ws_ohlcv(websocket: WebSocket, symbol: str = "BTC/USDT", interval: str = "1m"):
     """Realtime aggregated candles (Binance + Bybit public kline streams)."""
