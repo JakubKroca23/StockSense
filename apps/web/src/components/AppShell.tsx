@@ -18,6 +18,7 @@ import {
 const links = [
   { href: "/", label: "Home" },
   { href: "/cryptosense", label: "Crypto" },
+  { href: "/gold", label: "Gold" },
 ] as const;
 
 function isActive(pathname: string, href: string) {
@@ -44,7 +45,9 @@ function useLockPageZoom() {
   useEffect(() => {
     const isChartTouch = (target: EventTarget | null) => {
       if (!(target instanceof Element)) return false;
-      return Boolean(target.closest(".price-chart, .crypto-chart-stage"));
+      return Boolean(
+        target.closest(".price-chart, .crypto-chart-stage, .gold-page__chart-pane")
+      );
     };
 
     const preventGesture = (e: Event) => {

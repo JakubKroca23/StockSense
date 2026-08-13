@@ -77,6 +77,17 @@ export function IconCrypto(p: IconProps) {
   );
 }
 
+/** Gold — ingot / kov */
+export function IconGold(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M4.5 16.5 7.2 8.5h9.6l2.7 8H4.5Z" />
+      <path d="M7.2 8.5 9 5.5h6l1.8 3" />
+      <path d="M6.2 13h11.6" />
+    </Svg>
+  );
+}
+
 /** Nastavení — plné zelené ozubené kolo */
 export function IconSettings({ size = NAV_ICON_SIZE, className = "" }: IconProps) {
   return (
@@ -115,4 +126,5 @@ export function IconClose({ size = NAV_ICON_SIZE, className = "" }: IconProps) {
 export const navIcons = {
   "/": IconHome,
   "/cryptosense": IconCrypto,
+  "/gold": IconGold,
 } as const;
