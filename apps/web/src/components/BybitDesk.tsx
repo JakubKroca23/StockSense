@@ -15,6 +15,7 @@ import {
   type SessionProfile,
 } from "@/lib/orderflow";
 import type { ChartDrawing, DrawTool } from "@/lib/chart";
+import type { LinearDeskInfo } from "@/lib/desks";
 
 type DeskChartResponse = {
   symbol: string;
