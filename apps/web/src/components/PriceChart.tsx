@@ -204,8 +204,8 @@ function stickLiveToPriceScale(chart: IChartApi, lastIndex: number) {
   const spacing = Math.max(1, ts.options().barSpacing || 9);
   const width = Math.max(spacing * 8, ts.width());
   const visible = width / spacing;
-  const to = lastIndex + LIVE_RIGHT_PAD;
-  ts.setVisibleLogicalRange({ from: to - visible, to });
+  const rangeTo = lastIndex + LIVE_RIGHT_PAD;
+  ts.setVisibleLogicalRange({ from: rangeTo - visible, to: rangeTo });
 }
 
 function lookingAtFuture(rangeTo: number, lastIndex: number) {
