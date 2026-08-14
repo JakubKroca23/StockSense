@@ -73,13 +73,20 @@ export function LiquidityPanel({
   );
 
   const summary = snapshot ? (
-    <p className={`liq-panel__bias is-${bias}`}>
-      {bias === "up" && snapshot.nearR
-        ? `↑ ${fmtTicks(Math.round((snapshot.nearR.poc - last) / tick))} → ${fmtPx(snapshot.nearR.poc, priceDigits)}`
-        : bias === "down" && snapshot.nearS
-          ? `↓ ${fmtTicks(Math.round((snapshot.nearS.poc - last) / tick))} → ${fmtPx(snapshot.nearS.poc, priceDigits)}`
-          : "↔ vyvážená kniha"}
-    </p>
+    <>
+      <p className={`liq-panel__bias is-${bias}`}>
+        {bias === "up" && snapshot.nearR
+          ? `↑ ${fmtTicks(Math.round((snapshot.nearR.poc - last) / tick))} → ${fmtPx(snapshot.nearR.poc, priceDigits)}`
+          : bias === "down" && snapshot.nearS
+            ? `↓ ${fmtTicks(Math.round((snapshot.nearS.poc - last) / tick))} → ${fmtPx(snapshot.nearS.poc, priceDigits)}`
+            : "↔ vyvážená kniha"}
+      </p>
+      <p className="liq-panel__marks">
+        <span className="is-ice">ICE {snapshot.icebergs}</span>
+        <span className="is-wall">WALL {snapshot.walls}</span>
+        <span className="is-spoof">SPOOF {snapshot.spoofs}</span>
+      </p>
+    </>
   ) : (
     <p className="muted">Čekám na L2…</p>
   );
@@ -160,6 +167,22 @@ export function LiquidityPanel({
 
         <ZoneRow label="R" zone={snapshot?.nearR ?? null} last={last} tick={tick} digits={priceDigits} />
         <ZoneRow label="S" zone={snapshot?.nearS ?? null} last={last} tick={tick} digits={priceDigits} />
+
+        {snapshot?.rows.some((r) => r.flag) ? (
+          <ul className="liq-panel__flags">
+            {snapshot.rows
+              .filter((r) => r.flag)
+              .sort((a, b) => (b.score || 0) - (a.score || 0))
+              .slice(0, 8)
+              .map((r) => (
+                <li key={`${r.flag}-${r.price}`} className={`is-${r.flag}`}>
+                  <span>{r.flag === "iceberg" ? "ICE" : r.flag === "wall" ? "WALL" : "SPF"}</span>
+                  <span>{fmtPx(r.price, priceDigits)}</span>
+                  <span className="muted">{fmtTicks(Math.round((r.price - last) / tick))}</span>
+                </li>
+              ))}
+          </ul>
+        ) : null}
 
         {snapshot && Number.isFinite(snapshot.bestBid) && Number.isFinite(snapshot.bestAsk) && (
           <p className="liq-panel__meta muted">

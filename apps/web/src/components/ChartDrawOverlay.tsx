@@ -138,6 +138,7 @@ export function ChartDrawOverlay({
         <rect x={0} y={0} width={Math.max(1, clipW)} height={Math.max(1, h)} />
       </clipPath>
       <g clipPath="url(#chart-draw-clip)">
+        {items.map((d) => {
         if (!chart || !series) return null;
         if (d.kind === "hline") {
           const y = priceToY(series, d.price);

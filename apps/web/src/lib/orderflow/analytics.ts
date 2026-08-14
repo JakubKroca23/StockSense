@@ -116,6 +116,40 @@ export function unfinishedAuction(candle: {
   };
 }
 
+/** Lowest-volume valley in a candle (not the POC). */
+export function lowVolumeNodes(levels: FootprintLevel[]): number[] {
+  if (levels.length < 2) return [];
+  const sorted = [...levels].sort((a, b) => a.price - b.price);
+  let peak = 0;
+  let peakPx = sorted[0].price;
+  for (const l of sorted) {
+    if (l.totalVolume > peak) {
+      peak = l.totalVolume;
+      peakPx = l.price;
+    }
+  }
+  if (peak <= 0) return [];
+  const cut = peak * 0.2;
+  const out: number[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const l = sorted[i];
+    if (l.price === peakPx) continue;
+    const prev = i > 0 ? sorted[i - 1].totalVolume : l.totalVolume + 1;
+    const next = i < sorted.length - 1 ? sorted[i + 1].totalVolume : l.totalVolume + 1;
+    const valley = l.totalVolume <= prev && l.totalVolume <= next;
+    if (valley && l.totalVolume <= cut) out.push(l.price);
+  }
+  if (!out.length) {
+    let min = sorted[0];
+    for (const l of sorted) {
+      if (l.price === peakPx) continue;
+      if (l.totalVolume < min.totalVolume) min = l;
+    }
+    if (min.price !== peakPx && min.totalVolume <= cut) out.push(min.price);
+  }
+  return out;
+}
+
 /** Value area covering `cover` fraction of volume, grown from POC. */
 export function valueArea(
   rows: SessionProfileRow[],

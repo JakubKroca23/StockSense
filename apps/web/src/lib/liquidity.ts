@@ -26,7 +26,7 @@ export const DEFAULT_HEAT_VIZ: HeatVizSettings = {
   noisePct: 0.18,
   wallPct: 0.78,
   srPct: 0.9,
-  profileWidth: 0.26,
+  profileWidth: 0.32,
   tickGroup: 1,
   guides: false,
   labels: false,
@@ -52,6 +52,8 @@ export type LiqZone = {
   score: number;
 };
 
+export type LiqFlag = "iceberg" | "wall" | "spoof" | null;
+
 export type LiqBucket = {
   price: number;
   bid: number;
@@ -59,7 +61,203 @@ export type LiqBucket = {
   rest: number;
   showBid: number;
   showAsk: number;
+  flag: LiqFlag;
+  sessionVol: number;
+  prevRest: number;
+  implied: number;
+  score: number;
 };
+
+/** Rolling L2 rest per price — ~13s at 650ms poll. */
+export type BookMem = Map<number, { rest: number[]; max: number }>;
+
+const BOOK_MEM_CAP = 20;
+
+export function rememberBook(
+  mem: BookMem,
+  rows: { price: number; rest: number }[],
+  cap = BOOK_MEM_CAP
+): BookMem {
+  const next: BookMem = new Map();
+  const seen = new Set<number>();
+  for (const r of rows) {
+    seen.add(r.price);
+    const prev = mem.get(r.price);
+    const rest = prev ? prev.rest.concat(r.rest).slice(-cap) : [r.rest];
+    next.set(r.price, { rest, max: Math.max(prev?.max || 0, r.rest) });
+  }
+  for (const [p, h] of mem) {
+    if (seen.has(p)) continue;
+    const rest = h.rest.concat(0).slice(-cap);
+    if (rest.some((x) => x > 0)) next.set(p, { rest, max: h.max });
+  }
+  return next;
+}
+
+export type TapePrint = {
+  price: number;
+  amount: number;
+  side: "buy" | "sell";
+  ts_ms?: number;
+};
+
+export type FlowAtPrice = { buy: number; sell: number };
+
+type FpBars = { levels?: { price: number; buy?: number; sell?: number }[] }[] | null | undefined;
+
+export function tradedVolFromBars(
+  bars: FpBars,
+  lastN: number,
+  step: number,
+  weightRecent = false
+): Map<number, number> {
+  const flow = tradedFlowFromBars(bars, lastN, step, weightRecent);
+  const map = new Map<number, number>();
+  for (const [p, f] of flow) map.set(p, f.buy + f.sell);
+  return map;
+}
+
+export function tradedFlowFromBars(
+  bars: FpBars,
+  lastN: number,
+  step: number,
+  weightRecent = false
+): Map<number, FlowAtPrice> {
+  const map = new Map<number, FlowAtPrice>();
+  if (!bars?.length || !(step > 0)) return map;
+  const slice = bars.slice(-Math.max(1, lastN));
+  const n = slice.length;
+  for (let i = 0; i < n; i++) {
+    const w = weightRecent ? (i + 1) / n : 1;
+    for (const lvl of slice[i].levels || []) {
+      if (!(lvl.price > 0)) continue;
+      const p = quantizePrice(lvl.price, step);
+      const cur = map.get(p) || { buy: 0, sell: 0 };
+      cur.buy += (lvl.buy || 0) * w;
+      cur.sell += (lvl.sell || 0) * w;
+      map.set(p, cur);
+    }
+  }
+  return map;
+}
+
+/** Aggressive prints in the last `maxAgeMs` — aligned with L2 memory (~13s). */
+export function tradedFlowFromTape(
+  prints: TapePrint[] | null | undefined,
+  step: number,
+  maxAgeMs = 12000,
+  nowMs = Date.now()
+): Map<number, FlowAtPrice> {
+  const map = new Map<number, FlowAtPrice>();
+  if (!prints?.length || !(step > 0)) return map;
+  for (const t of prints) {
+    if (!(t.price > 0) || !(t.amount > 0)) continue;
+    if (t.ts_ms && nowMs - t.ts_ms > maxAgeMs) continue;
+    const p = quantizePrice(t.price, step);
+    const cur = map.get(p) || { buy: 0, sell: 0 };
+    if (t.side === "buy") cur.buy += t.amount;
+    else cur.sell += t.amount;
+    map.set(p, cur);
+  }
+  return map;
+}
+
+function mergeFlow(a: Map<number, FlowAtPrice>, b: Map<number, FlowAtPrice>): Map<number, FlowAtPrice> {
+  const out = new Map<number, FlowAtPrice>();
+  for (const src of [a, b]) {
+    for (const [p, f] of src) {
+      const cur = out.get(p) || { buy: 0, sell: 0 };
+      cur.buy += f.buy;
+      cur.sell += f.sell;
+      out.set(p, cur);
+    }
+  }
+  return out;
+}
+
+function flowPrints(map: Map<number, FlowAtPrice>): number {
+  let n = 0;
+  for (const f of map.values()) if (f.buy + f.sell > 0) n += 1;
+  return n;
+}
+
+function lookupFlow(
+  map: Map<number, FlowAtPrice> | undefined,
+  price: number,
+  step: number
+): FlowAtPrice {
+  const empty = { buy: 0, sell: 0 };
+  if (!map?.size) return empty;
+  const exact = map.get(price);
+  if (exact) return exact;
+  const acc = { buy: 0, sell: 0 };
+  for (const [p, f] of map) {
+    if (Math.abs(p - price) < step / 2) {
+      acc.buy += f.buy;
+      acc.sell += f.sell;
+    }
+  }
+  return acc;
+}
+
+function collapseNearby(rows: LiqBucket[], flag: LiqFlag, gap: number): void {
+  const hits = rows
+    .filter((r) => r.flag === flag)
+    .sort((a, b) => (b.score || 0) - (a.score || 0));
+  const kept: number[] = [];
+  for (const r of hits) {
+    if (kept.some((p) => Math.abs(p - r.price) <= gap)) r.flag = null;
+    else kept.push(r.price);
+  }
+}
+
+function eatenFrom(samples: number[]): number {
+  let e = 0;
+  for (let i = 1; i < samples.length; i++) {
+    e += Math.max(0, samples[i - 1] - samples[i]);
+  }
+  return e;
+}
+
+function refillAmt(samples: number[]): number {
+  let a = 0;
+  for (let i = 1; i < samples.length; i++) {
+    a += Math.max(0, samples[i] - samples[i - 1]);
+  }
+  return a;
+}
+
+function refillCount(samples: number[], peak: number): number {
+  if (!(peak > 0)) return 0;
+  let n = 0;
+  for (let i = 1; i < samples.length; i++) {
+    const a = samples[i - 1];
+    const b = samples[i];
+    if (a > 0 && a <= peak * 0.72 && b >= a * 1.32 && b >= peak * 0.55) n += 1;
+  }
+  return n;
+}
+
+function keepTopFlags(
+  rows: LiqBucket[],
+  flag: LiqFlag,
+  maxN: number,
+  wallCut: number,
+  demoteToWall = false
+): number {
+  const hits = rows.filter((r) => r.flag === flag).sort((a, b) => (b.score || 0) - (a.score || 0));
+  const drop = new Set(hits.slice(Math.max(0, maxN)).map((r) => r.price));
+  let kept = 0;
+  for (const r of rows) {
+    if (r.flag !== flag) continue;
+    if (drop.has(r.price)) {
+      r.flag = demoteToWall && r.rest >= wallCut ? "wall" : null;
+    } else {
+      kept += 1;
+    }
+  }
+  return kept;
+}
 
 export type LiqVacuum = { lo: number; hi: number; up: boolean; ticks: number };
 
@@ -84,6 +282,9 @@ export type LiqSnapshot = {
   noiseCut: number;
   peakShow: number;
   peakRest: number;
+  icebergs: number;
+  walls: number;
+  spoofs: number;
 };
 
 export function fmtPx(n: number, digits: number): string {
@@ -244,6 +445,13 @@ export function analyzeLiquidity(opts: {
   viz: HeatVizSettings;
   tick: number;
   lastClose: number;
+  sessionVol?: Map<number, number>;
+  recentVol?: Map<number, number>;
+  prevRest?: Map<number, number>;
+  bookMem?: BookMem;
+  tape?: TapePrint[] | null;
+  fpBars?: FpBars;
+  nowMs?: number;
 }): LiqSnapshot | null {
   const { levels, viz, lastClose } = opts;
   if (!levels.length) return null;
@@ -282,6 +490,11 @@ export function analyzeLiquidity(opts: {
       rest,
       showBid: v.bid,
       showAsk: v.ask,
+      flag: null,
+      sessionVol: 0,
+      prevRest: 0,
+      implied: 0,
+      score: 0,
     });
   }
   if (!rows.length) return null;
@@ -322,6 +535,135 @@ export function analyzeLiquidity(opts: {
     peakRest = Math.max(peakRest, r.rest);
   }
   if (peakShow <= 0 || peakRest <= 0) return null;
+
+  const sessionVol = opts.sessionVol;
+  const bookMem = opts.bookMem;
+  const lookup = (map: Map<number, number> | undefined, price: number) => {
+    if (!map || !map.size) return 0;
+    const exact = map.get(price);
+    if (exact) return exact;
+    let acc = 0;
+    for (const [p, v] of map) {
+      if (Math.abs(p - price) < step / 2) acc += v;
+    }
+    return acc;
+  };
+
+  const tapeFlow = tradedFlowFromTape(opts.tape, step, 12000, opts.nowMs ?? Date.now());
+  let flow = tapeFlow;
+  if (flowPrints(tapeFlow) < 5) {
+    flow = mergeFlow(tapeFlow, tradedFlowFromBars(opts.fpBars, 2, step));
+  }
+  const spreadTicks =
+    Number.isFinite(bestAsk) && Number.isFinite(bestBid)
+      ? Math.max(1, (bestAsk - bestBid) / tickSize)
+      : 2;
+  const touchTicks = Math.min(6, Math.max(2, spreadTicks + 1.5));
+  const hitVals: number[] = [];
+  for (const row of visible) {
+    const f0 = lookupFlow(flow, row.price, step);
+    const h0 = row.bid >= row.ask ? f0.sell : f0.buy;
+    if (h0 > 0) hitVals.push(h0);
+  }
+  hitVals.sort((a, b) => a - b);
+  const medHits = medianOf(hitVals);
+  const hotHits = hitVals.length ? percentileOf(hitVals, 0.78) : 0;
+
+  let icebergs = 0;
+  let walls = 0;
+  let spoofs = 0;
+  for (const r of visible) {
+    const sessV = lookup(sessionVol, r.price);
+    const hist = bookMem?.get(r.price);
+    const series = (hist?.rest || []).concat(r.rest);
+    const prev =
+      series.length >= 2 ? series[series.length - 2] : opts.prevRest?.get(r.price) || 0;
+    const winMax = Math.max(hist?.max || 0, r.rest, prev);
+    const floor = Math.max(noiseCut, med * 0.28, r.rest * 0.5);
+    let persist = 0;
+    for (const s of series) if (s >= floor) persist += 1;
+    const n = Math.max(series.length, 1);
+    const persistPct = persist / n;
+    const eaten = eatenFrom(series);
+    const added = refillAmt(series);
+    const refills = refillCount(series, winMax);
+    const drop = winMax > 0 ? 1 - r.rest / winMax : 0;
+    const isBid = r.bid >= r.ask;
+    const distToTouch = isBid
+      ? Number.isFinite(bestBid)
+        ? (bestBid - r.price) / tickSize
+        : Math.abs(r.price - mid) / tickSize
+      : Number.isFinite(bestAsk)
+        ? (r.price - bestAsk) / tickSize
+        : Math.abs(r.price - mid) / tickSize;
+    const atTouch = distToTouch >= -0.6 && distToTouch <= touchTicks;
+    const f = lookupFlow(flow, r.price, step);
+    const hits = isBid ? f.sell : f.buy;
+    const contra = isBid ? f.buy : f.sell;
+    const hitFloor = Math.max(hotHits * 0.7, medHits * 1.55, r.rest * 0.28);
+    const held = drop < 0.38 && r.rest >= Math.max(noiseCut, med * 0.45);
+    const intoQueue = hits >= contra * 0.85;
+    const replenish =
+      hits >= Math.max(eaten * 2.15, r.rest * 0.4, hitFloor) && hits > eaten + r.rest * 0.15;
+    const refillWithFlow = refills >= 2 && added > eaten * 0.55 && hits >= hitFloor && held;
+    const enoughHist = n >= 5;
+    const restOk = r.rest >= Math.max(noiseCut, med * 0.45);
+    const recentPull =
+      series.length >= 3 &&
+      Math.max(series[series.length - 3], series[series.length - 2]) >= wallCut * 0.9 &&
+      r.rest < wallCut * 0.5;
+    const pulledNotFilled = hits < Math.max(eaten * 0.45, winMax * 0.18) && drop >= 0.62;
+
+    r.sessionVol = sessV;
+    r.prevRest = prev;
+    r.implied = Math.max(0, hits - eaten, hits - r.rest * 0.4);
+
+    if (n >= 4 && winMax >= wallCut * 0.88 && pulledNotFilled && (recentPull || persistPct < 0.5)) {
+      r.flag = "spoof";
+      r.score = Math.min(
+        1,
+        0.45 * drop + 0.35 * (1 - Math.min(1, hits / Math.max(winMax, 1e-9))) + 0.2 * (1 - persistPct)
+      );
+      spoofs += 1;
+    } else if (
+      atTouch &&
+      enoughHist &&
+      restOk &&
+      held &&
+      intoQueue &&
+      hits > 0 &&
+      (replenish || refillWithFlow)
+    ) {
+      r.flag = "iceberg";
+      r.score = Math.min(
+        1,
+        0.36 * Math.min(1, hits / Math.max(r.rest, 1e-9) / 1.8) +
+          0.28 * Math.min(1, hits / Math.max(eaten, r.rest * 0.12, 1e-9) / 2.6) +
+          0.16 * persistPct +
+          0.1 * Math.max(0, 1 - distToTouch / touchTicks) +
+          0.1 * Math.min(1, refills / 2)
+      );
+      icebergs += 1;
+    } else if (
+      r.rest >= wallCut &&
+      (n < 3 ? r.rest >= srCut : persist >= 3 && (n < 6 || persistPct >= 0.42))
+    ) {
+      r.flag = "wall";
+      r.score = Math.min(1, 0.7 * (r.rest / Math.max(peakRest, 1e-9)) + 0.3 * persistPct);
+      walls += 1;
+    } else {
+      r.score = Math.min(1, r.rest / Math.max(peakRest, 1e-9));
+    }
+  }
+
+  collapseNearby(visible, "iceberg", step * 1.6);
+  for (const r of visible) {
+    if (r.flag === "iceberg" && (r.score || 0) < 0.4) r.flag = null;
+  }
+  icebergs = keepTopFlags(visible, "iceberg", 3, wallCut, true);
+  collapseNearby(visible, "spoof", step * 1.6);
+  spoofs = keepTopFlags(visible, "spoof", 4, wallCut, false);
+  walls = keepTopFlags(visible, "wall", 10, wallCut, false);
 
   const zones = viz.zones
     ? clusterZones(visible, mid, wallCut, step, med).sort((a, b) => b.score - a.score)
@@ -389,5 +731,8 @@ export function analyzeLiquidity(opts: {
     noiseCut,
     peakShow,
     peakRest,
+    icebergs,
+    walls,
+    spoofs,
   };
 }

@@ -6,15 +6,12 @@ import { apiFetch, apiWsUrl } from "@/lib/api";
 import { PriceChart, type ChartBar, type HeatmapLevel, type HeatVizSettings, type ChartVizSettings, DEFAULT_HEAT_VIZ, DEFAULT_DESK_CHART_VIZ } from "@/components/PriceChart";
 import { HeaderExtra } from "@/components/HeaderExtra";
 import { type FootprintData, type FpVizSettings, DEFAULT_FP_VIZ } from "@/components/FootprintChart";
-import { OrderBookPanel, type OrderBookData } from "@/components/OrderBookPanel";
+import { type OrderBookData } from "@/components/OrderBookPanel";
 import { TradesTapePanel, type TradesTapeData } from "@/components/TradesTapePanel";
 import { LiquidityPanel } from "@/components/LiquidityPanel";
-import { analyzeLiquidity } from "@/lib/liquidity";
+import { analyzeLiquidity, rememberBook, type BookMem } from "@/lib/liquidity";
 import {
-  detectBookWalls,
   levelsFromWireBars,
-  type BookWallFlag,
-  type OrderBookLevel,
   type SessionProfile,
 } from "@/lib/orderflow";
 import type { ChartDrawing, DrawTool } from "@/lib/chart";
@@ -417,13 +414,13 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
   const [timeframe, setTimeframe] = useState("1m");
   const [lookback, setLookback] = useState("1d");
   const [live, setLive] = useState(false);
-  const [orderBook, setOrderBook] = useState<OrderBookData | null>(null);
   const [tradesTape, setTradesTape] = useState<TradesTapeData | null>(null);
-  const [bookOpen, toggleBook] = usePersistedOpen(`${DESK_STORE}-ob`, true);
   const [tapeOpen, toggleTape] = usePersistedOpen(`${DESK_STORE}-tape`, true);
   const [liqOpen, toggleLiq] = usePersistedOpen(`${DESK_STORE}-liq`, true);
   const [showHeatmap, , setShowHeatmap] = usePersistedOpen(`${DESK_STORE}-heat`, true);
   const [heatmapLevels, setHeatmapLevels] = useState<HeatmapLevel[]>([]);
+  const bookMemRef = useRef<BookMem>(new Map());
+  const bookSrcRef = useRef<HeatmapLevel[] | null>(null);
   const [heatOpacity, setHeatOpacity] = useState(0.55);
   const [footprint, , setFootprint] = usePersistedOpen(`${DESK_STORE}-fp`, false);
   const [fpData, setFpData] = useState<FootprintData | null>(null);
@@ -445,8 +442,6 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
   );
   const [drawTool, setDrawTool] = useState<DrawTool>("none");
   const [tapeViz, setTapeViz] = usePersistedJson(`${DESK_STORE}-tape-viz`, DEFAULT_TAPE_VIZ);
-  const prevBookRef = useRef<Map<number, number>>(new Map());
-  const [walls, setWalls] = useState<BookWallFlag[]>([]);
 
   const [deskPrefsReady, setDeskPrefsReady] = useState(false);
 
@@ -475,14 +470,17 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
 
   const applyHeatLevels = useCallback((res: OrderBookData) => {
     const priceMap = new Map<number, { bid: number; ask: number }>();
-    for (const lvl of res.bids) {
-      priceMap.set(lvl.price, { bid: lvl.amount, ask: 0 });
+    for (const lvl of res.bids || []) {
+      if (!lvl || !(lvl.price > 0)) continue;
+      priceMap.set(lvl.price, { bid: lvl.amount || 0, ask: 0 });
     }
-    for (const lvl of res.asks) {
+    for (const lvl of res.asks || []) {
+      if (!lvl || !(lvl.price > 0)) continue;
       const cur = priceMap.get(lvl.price) || { bid: 0, ask: 0 };
-      cur.ask = lvl.amount;
+      cur.ask = lvl.amount || 0;
       priceMap.set(lvl.price, cur);
     }
+    if (!priceMap.size) return;
     setHeatmapLevels(
       [...priceMap.entries()].map(([price, v]) => ({ price, bid: v.bid, ask: v.ask }))
     );
@@ -491,7 +489,6 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
   const loadOrderBook = useCallback(async () => {
       try {
         const res = await apiFetch<OrderBookData>(`${apiBase}/orderbook?limit=400`);
-        setOrderBook(res);
         applyHeatLevels(res);
       } catch {
         /* keep last book */
@@ -507,24 +504,29 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
     }
   }, [apiBase]);
 
+  const loadGen = useRef(0);
   const load = useCallback(async (iv: string, lb: string, silent = false) => {
+    const gen = ++loadGen.current;
     if (!silent) setLoading(true);
     try {
       const res = await apiFetch<DeskChartResponse>(
         `${apiBase}/chart?interval=${encodeURIComponent(iv)}&lookback=${encodeURIComponent(lb)}`
       );
+      if (gen !== loadGen.current) return;
       setData(res);
       setError(null);
     } catch (err) {
+      if (gen !== loadGen.current) return;
       if (!silent) setError(err instanceof Error ? err.message : loadError);
     } finally {
-      if (!silent) setLoading(false);
+      if (gen === loadGen.current && !silent) setLoading(false);
     }
   }, [apiBase, loadError]);
 
   useEffect(() => {
+    if (!deskPrefsReady) return;
     void load(timeframe, lookback);
-  }, [load, timeframe, lookback]);
+  }, [deskPrefsReady, load, timeframe, lookback]);
 
   useEffect(() => {
     void loadOrderBook();
@@ -539,13 +541,17 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
   }, [loadTrades]);
 
   useEffect(() => {
+    if (!deskPrefsReady) return;
     let cancelled = false;
+    const iv = timeframe;
+    const lb = lookback;
     const tick = async () => {
       try {
         const res = await apiFetch<FootprintData>(
-          `${apiBase}/footprint?interval=${encodeURIComponent(timeframe)}&lookback=${encodeURIComponent(lookback)}`
+          `${apiBase}/footprint?interval=${encodeURIComponent(iv)}&lookback=${encodeURIComponent(lb)}`
         );
-        if (!cancelled) setFpData(res);
+        if (cancelled) return;
+        setFpData(res);
       } catch {
         /* keep last */
       }
@@ -556,7 +562,7 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [footprint, timeframe, lookback, apiBase]);
+  }, [deskPrefsReady, footprint, timeframe, lookback, apiBase]);
 
   useEffect(() => {
     if (loading || !data?.source?.startsWith("bybit")) return;
@@ -670,6 +676,16 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
 
   useEffect(() => {
     try {
+      if (window.localStorage.getItem(`${DESK_STORE}-vol-stats`) === "1") return;
+      window.localStorage.setItem(`${DESK_STORE}-vol-stats`, "1");
+      setChartViz({ volume: true });
+    } catch {
+      /* ignore */
+    }
+  }, [setChartViz]);
+
+  useEffect(() => {
+    try {
       window.localStorage.setItem(`${DESK_STORE}-alpha`, String(heatOpacity));
     } catch {
       /* ignore */
@@ -683,32 +699,30 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
   const lastClose = data?.bars?.length
     ? data.bars[data.bars.length - 1].close
     : data?.price ?? 0;
-  const liqSnap = useMemo(
-    () =>
-      analyzeLiquidity({
-        levels: heatmapLevels,
-        viz: heatViz,
-        tick: config.tick,
-        lastClose: lastClose || 0,
-      }),
-    [heatmapLevels, heatViz, config.tick, lastClose]
-  );
-
   const session: SessionProfile | null = useMemo(() => {
     if (!fpData?.bars.length) return null;
     const tick = (fpData.tick || config.tick) * (fpViz.tickGroup || 1);
     return levelsFromWireBars(fpData.bars, tick);
   }, [fpData, fpViz.tickGroup, config.tick]);
 
-  useEffect(() => {
-    if (!orderBook) return;
-    const levels: OrderBookLevel[] = [
-      ...orderBook.bids.map((l) => ({ price: l.price, size: l.amount, side: "bid" as const })),
-      ...orderBook.asks.map((l) => ({ price: l.price, size: l.amount, side: "ask" as const })),
-    ];
-    setWalls(detectBookWalls(levels, prevBookRef.current));
-    prevBookRef.current = new Map(levels.map((l) => [l.price, l.size]));
-  }, [orderBook]);
+  const liqSnap = useMemo(() => {
+    const sessionVol = new Map((session?.rows || []).map((r) => [r.price, r.totalVolume]));
+    const snap = analyzeLiquidity({
+      levels: heatmapLevels,
+      viz: heatViz,
+      tick: config.tick,
+      lastClose: lastClose || 0,
+      sessionVol,
+      bookMem: bookMemRef.current,
+      tape: tradesTape?.trades,
+      fpBars: fpData?.bars,
+    });
+    if (snap && bookSrcRef.current !== heatmapLevels) {
+      bookMemRef.current = rememberBook(bookMemRef.current, snap.rows);
+      bookSrcRef.current = heatmapLevels;
+    }
+    return snap;
+  }, [heatmapLevels, heatViz, config.tick, lastClose, session, fpData, tradesTape]);
 
   return (
     <div className="gold-page oil-page">
@@ -877,21 +891,21 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
                 Volume histogram
               </label>
               <p className="viz-menu__sec">Měřítko</p>
-              <VizRow label="Šířka svíček" value={`${chartViz.barSpacing}`}>
+              <VizRow label="Šířka svíček" value={`${chartViz.barSpacing} px`}>
                 <input
                   type="range"
                   min={4}
-                  max={28}
+                  max={72}
                   value={chartViz.barSpacing}
                   onChange={(e) => setChartViz({ barSpacing: Number(e.target.value) })}
                 />
               </VizRow>
-              <VizRow label="Pravý okraj" value={`${chartViz.rightOffset}`}>
+              <VizRow label="Pravý okraj" value={chartViz.rightOffset <= 0 ? "lepit" : `${chartViz.rightOffset}`}>
                 <input
                   type="range"
-                  min={2}
-                  max={24}
-                  value={chartViz.rightOffset}
+                  min={0}
+                  max={12}
+                  value={chartViz.rightOffset >= 6 ? 0 : chartViz.rightOffset}
                   onChange={(e) => setChartViz({ rightOffset: Number(e.target.value) })}
                 />
               </VizRow>
@@ -933,13 +947,27 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
             <button
               type="button"
               className={`chart-chip chart-chip--soft ${footprint ? "is-active" : ""}`}
-              onClick={() => setFootprint((v) => !v)}
+              onClick={() =>
+                setFootprint((v) => {
+                  if (!v && chartViz.barSpacing < 20) setChartViz({ barSpacing: 24 });
+                  return !v;
+                })
+              }
               aria-pressed={footprint}
               title="Footprint — volume na ceně z Bybit tradů"
             >
               FP
             </button>
             <VizMenu title="Footprint" ariaLabel="Nastavení vizualizace footprintu">
+              <VizRow label="Velikost" value={`${chartViz.barSpacing} px`}>
+                <input
+                  type="range"
+                  min={8}
+                  max={72}
+                  value={chartViz.barSpacing}
+                  onChange={(e) => setChartViz({ barSpacing: Number(e.target.value) })}
+                />
+              </VizRow>
               <div className="viz-menu__row">
                 <span className="viz-menu__lab">Buňky</span>
                 <div className="viz-menu__seg">
@@ -980,6 +1008,14 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
               <label className="viz-menu__check">
                 <input
                   type="checkbox"
+                  checked={fpViz.lvn !== false}
+                  onChange={(e) => setFpViz({ lvn: e.target.checked })}
+                />
+                LVN
+              </label>
+              <label className="viz-menu__check">
+                <input
+                  type="checkbox"
                   checked={fpViz.unfinished}
                   onChange={(e) => setFpViz({ unfinished: e.target.checked })}
                 />
@@ -993,6 +1029,37 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
                 />
                 Knoty
               </label>
+              <label className="viz-menu__check">
+                <input
+                  type="checkbox"
+                  checked={fpViz.histogram !== false}
+                  onChange={(e) => setFpViz({ histogram: e.target.checked })}
+                />
+                Volume profil šířkou
+              </label>
+              <div className="viz-menu__row">
+                <span className="viz-menu__lab">
+                  Škála
+                  <span className="muted">{fpViz.scale === "session" ? "relace" : "svíčka"}</span>
+                </span>
+                <div className="viz-menu__seg">
+                  {(
+                    [
+                      ["candle", "Svíčka"],
+                      ["session", "Relace"],
+                    ] as const
+                  ).map(([id, lab]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      className={`chart-chip chart-chip--soft ${(fpViz.scale || "candle") === id ? "is-active" : ""}`}
+                      onClick={() => setFpViz({ scale: id })}
+                    >
+                      {lab}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="viz-menu__row">
                 <span className="viz-menu__lab">
                   Tick
@@ -1011,13 +1078,48 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
                   ))}
                 </div>
               </div>
-              <VizRow label="Kontrast" value={fpViz.gamma.toFixed(2)}>
+              <p className="viz-menu__sec">Vzhled</p>
+              <div className="viz-menu__colors">
+                {(
+                  [
+                    ["buyColor", "Buy / ask"],
+                    ["sellColor", "Sell / bid"],
+                    ["pocColor", "POC"],
+                    ["lvnColor", "LVN"],
+                    ["uaColor", "UA"],
+                  ] as const
+                ).map(([key, lab]) => (
+                  <label key={key} className="viz-menu__color">
+                    <span>{lab}</span>
+                    <input
+                      type="color"
+                      value={fpViz[key] || DEFAULT_FP_VIZ[key]}
+                      onChange={(e) => setFpViz({ [key]: e.target.value } as Partial<FpVizSettings>)}
+                    />
+                  </label>
+                ))}
+              </div>
+              <VizRow
+                label="Kontrast"
+                value={`${Math.round(((1.45 - (fpViz.gamma ?? 0.55)) / (1.45 - 0.28)) * 100)}`}
+              >
                 <input
                   type="range"
-                  min={40}
-                  max={120}
-                  value={Math.round(fpViz.gamma * 100)}
-                  onChange={(e) => setFpViz({ gamma: Number(e.target.value) / 100 })}
+                  min={0}
+                  max={100}
+                  value={Math.round(((1.45 - (fpViz.gamma ?? 0.55)) / (1.45 - 0.28)) * 100)}
+                  onChange={(e) =>
+                    setFpViz({ gamma: 1.45 - (Number(e.target.value) / 100) * (1.45 - 0.28) })
+                  }
+                />
+              </VizRow>
+              <VizRow label="Výplň" value={`${Math.round((fpViz.fill ?? 0.88) * 100)}%`}>
+                <input
+                  type="range"
+                  min={20}
+                  max={100}
+                  value={Math.round((fpViz.fill ?? 0.88) * 100)}
+                  onChange={(e) => setFpViz({ fill: Number(e.target.value) / 100 })}
                 />
               </VizRow>
               <VizRow
@@ -1068,7 +1170,7 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
                   bars={data.bars}
                   realtime
                   showMa={false}
-                  showVolume={false}
+                  showVolume={chartViz.volume}
                   secondsVisible={timeframe === "1m" || timeframe === "1s"}
                   heatmapLevels={heatmapLevels}
                   showHeatmap={showHeatmap}
@@ -1076,9 +1178,11 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
                   heatViz={heatViz}
                   tick={config.tick}
                   priceDigits={config.priceDigits}
+                  session={session}
                   onProfileWidthChange={(frac) => setHeatViz({ profileWidth: frac })}
                   showFootprint={footprint}
                   footprintData={fpData}
+                  tapePrints={tradesTape?.trades ?? null}
                   fpViz={fpViz}
                   chartViz={chartViz}
                   drawTool={drawTool}
@@ -1113,19 +1217,6 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
             priceDigits={config.priceDigits}
             collapsed={!liqOpen}
             onToggle={toggleLiq}
-          />
-        </div>
-        <div className={`oil-page__panel ${bookOpen ? "" : "is-collapsed"}`}>
-          <OrderBookPanel
-            book={orderBook}
-            session={session}
-            walls={walls}
-            priceDigits={config.priceDigits}
-            collapsed={!bookOpen}
-            onToggle={toggleBook}
-            onPriceClick={(price) => {
-              void navigator.clipboard?.writeText(String(price));
-            }}
           />
         </div>
         <div className={`oil-page__panel ${tapeOpen ? "" : "is-collapsed"}`}>

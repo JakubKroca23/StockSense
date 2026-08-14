@@ -29,6 +29,7 @@ export {
   stackedImbalanceZones,
   toWireLevel,
   unfinishedAuction,
+  lowVolumeNodes,
   valueArea,
 } from "./analytics";
 
