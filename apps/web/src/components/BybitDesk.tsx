@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch, apiWsUrl } from "@/lib/api";
 import { PriceChart, type ChartBar, type HeatmapLevel, type HeatVizSettings, DEFAULT_HEAT_VIZ } from "@/components/PriceChart";
@@ -8,6 +8,8 @@ import { HeaderExtra } from "@/components/HeaderExtra";
 import { FootprintChart, type FootprintData, type FpVizSettings, DEFAULT_FP_VIZ } from "@/components/FootprintChart";
 import { OrderBookPanel, type OrderBookData } from "@/components/OrderBookPanel";
 import { TradesTapePanel, type TradesTapeData } from "@/components/TradesTapePanel";
+import { LiquidityPanel } from "@/components/LiquidityPanel";
+import { analyzeLiquidity } from "@/lib/liquidity";
 import type { LinearDeskInfo } from "@/lib/desks";
 
 type DeskChartResponse = {
@@ -307,7 +309,7 @@ function VizMenu({
   useLayoutEffect(() => {
     if (!open || !btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
-    const width = 288;
+    const width = 300;
     let left = r.left;
     if (left + width > window.innerWidth - 8) left = Math.max(8, r.right - width);
     setPos({ top: r.bottom + 4, left });
@@ -408,10 +410,12 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
   const [tradesTape, setTradesTape] = useState<TradesTapeData | null>(null);
   const [bookOpen, toggleBook] = usePersistedOpen(`${DESK_STORE}-ob`, true);
   const [tapeOpen, toggleTape] = usePersistedOpen(`${DESK_STORE}-tape`, true);
+  const [liqOpen, toggleLiq] = usePersistedOpen(`${DESK_STORE}-liq`, true);
   const [showHeatmap, , setShowHeatmap] = usePersistedOpen(`${DESK_STORE}-heat`, true);
   const [heatmapLevels, setHeatmapLevels] = useState<HeatmapLevel[]>([]);
   const [heatOpacity, setHeatOpacity] = useState(0.55);
   const [footprint, , setFootprint] = usePersistedOpen(`${DESK_STORE}-fp`, false);
+  const [fpSplit, setFpSplit] = useState(0.36);
   const [fpData, setFpData] = useState<FootprintData | null>(null);
   const [heatViz, setHeatViz, resetHeatViz] = usePersistedJson<HeatVizSettings>(
     `${DESK_STORE}-l2-viz`,
@@ -429,6 +433,7 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
       const tfRaw = window.localStorage.getItem(`${DESK_STORE}-tf`);
       const lbRaw = window.localStorage.getItem(`${DESK_STORE}-lb`);
       const alpha = window.localStorage.getItem(`${DESK_STORE}-alpha`);
+      const splitRaw = window.localStorage.getItem(`${DESK_STORE}-fp-split`);
       const tfOk = TIMEFRAMES.some((t) => t.id === tfRaw) ? tfRaw! : "1m";
       const allowed = LOOKBACKS_BY_TF[tfOk] || LOOKBACKS_BY_TF["1d"];
       const tfMeta = TIMEFRAMES.find((t) => t.id === tfOk);
@@ -440,6 +445,10 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
       if (alpha) {
         const n = Number(alpha);
         if (Number.isFinite(n)) setHeatOpacity(Math.min(1, Math.max(0.15, n)));
+      }
+      if (splitRaw) {
+        const n = Number(splitRaw);
+        if (Number.isFinite(n)) setFpSplit(Math.min(0.72, Math.max(0.22, n)));
       }
     } catch {
       /* ignore */
@@ -462,19 +471,15 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
     );
   }, []);
 
-  const loadOrderBook = useCallback(
-    async (forHeatmap: boolean) => {
+  const loadOrderBook = useCallback(async () => {
       try {
-        const depth = forHeatmap ? 400 : 200;
-        const res = await apiFetch<OrderBookData>(`${apiBase}/orderbook?limit=${depth}`);
+        const res = await apiFetch<OrderBookData>(`${apiBase}/orderbook?limit=400`);
         setOrderBook(res);
-        if (forHeatmap) applyHeatLevels(res);
+        applyHeatLevels(res);
       } catch {
         /* keep last book */
       }
-    },
-    [applyHeatLevels, apiBase]
-  );
+    }, [applyHeatLevels, apiBase]);
 
   const loadTrades = useCallback(async () => {
     try {
@@ -505,13 +510,10 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
   }, [load, timeframe, lookback]);
 
   useEffect(() => {
-    void loadOrderBook(showHeatmap);
-    const id = window.setInterval(
-      () => void loadOrderBook(showHeatmap),
-      showHeatmap ? 650 : 2000
-    );
+    void loadOrderBook();
+    const id = window.setInterval(() => void loadOrderBook(), 650);
     return () => window.clearInterval(id);
-  }, [loadOrderBook, showHeatmap]);
+  }, [loadOrderBook]);
 
   useEffect(() => {
     void loadTrades();
@@ -658,10 +660,52 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
     }
   }, [heatOpacity]);
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(`${DESK_STORE}-fp-split`, String(fpSplit));
+    } catch {
+      /* ignore */
+    }
+  }, [fpSplit]);
+
   const up = (data?.change_pct ?? data?.change_pct_window ?? 0) >= 0;
   const ranges = LOOKBACKS_BY_TF[timeframe] || LOOKBACKS_BY_TF["1d"];
   const tfLabel = TIMEFRAMES.find((t) => t.id === timeframe)?.label ?? timeframe;
   const lbLabel = ranges.find((r) => r.id === lookback)?.label ?? lookback;
+  const lastClose = data?.bars?.length
+    ? data.bars[data.bars.length - 1].close
+    : data?.price ?? 0;
+  const liqSnap = useMemo(
+    () =>
+      analyzeLiquidity({
+        levels: heatmapLevels,
+        viz: heatViz,
+        tick: config.tick,
+        lastClose: lastClose || 0,
+      }),
+    [heatmapLevels, heatViz, config.tick, lastClose]
+  );
+
+  const onFpSplitDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const wrap = e.currentTarget.parentElement;
+    if (!wrap) return;
+    const y0 = e.clientY;
+    const h = wrap.getBoundingClientRect().height || 1;
+    const start = fpSplit;
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    const onMove = (ev: PointerEvent) => {
+      const next = Math.min(0.72, Math.max(0.22, start - (ev.clientY - y0) / h));
+      setFpSplit(next);
+    };
+    const onUp = () => {
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup", onUp);
+    };
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerup", onUp);
+  };
 
   return (
     <div className="gold-page oil-page">
@@ -704,103 +748,6 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
               options={ranges}
               onSelect={setLookback}
             />
-            <button
-              type="button"
-              className={`chart-chip chart-chip--soft ${showHeatmap ? "is-active" : ""}`}
-              onClick={() => {
-                setShowHeatmap((v) => {
-                  const next = !v;
-                  if (next && orderBook) applyHeatLevels(orderBook);
-                  if (!next) setHeatmapLevels([]);
-                  return next;
-                });
-              }}
-              title="Živá heatmapa likvidity z Bybit L2"
-            >
-              L2
-            </button>
-            <label
-              className={`cryptosense__heat-opacity ${showHeatmap ? "is-on" : "is-off"}`}
-              title="Průhlednost heatmapy"
-            >
-              <span className="muted">α</span>
-              <input
-                type="range"
-                min={15}
-                max={100}
-                value={Math.round(heatOpacity * 100)}
-                onChange={(e) => setHeatOpacity(Number(e.target.value) / 100)}
-                aria-label="Průhlednost heatmapy"
-                disabled={!showHeatmap}
-              />
-            </label>
-            <VizMenu title="Likvidita L2" ariaLabel="Nastavení vizualizace likvidity">
-              <VizRow label="Šum" value={`${Math.round(heatViz.noisePct * 100)}%`}>
-                <input
-                  type="range"
-                  min={10}
-                  max={70}
-                  value={Math.round(heatViz.noisePct * 100)}
-                  onChange={(e) => setHeatViz({ noisePct: Number(e.target.value) / 100 })}
-                />
-              </VizRow>
-              <VizRow label="Stěny" value={`${Math.round(heatViz.wallPct * 100)}%`}>
-                <input
-                  type="range"
-                  min={70}
-                  max={96}
-                  value={Math.round(heatViz.wallPct * 100)}
-                  onChange={(e) => setHeatViz({ wallPct: Number(e.target.value) / 100 })}
-                />
-              </VizRow>
-              <VizRow label="S/R" value={`${Math.round(heatViz.srPct * 100)}%`}>
-                <input
-                  type="range"
-                  min={85}
-                  max={99}
-                  value={Math.round(heatViz.srPct * 100)}
-                  onChange={(e) => setHeatViz({ srPct: Number(e.target.value) / 100 })}
-                />
-              </VizRow>
-              <VizRow label="Šířka profilu" value={`${Math.round(heatViz.profileWidth * 100)}%`}>
-                <input
-                  type="range"
-                  min={12}
-                  max={40}
-                  value={Math.round(heatViz.profileWidth * 100)}
-                  onChange={(e) => setHeatViz({ profileWidth: Number(e.target.value) / 100 })}
-                />
-              </VizRow>
-              <VizRow label="Hustota řádků" value={`${heatViz.rows}`}>
-                <input
-                  type="range"
-                  min={40}
-                  max={140}
-                  value={heatViz.rows}
-                  onChange={(e) => setHeatViz({ rows: Number(e.target.value) })}
-                />
-              </VizRow>
-              <VizRow label="Kontrast" value={heatViz.gamma.toFixed(2)}>
-                <input
-                  type="range"
-                  min={40}
-                  max={140}
-                  value={Math.round(heatViz.gamma * 100)}
-                  onChange={(e) => setHeatViz({ gamma: Number(e.target.value) / 100 })}
-                />
-              </VizRow>
-              <label className="viz-menu__check">
-                <input
-                  type="checkbox"
-                  checked={heatViz.guides}
-                  onChange={(e) => setHeatViz({ guides: e.target.checked })}
-                />
-                Vodorovné vodítka
-              </label>
-              <button type="button" className="viz-menu__reset" onClick={resetHeatViz}>
-                Výchozí
-              </button>
-            </VizMenu>
             <button
               type="button"
               className={`chart-chip chart-chip--soft ${footprint ? "is-active" : ""}`}
@@ -892,24 +839,45 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
       <section className="card instrument-chart gold-page__chart">
         <div className="instrument-chart__stage crypto-chart-stage gold-page__chart-pane">
           {data?.bars?.length ? (
-            footprint ? (
-              <FootprintChart
-                key={timeframe}
-                data={fpData || { interval: timeframe, tick: config.tick, bars: [] }}
-                viz={fpViz}
-              />
-            ) : (
-              <PriceChart
-                bars={data.bars}
-                realtime
-                showMa={false}
-                secondsVisible={timeframe === "1m" || timeframe === "1s"}
-                heatmapLevels={heatmapLevels}
-                showHeatmap={showHeatmap}
-                heatOpacity={heatOpacity}
-                heatViz={heatViz}
-              />
-            )
+            <div className={`desk-charts ${footprint ? "has-fp" : ""}`}>
+              <div
+                className="desk-charts__pane"
+                style={footprint ? { flex: `${(1 - fpSplit).toFixed(3)} 1 0` } : undefined}
+              >
+                <PriceChart
+                  bars={data.bars}
+                  realtime
+                  showMa={false}
+                  secondsVisible={timeframe === "1m" || timeframe === "1s"}
+                  heatmapLevels={heatmapLevels}
+                  showHeatmap={showHeatmap}
+                  heatOpacity={heatOpacity}
+                  heatViz={heatViz}
+                  tick={config.tick}
+                  priceDigits={config.priceDigits}
+                  onProfileWidthChange={(frac) => setHeatViz({ profileWidth: frac })}
+                />
+              </div>
+              {footprint ? (
+                <>
+                  <div
+                    className="desk-charts__hsplit"
+                    onPointerDown={onFpSplitDown}
+                    role="separator"
+                    aria-orientation="horizontal"
+                    aria-label="Velikost footprint grafu"
+                    title="Velikost footprint grafu"
+                  />
+                  <div className="desk-charts__pane" style={{ flex: `${fpSplit.toFixed(3)} 1 0` }}>
+                    <FootprintChart
+                      key={timeframe}
+                      data={fpData || { interval: timeframe, tick: config.tick, bars: [] }}
+                      viz={fpViz}
+                    />
+                  </div>
+                </>
+              ) : null}
+            </div>
           ) : (
             <div className="muted p-6 text-sm">
               {loading ? loadingLabel : "Žádná OHLCV data."}
@@ -923,6 +891,21 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
         </div>
       </section>
       <div className="oil-page__ob-side">
+        <div className={`oil-page__panel ${liqOpen ? "" : "is-collapsed"}`}>
+          <LiquidityPanel
+            snapshot={liqSnap}
+            showHeatmap={showHeatmap}
+            onToggleHeatmap={(on) => setShowHeatmap(on)}
+            heatViz={heatViz}
+            onHeatViz={setHeatViz}
+            onReset={resetHeatViz}
+            heatOpacity={heatOpacity}
+            onOpacity={setHeatOpacity}
+            priceDigits={config.priceDigits}
+            collapsed={!liqOpen}
+            onToggle={toggleLiq}
+          />
+        </div>
         <div className={`oil-page__panel ${bookOpen ? "" : "is-collapsed"}`}>
           <OrderBookPanel book={orderBook} collapsed={!bookOpen} onToggle={toggleBook} />
         </div>

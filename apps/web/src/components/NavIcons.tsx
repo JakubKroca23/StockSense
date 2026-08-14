@@ -69,26 +69,15 @@ export function IconTips(p: IconProps) {
   );
 }
 
-/** CryptoSense — mince s Bitcoin symbolem */
-export function IconCrypto(p: IconProps) {
+/** Desk — svíčky (výchozí ikona nového symbolu) */
+export function IconDesk(p: IconProps) {
   return (
     <Svg {...p}>
-      <circle cx="12" cy="12" r="8.4" />
-      <path d="M10.8 6.4v1.5M13.5 6.4v1.5M10.8 16.1v1.5M13.5 16.1v1.5" />
-      <path d="M9.4 8.15h3.55c1.72 0 2.8.88 2.8 2.18 0 1.18-.82 1.95-2.22 2.18" />
-      <path d="M9.4 12.5h4.25c1.88 0 3 .95 3 2.28 0 1.42-1.22 2.28-3.18 2.28H9.4" />
-      <path d="M9.4 8.15v9" />
-    </Svg>
-  );
-}
-
-/** Gold — slitek / hromada cihel */
-export function IconGold(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <path d="M6.2 9.2 8 6.4h8l1.8 2.8H6.2Z" />
-      <path d="M4.8 13.4 6.8 10.6h10.4l2 2.8H4.8Z" />
-      <path d="M3.4 18.2 5.6 15h12.8l2.2 3.2H3.4Z" />
+      <path d="M4.5 19.5V6.8" />
+      <path d="M4.5 19.5H19.5" />
+      <path d="M8 16V10M8 10V8M8 16v2" />
+      <path d="M12.5 14.5V7.5M12.5 7.5V5.5M12.5 14.5v2" />
+      <path d="M17 15.5V11M17 11V9.5M17 15.5v1.5" />
     </Svg>
   );
 }
@@ -170,10 +159,8 @@ export function IconMoon(p: IconProps) {
 
 export const navIcons: Record<string, (p: IconProps) => ReactNode> = {
   "/": IconHome,
-  "/cryptosense": IconCrypto,
   "/desk/btc": IconBtc,
   "/btc": IconBtc,
-  "/gold": IconGold,
   "/desk/oil": IconOil,
   "/oil": IconOil,
 };

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import {
   ColorType,
   CrosshairMode,
@@ -13,6 +13,18 @@ import {
   createChart,
 } from "lightweight-charts";
 import { useThemeRevision } from "@/lib/theme";
+import {
+  analyzeLiquidity,
+  inferTick,
+  snapAutoGroup,
+  DEFAULT_HEAT_VIZ,
+  type HeatmapLevel,
+  type HeatVizSettings,
+  type LiqZone,
+} from "@/lib/liquidity";
+
+export type { HeatmapLevel, HeatVizSettings };
+export { DEFAULT_HEAT_VIZ };
 
 export type ChartBar = {
   ts: string;
@@ -29,40 +41,6 @@ export type ChartLevel = {
   title: string;
   color?: string;
   style?: "solid" | "dashed" | "dotted";
-};
-
-/** Live order-book liquidity level for heatmap overlay (no history). */
-export type HeatmapLevel = {
-  price: number;
-  bid: number;
-  ask: number;
-};
-
-export type HeatVizSettings = {
-  /** Percentile below which size is treated as noise (0–1). */
-  noisePct: number;
-  /** Percentile where walls start (0–1). */
-  wallPct: number;
-  /** Percentile for the strongest S/R walls (0–1). */
-  srPct: number;
-  /** Profile lane width as a fraction of the plot (0–1). */
-  profileWidth: number;
-  /** Target number of profile rows. */
-  rows: number;
-  /** Horizontal liquidity guides across the chart. */
-  guides: boolean;
-  /** Contrast curve — lower = more punchy walls. */
-  gamma: number;
-};
-
-export const DEFAULT_HEAT_VIZ: HeatVizSettings = {
-  noisePct: 0.4,
-  wallPct: 0.88,
-  srPct: 0.96,
-  profileWidth: 0.24,
-  rows: 95,
-  guides: true,
-  gamma: 0.85,
 };
 
 /** @deprecated use HeatmapLevel[] — kept for type aliases */
@@ -89,6 +67,12 @@ type Props = {
   /** Global heatmap opacity 0–1 (default 0.55). */
   heatOpacity?: number;
   heatViz?: Partial<HeatVizSettings>;
+  /** Instrument tick — groups L2 into price buckets. */
+  tick?: number;
+  /** Price decimals for S/R tags. */
+  priceDigits?: number;
+  /** Drag the profile divider — fraction of plot width. */
+  onProfileWidthChange?: (frac: number) => void;
 };
 
 type Theme = {
@@ -188,10 +172,16 @@ export function PriceChart({
   showHeatmap = false,
   heatOpacity = 0.55,
   heatViz,
+  tick,
+  onProfileWidthChange,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const heatRef = useRef<HTMLCanvasElement>(null);
+  const splitRef = useRef<HTMLDivElement>(null);
+  const profileGeomRef = useRef({ left: 0, plotW: 120, frac: 0.26 });
+  const onWidthRef = useRef(onProfileWidthChange);
+  onWidthRef.current = onProfileWidthChange;
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
@@ -204,6 +194,8 @@ export function PriceChart({
   const showHeatRef = useRef(showHeatmap);
   const heatOpacityRef = useRef(heatOpacity);
   const heatVizRef = useRef<HeatVizSettings>({ ...DEFAULT_HEAT_VIZ, ...heatViz });
+  const heatTickRef = useRef(tick ?? 0);
+  const lastCloseRef = useRef(0);
   const fill = height == null;
   const themeRev = useThemeRevision();
 
@@ -211,6 +203,8 @@ export function PriceChart({
   showHeatRef.current = showHeatmap;
   heatOpacityRef.current = Math.min(1, Math.max(0.1, heatOpacity));
   heatVizRef.current = { ...DEFAULT_HEAT_VIZ, ...heatViz };
+  heatTickRef.current = tick ?? 0;
+  lastCloseRef.current = bars.length ? bars[bars.length - 1].close : 0;
 
   const drawHeatmap = () => {
     const canvas = heatRef.current;
@@ -237,9 +231,19 @@ export function PriceChart({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
-    if (!showHeatRef.current) return;
+    const hideSplit = () => {
+      if (splitRef.current) splitRef.current.style.visibility = "hidden";
+    };
+
+    if (!showHeatRef.current) {
+      hideSplit();
+      return;
+    }
     const raw = heatLevelsRef.current;
-    if (!raw.length) return;
+    if (!raw.length) {
+      hideSplit();
+      return;
+    }
 
     const theme = themeRef.current || readTheme();
     const opacityMul = heatOpacityRef.current;
@@ -247,38 +251,23 @@ export function PriceChart({
     const isNarrow =
       w < 720 ||
       (typeof window !== "undefined" && window.matchMedia("(max-width: 1099px)").matches);
-    // Keep clear of right price labels
     const leftPad = 2;
     const rightPad = isNarrow ? 54 : 68;
     const plotW = Math.max(48, w - leftPad - rightPad);
-    const profileFrac = Math.min(0.42, Math.max(0.1, viz.profileWidth));
+    const profileFrac = Math.min(0.5, Math.max(0.12, viz.profileWidth));
     const profileW = isNarrow
-      ? Math.max(36, Math.min(plotW * Math.min(profileFrac, 0.28), 95))
-      : Math.max(48, Math.min(plotW * profileFrac, 160));
+      ? Math.max(44, Math.min(plotW * Math.min(profileFrac, 0.38), plotW * 0.42))
+      : Math.max(56, Math.min(plotW * profileFrac, plotW * 0.5));
     const profileRight = leftPad + plotW;
     const profileLeft = profileRight - profileW;
-
-    type Side = { price: number; size: number; side: "bid" | "ask" };
-    const sides: Side[] = [];
-    for (const lvl of raw) {
-      if (lvl.bid > 0) sides.push({ price: lvl.price, size: lvl.bid, side: "bid" });
-      if (lvl.ask > 0) sides.push({ price: lvl.price, size: lvl.ask, side: "ask" });
+    profileGeomRef.current = { left: profileLeft, plotW, frac: profileFrac };
+    if (splitRef.current) {
+      splitRef.current.style.left = `${profileLeft}px`;
+      splitRef.current.style.visibility = "visible";
     }
-    if (!sides.length) return;
 
-    const sizes = sides.map((s) => s.size).sort((a, b) => a - b);
-    const pct = (p: number) =>
-      sizes[Math.min(sizes.length - 1, Math.floor(sizes.length * p))] || sizes[sizes.length - 1];
-    const maxSize = sizes[sizes.length - 1];
-    const noisePct = Math.min(0.75, Math.max(0.05, viz.noisePct));
-    const wallPct = Math.min(0.99, Math.max(noisePct + 0.08, viz.wallPct));
-    const srPct = Math.min(0.995, Math.max(wallPct, viz.srPct));
-    const noiseFloor = Math.max(pct(noisePct) * 0.7, maxSize * 0.015);
-    const lineCut = pct(Math.min(wallPct - 0.12, 0.78));
-    const wallCut = pct(wallPct);
-    const srCut = pct(srPct);
-    const visible = sides.filter((s) => s.size >= noiseFloor);
-    if (!visible.length) return;
+    const lastPx = lastCloseRef.current;
+    const tickSize = Math.max(1e-9, heatTickRef.current || inferTick(raw));
 
     const topP = series.coordinateToPrice(0);
     const botP = series.coordinateToPrice(h);
@@ -289,126 +278,230 @@ export function PriceChart({
       return ((topP - price) / (topP - botP)) * h;
     };
 
-    const targetRows = Math.round(isNarrow ? viz.rows * 0.76 : viz.rows);
-    const rowH = Math.max(1.6, Math.min(5.2, h / Math.max(24, targetRows)));
-    type Bucket = { y: number; bid: number; ask: number; price: number };
-    const buckets = new Map<number, Bucket>();
-    for (const s of visible) {
-      const y = priceToY(s.price);
-      if (y == null || y < -8 || y > h + 8) continue;
-      const key = Math.round(y / rowH);
-      const cur = buckets.get(key) || {
-        y: key * rowH,
-        bid: 0,
-        ask: 0,
-        price: s.price,
-      };
-      if (s.side === "bid") cur.bid += s.size;
-      else cur.ask += s.size;
-      const sideMax = Math.max(cur.bid, cur.ask);
-      if (s.size >= sideMax * 0.55) cur.price = s.price;
-      buckets.set(key, cur);
-    }
+    const snap = analyzeLiquidity({
+      levels: raw,
+      viz,
+      tick: tickSize,
+      lastClose: lastPx,
+    });
+    if (!snap) return;
 
-    // Only absorb very weak neighbors so we keep more distinct rows
-    const sortedKeys = [...buckets.keys()].sort((a, b) => a - b);
-    const merged = new Map<number, Bucket>();
-    for (const key of sortedKeys) {
-      const cur = buckets.get(key)!;
-      const total = cur.bid + cur.ask;
-      const prev = merged.get(key - 1);
-      const prevTotal = prev ? prev.bid + prev.ask : 0;
-      if (prev && total < prevTotal * 0.12) {
-        prev.bid += cur.bid;
-        prev.ask += cur.ask;
-        if (total >= Math.max(prev.bid, prev.ask) * 0.35) prev.price = cur.price;
-        continue;
-      }
-      merged.set(key, { ...cur });
-    }
-
-    const rows = [...merged.values()];
-    if (!rows.length) return;
-
-    let peak = 0;
-    for (const r of rows) peak = Math.max(peak, r.bid, r.ask);
-    if (peak <= 0) return;
-
-    const gamma = Math.min(1.6, Math.max(0.35, viz.gamma));
-    const strength = (size: number) => Math.pow(size / peak, gamma);
+    const {
+      rows: visible,
+      nearS,
+      nearR,
+      vacuums,
+      wallCut,
+      srCut,
+      peakShow,
+      peakRest,
+      step,
+      mid,
+      last,
+    } = snap;
+    const gamma = Math.min(1.55, Math.max(0.32, viz.gamma));
+    const punch = (size: number) => Math.pow(Math.min(1, size / peakRest), gamma);
     const widthOf = (size: number) => {
-      const t = strength(size);
-      return Math.max(2.5, profileW * (0.06 + t * 0.94));
-    };
-    // Thin lines; thickness still scales mildly with size
-    const lineThickness = (size: number) => {
-      const t = strength(size);
-      return 0.35 + t * t * (isNarrow ? 2.4 : 3.1);
-    };
-    const lineAlpha = (size: number) => {
-      const t = strength(size);
-      // Low volume nearly invisible, walls punch through
-      return Math.min(0.9, (0.05 + t * 0.82) * opacityMul);
+      const t = Math.pow(Math.min(1, size / peakShow), gamma);
+      return Math.max(2.5, profileW * (0.04 + t * 0.96));
     };
 
-    // Soft lane backdrop
-    ctx.fillStyle = hexAlpha(theme.muted, 0.06 * opacityMul);
+    ctx.fillStyle = hexAlpha(theme.chartBg, 0.42 * opacityMul);
     ctx.fillRect(profileLeft, 0, profileW, h);
-    ctx.strokeStyle = hexAlpha(theme.muted, 0.14 * opacityMul);
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(profileLeft + 0.5, 0);
-    ctx.lineTo(profileLeft + 0.5, h);
-    ctx.stroke();
+    ctx.fillStyle = hexAlpha(theme.muted, 0.04 * opacityMul);
+    ctx.fillRect(profileLeft, 0, profileW, h);
 
-    // Weaker full-chart guides first, strong walls on top
-    const bySize = [...rows].sort(
-      (a, b) => Math.max(a.bid, a.ask) - Math.max(b.bid, b.ask)
-    );
+    const yBand = (zlo: number, zhi: number, pad = 0): { y: number; h: number } | null => {
+      const yHi = priceToY(zhi + pad);
+      const yLo = priceToY(zlo - pad);
+      if (yHi == null || yLo == null) return null;
+      const y = Math.min(yHi, yLo);
+      return { y, h: Math.max(1.5, Math.abs(yLo - yHi)) };
+    };
 
-    if (viz.guides) {
-      for (const r of bySize) {
-        const y = r.y;
-        if (y < -6 || y > h + 6) continue;
-        const wallSize = Math.max(r.bid, r.ask);
-        if (wallSize < lineCut) continue;
-        const color = r.bid >= r.ask ? theme.up : theme.down;
-        const th = lineThickness(wallSize);
-        const a = lineAlpha(wallSize);
-        const boost = wallSize >= srCut ? 1 : wallSize >= wallCut ? 0.78 : 0.42;
-        ctx.fillStyle = hexAlpha(color, a * boost);
-        ctx.fillRect(leftPad, y - th / 2, Math.max(0, profileRight - leftPad), th);
+    const candleW = Math.max(0, profileLeft - leftPad);
+
+    if (viz.vacuums) {
+      for (const v of vacuums) {
+        const box = yBand(v.lo, v.hi, step * 0.1);
+        if (!box || candleW < 8) continue;
+        const col = v.up ? theme.up : theme.down;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(leftPad, box.y, candleW, box.h);
+        ctx.clip();
+        ctx.fillStyle = hexAlpha(col, 0.055 * opacityMul);
+        ctx.fillRect(leftPad, box.y, candleW, box.h);
+        ctx.strokeStyle = hexAlpha(col, 0.14 * opacityMul);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let x = leftPad - box.h; x < leftPad + candleW; x += 10) {
+          ctx.moveTo(x, box.y + box.h);
+          ctx.lineTo(x + box.h, box.y);
+        }
+        ctx.stroke();
+        ctx.restore();
+        ctx.strokeStyle = hexAlpha(col, 0.28 * opacityMul);
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 4]);
+        ctx.beginPath();
+        ctx.moveTo(leftPad, box.y + 0.5);
+        ctx.lineTo(profileLeft, box.y + 0.5);
+        ctx.moveTo(leftPad, box.y + box.h + 0.5);
+        ctx.lineTo(profileLeft, box.y + box.h + 0.5);
+        ctx.stroke();
+        ctx.setLineDash([]);
       }
     }
 
-    // Profile bars — thin rows, opacity strongly tied to volume
-    for (const r of rows) {
-      const y = r.y;
-      if (y < -4 || y > h + 4) continue;
-      const barH = Math.max(1.15, rowH * 0.62);
+    if (Number.isFinite(snap.bestBid) && Number.isFinite(snap.bestAsk) && snap.bestAsk > snap.bestBid) {
+      const yAsk = priceToY(snap.bestAsk);
+      const yBid = priceToY(snap.bestBid);
+      if (yAsk != null && yBid != null) {
+        const y0 = Math.min(yAsk, yBid);
+        const zh = Math.max(1, Math.abs(yBid - yAsk));
+        ctx.fillStyle = hexAlpha(theme.sense, 0.1 * opacityMul);
+        ctx.fillRect(profileLeft, y0, profileW, zh);
+      }
+    }
 
-      const paint = (size: number, color: string) => {
-        if (size < noiseFloor) return;
+    const paintNear = (z: LiqZone | null) => {
+      if (!z) return;
+      const color = z.support ? theme.up : theme.down;
+      const pad = z.magnet ? 0 : step * 0.45;
+      const box = yBand(z.lo, z.hi, pad);
+      const pocY = priceToY(z.poc);
+      if (z.magnet) {
+        if (pocY == null) return;
+        ctx.strokeStyle = hexAlpha(color, 0.78 * opacityMul);
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(leftPad, pocY + 0.5);
+        ctx.lineTo(profileLeft, pocY + 0.5);
+        ctx.stroke();
+        ctx.fillStyle = hexAlpha(color, 0.92 * opacityMul);
+        ctx.beginPath();
+        ctx.moveTo(profileLeft - 1, pocY);
+        ctx.lineTo(profileLeft - 9, pocY - 5);
+        ctx.lineTo(profileLeft - 9, pocY + 5);
+        ctx.closePath();
+        ctx.fill();
+      } else if (box) {
+        ctx.fillStyle = hexAlpha(color, 0.16 * opacityMul);
+        ctx.fillRect(leftPad, box.y, candleW, box.h);
+        ctx.strokeStyle = hexAlpha(color, 0.42 * opacityMul);
+        ctx.lineWidth = 1;
+        ctx.strokeRect(leftPad + 0.5, box.y + 0.5, Math.max(0, candleW - 1), Math.max(1, box.h - 1));
+        if (pocY != null) {
+          ctx.strokeStyle = hexAlpha(color, 0.7 * opacityMul);
+          ctx.lineWidth = 1.15;
+          ctx.setLineDash([5, 3]);
+          ctx.beginPath();
+          ctx.moveTo(leftPad, pocY + 0.5);
+          ctx.lineTo(profileLeft, pocY + 0.5);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+      }
+    };
+    if (viz.zones) {
+      paintNear(nearS);
+      paintNear(nearR);
+    }
+
+    const yStep = priceToY(snap.mid + step);
+    const yMid = priceToY(snap.mid);
+    const pxPerStep = yMid != null && yStep != null ? Math.abs(yStep - yMid) : 2;
+    const visGroup = snapAutoGroup(pxPerStep);
+    let drawRows = visible;
+    let drawStep = step;
+    if (visGroup > 1) {
+      const merged = new Map<number, (typeof visible)[number]>();
+      const qStep = step * visGroup;
+      for (const r of visible) {
+        const p = Number((Math.round(r.price / qStep) * qStep).toFixed(10));
+        const cur = merged.get(p);
+        if (!cur) {
+          merged.set(p, { ...r, price: p });
+        } else {
+          cur.bid += r.bid;
+          cur.ask += r.ask;
+          cur.showBid = Math.max(cur.showBid, r.showBid);
+          cur.showAsk = Math.max(cur.showAsk, r.showAsk);
+          cur.rest = Math.max(cur.rest, r.rest);
+        }
+      }
+      drawRows = [...merged.values()];
+      drawStep = qStep;
+    }
+
+    const byRest = [...drawRows].sort((a, b) => a.rest - b.rest);
+    for (const r of byRest) {
+      const y = priceToY(r.price);
+      const yNext = priceToY(r.price + drawStep);
+      if (y == null) continue;
+      if (y < -10 || y > h + 10) continue;
+      const bandH = Math.max(1.2, yNext != null ? Math.abs(yNext - y) * 0.88 : 3);
+      const t = punch(r.rest);
+      const isWall = r.rest >= wallCut;
+      const isSr = r.rest >= srCut;
+      const paint = (size: number, col: string) => {
+        if (size <= 0) return;
         const bw = widthOf(size);
-        const t = strength(size);
-        const isWall = size >= wallCut;
-        const isSr = size >= srCut;
-        // Big spread: faint mid-book vs opaque walls
-        const aBase = 0.08 + t * 0.78;
-        const a = Math.min(0.94, aBase * opacityMul * (isSr ? 1.15 : isWall ? 1.05 : 1));
-        ctx.fillStyle = hexAlpha(color, a);
-        ctx.fillRect(profileRight - bw, y - barH / 2, bw, barH);
-
+        const a = Math.min(
+          0.94,
+          (0.1 + t * (isSr ? 0.82 : isWall ? 0.7 : 0.42)) * opacityMul
+        );
         if (isWall) {
-          const tipH = Math.max(0.8, Math.min(barH, 0.9 + t * 1.8));
-          ctx.fillStyle = hexAlpha(color, Math.min(0.96, (0.35 + t * 0.55) * opacityMul));
-          ctx.fillRect(profileRight - bw, y - tipH / 2, Math.min(3.5, bw), tipH);
+          ctx.fillStyle = hexAlpha(col, 0.12 * opacityMul);
+          ctx.fillRect(profileRight - bw - 4, y - bandH * 0.62, bw + 6, bandH * 1.24);
+        }
+        ctx.fillStyle = hexAlpha(col, a);
+        ctx.fillRect(profileRight - bw, y - bandH / 2, bw, Math.max(1.1, bandH * 0.84));
+        if (isWall) {
+          ctx.fillStyle = hexAlpha(col, Math.min(0.98, (0.5 + t * 0.45) * opacityMul));
+          ctx.fillRect(
+            profileRight - bw,
+            y - Math.max(1, bandH * 0.2),
+            Math.min(3.5, bw),
+            Math.max(1, bandH * 0.4)
+          );
         }
       };
-
-      if (r.bid > 0) paint(r.bid, theme.up);
-      if (r.ask > 0) paint(r.ask, theme.down);
+      if (r.bid > 0) paint(r.showBid, theme.up);
+      if (r.ask > 0) paint(r.showAsk, theme.down);
     }
+
+    const lastY = last > 0 ? priceToY(last) : priceToY(mid);
+    if (lastY != null && lastY >= 0 && lastY <= h) {
+      ctx.strokeStyle = hexAlpha(theme.sense, 0.75 * opacityMul);
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(profileLeft, lastY + 0.5);
+      ctx.lineTo(profileRight, lastY + 0.5);
+      ctx.stroke();
+    }
+  };
+
+  const onProfileSplitDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startFrac = profileGeomRef.current.frac;
+    const plotW = Math.max(48, profileGeomRef.current.plotW);
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    const onMove = (ev: PointerEvent) => {
+      const next = Math.min(0.5, Math.max(0.12, startFrac + (startX - ev.clientX) / plotW));
+      profileGeomRef.current.frac = next;
+      onWidthRef.current?.(next);
+    };
+    const onUp = () => {
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup", onUp);
+    };
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerup", onUp);
   };
 
   useEffect(() => {
@@ -573,7 +666,7 @@ export function PriceChart({
   useEffect(() => {
     const id = requestAnimationFrame(() => drawHeatmap());
     return () => cancelAnimationFrame(id);
-  }, [heatmapLevels, showHeatmap, heatOpacity, bars, heatViz]);
+  }, [heatmapLevels, showHeatmap, heatOpacity, bars, heatViz, tick]);
 
   useEffect(() => {
     if (!seriesRef.current || !volumeRef.current || !chartRef.current) return;
@@ -721,6 +814,15 @@ export function PriceChart({
         ref={heatRef}
         className={`price-chart__heat ${showHeatmap ? "is-on" : ""}`}
         aria-hidden
+      />
+      <div
+        ref={splitRef}
+        className={`price-chart__split ${showHeatmap ? "is-on" : ""}`}
+        onPointerDown={onProfileSplitDown}
+        title="Šířka profilu"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Šířka profilu likvidity"
       />
     </div>
   );

@@ -8,6 +8,7 @@ import { SettingsPanel } from "@/components/SettingsPanel";
 import { HeaderExtraSlot } from "@/components/HeaderExtra";
 import {
   IconClose,
+  IconDesk,
   IconMenu,
   IconMoon,
   IconSettings,
@@ -21,9 +22,7 @@ import { LINEAR_DESKS, deskHref } from "@/lib/desks";
 
 const links: { href: string; label: string }[] = [
   { href: "/", label: "Home" },
-  { href: "/cryptosense", label: "Crypto" },
   ...LINEAR_DESKS.map((d) => ({ href: deskHref(d.id), label: d.navLabel })),
-  { href: "/gold", label: "Gold" },
 ];
 
 const RAIL_KEY = "stocksense-rail-collapsed";
@@ -42,7 +41,7 @@ function NavLabel({
   label: string;
   size?: number;
 }) {
-  const Icon = navIcons[href] ?? navIcons["/"];
+  const Icon = navIcons[href] ?? IconDesk;
   return (
     <span className="nav-item">
       <Icon size={size} />

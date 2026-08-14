@@ -40,6 +40,7 @@ class LinearDesk:
 
 
 DESKS: dict[str, LinearDesk] = {
+    # Add a desk here AND in apps/web/src/lib/desks.ts (same id). Footprint engines pick it up automatically.
     "oil": LinearDesk(
         id="oil",
         symbol="CLUSDT",

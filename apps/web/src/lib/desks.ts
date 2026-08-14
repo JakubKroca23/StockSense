@@ -8,6 +8,10 @@ export type LinearDeskInfo = {
   tick: number;
 };
 
+/**
+ * Shared Bybit linear desks. UI is always `BybitDesk` at `/desk/{id}`.
+ * To add a symbol: append here AND in `apps/api/app/services/oil_bybit.py` `DESKS` (same `id`).
+ */
 export const LINEAR_DESKS: LinearDeskInfo[] = [
   {
     id: "btc",

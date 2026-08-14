@@ -38,7 +38,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   return res.json() as Promise<T>;
 }
 
-/** Build WebSocket URL for API paths like `/crypto/ws/ohlcv?...`. */
+/** Build WebSocket URL for API paths like `/desk/btc/ws/ohlcv?...`. */
 export function apiWsUrl(path: string): string {
   const base = API_URL.replace(/\/$/, "");
   const wsBase = base.startsWith("https")
