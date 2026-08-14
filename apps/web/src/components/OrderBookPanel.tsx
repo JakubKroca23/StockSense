@@ -1,6 +1,8 @@
 "use client";
 
-import { useLayoutEffect, useRef, type ReactNode } from "react";
+import { useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
+import { fmtV } from "@/components/FootprintChart";
+import type { BookWallFlag, SessionProfile } from "@/lib/orderflow";
 
 export type OrderLevel = {
   price: number;
@@ -32,11 +34,12 @@ export type OrderBookData = {
   as_of: string;
 };
 
-function fmtPrice(n: number | null | undefined) {
+function fmtPrice(n: number | null | undefined, digits = 2) {
   if (n == null) return "—";
-  if (n >= 1000) return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
-  if (n >= 1) return n.toLocaleString("en-US", { maximumFractionDigits: 4 });
-  return n.toLocaleString("en-US", { maximumFractionDigits: 6 });
+  return n.toLocaleString("en-US", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
 }
 
 function fmtAmt(n: number) {
@@ -44,7 +47,15 @@ function fmtAmt(n: number) {
   return n.toLocaleString("en-US", { maximumFractionDigits: 4 });
 }
 
-const ROWS = 36;
+const ROWS = 42;
+
+type LadderRow = {
+  price: number;
+  bid: number;
+  ask: number;
+  vol: number;
+  wall: "bid" | "ask" | "spoof" | null;
+};
 
 function PanelToggle({
   collapsed,
@@ -70,54 +81,88 @@ function PanelToggle({
 
 export function OrderBookPanel({
   book,
+  session,
+  walls = [],
+  priceDigits = 2,
   collapsed = false,
   onToggle,
+  onPriceClick,
 }: {
   book: OrderBookData | null;
+  session?: SessionProfile | null;
+  walls?: BookWallFlag[];
+  priceDigits?: number;
   collapsed?: boolean;
   onToggle?: () => void;
+  onPriceClick?: (price: number, side: "bid" | "ask") => void;
 }) {
   const ladderRef = useRef<HTMLDivElement>(null);
-  const spreadRef = useRef<HTMLDivElement>(null);
+  const midRef = useRef<HTMLDivElement>(null);
   const userLockRef = useRef(0);
 
   const title = (
     <p className="orderbook__title">
       {onToggle ? <span className="desk-panel__caret">{collapsed ? "▸" : "▾"}</span> : null}
-      Order book
+      DOM
     </p>
   );
+
+  const ladder = useMemo(() => {
+    if (!book) return { list: [] as LadderRow[], anchor: null as number | null };
+    const bidMap = new Map(book.bids.map((l) => [l.price, l.amount]));
+    const askMap = new Map(book.asks.map((l) => [l.price, l.amount]));
+    const volMap = new Map((session?.rows || []).map((r) => [r.price, r.totalVolume]));
+    const wallMap = new Map(walls.map((w) => [w.price, w.kind === "spoof" ? "spoof" : w.side]));
+    const prices = new Set<number>([
+      ...bidMap.keys(),
+      ...askMap.keys(),
+      ...[...volMap.keys()].filter((p) => {
+        if (book.mid == null) return false;
+        return Math.abs(p - book.mid) / Math.max(book.mid, 1) < 0.012;
+      }),
+    ]);
+    const sorted = [...prices].sort((a, b) => b - a);
+    const mid = book.mid ?? (sorted[Math.floor(sorted.length / 2)] || 0);
+    let midIdx = sorted.findIndex((p) => p <= mid);
+    if (midIdx < 0) midIdx = Math.floor(sorted.length / 2);
+    const from = Math.max(0, midIdx - ROWS);
+    const to = Math.min(sorted.length, midIdx + ROWS);
+    const list = sorted.slice(from, to).map((price) => {
+      const wall = wallMap.get(price);
+      return {
+        price,
+        bid: bidMap.get(price) || 0,
+        ask: askMap.get(price) || 0,
+        vol: volMap.get(price) || 0,
+        wall: (wall === "spoof" || wall === "bid" || wall === "ask" ? wall : null) as LadderRow["wall"],
+      };
+    });
+    const anchor =
+      list.find((r) => r.price <= mid)?.price ?? list[Math.floor(list.length / 2)]?.price ?? null;
+    return { list, anchor };
+  }, [book, session, walls]);
+
+  const rows = ladder.list;
+  const anchorPrice = ladder.anchor;
 
   useLayoutEffect(() => {
     if (collapsed || !book) return;
     const ladder = ladderRef.current;
-    const spread = spreadRef.current;
-    if (!ladder || !spread) return;
-
+    const midEl = midRef.current;
+    if (!ladder || !midEl) return;
     const center = () => {
       if (Date.now() < userLockRef.current) return;
       const view = ladder.clientHeight;
       if (view < 16) return;
-      ladder.style.paddingTop = "0px";
-      ladder.style.paddingBottom = "0px";
-      const spreadH = spread.offsetHeight;
-      const target = (view - spreadH) / 2;
-      const relTop = () =>
-        spread.getBoundingClientRect().top - ladder.getBoundingClientRect().top + ladder.scrollTop;
-      const asksH = relTop();
-      const bidsH = ladder.scrollHeight - asksH - spreadH;
-      const padTop = Math.max(0, Math.round(target - asksH));
-      const padBot = Math.max(0, Math.round(target - bidsH));
-      ladder.style.paddingTop = `${padTop}px`;
-      ladder.style.paddingBottom = `${padBot}px`;
-      ladder.scrollTop = Math.max(0, relTop() - target);
+      const rel =
+        midEl.getBoundingClientRect().top - ladder.getBoundingClientRect().top + ladder.scrollTop;
+      ladder.scrollTop = Math.max(0, rel - view / 2 + midEl.offsetHeight / 2);
     };
-
     center();
     const ro = new ResizeObserver(() => center());
     ro.observe(ladder);
     return () => ro.disconnect();
-  }, [collapsed, book]);
+  }, [collapsed, book, rows]);
 
   if (!book) {
     return (
@@ -130,16 +175,12 @@ export function OrderBookPanel({
     );
   }
 
-  const maxTotal = Math.max(
-    book.bids[book.bids.length - 1]?.total || 0,
-    book.asks[book.asks.length - 1]?.total || 0,
-    1
-  );
-  const asks = book.asks.slice(0, ROWS).reverse();
-  const bids = book.bids.slice(0, ROWS);
+  const maxBid = Math.max(...rows.map((r) => r.bid), 0.0001);
+  const maxAsk = Math.max(...rows.map((r) => r.ask), 0.0001);
+  const maxVol = Math.max(...rows.map((r) => r.vol), 0.0001);
 
   return (
-    <aside className={`orderbook ${collapsed ? "is-collapsed" : ""}`}>
+    <aside className={`orderbook orderbook--dom ${collapsed ? "is-collapsed" : ""}`}>
       <PanelToggle collapsed={collapsed} onToggle={onToggle}>
         {title}
         {!collapsed && (
@@ -152,10 +193,11 @@ export function OrderBookPanel({
 
       {!collapsed && (
         <>
-          <div className="orderbook__cols muted text-xs">
+          <div className="orderbook__cols orderbook__cols--dom muted text-xs">
+            <span>Bid</span>
             <span>Cena</span>
-            <span>Objem</span>
-            <span>Σ</span>
+            <span>Ask</span>
+            <span>Vol</span>
           </div>
 
           <div
@@ -168,36 +210,61 @@ export function OrderBookPanel({
               userLockRef.current = Date.now() + 2500;
             }}
           >
-            {asks.map((ask) => (
-              <div key={`a-${ask.price}`} className="orderbook__row is-ask">
-                <span
-                  className="orderbook__depth"
-                  style={{ width: `${(ask.total / maxTotal) * 100}%` }}
-                />
-                <span className="orderbook__px text-[var(--chart-down)]">{fmtPrice(ask.price)}</span>
-                <span className="orderbook__amt">{fmtAmt(ask.amount)}</span>
-                <span className="orderbook__tot muted">{fmtAmt(ask.total)}</span>
-              </div>
-            ))}
-
-            <div className="orderbook__spread" ref={spreadRef}>
-              <span className="text-[var(--text)] font-semibold">{fmtPrice(book.mid)}</span>
-              <span className="muted text-xs">
-                mid · Δ {book.spread != null ? fmtPrice(book.spread) : "—"}
-              </span>
-            </div>
-
-            {bids.map((bid) => (
-              <div key={`b-${bid.price}`} className="orderbook__row is-bid">
-                <span
-                  className="orderbook__depth"
-                  style={{ width: `${(bid.total / maxTotal) * 100}%` }}
-                />
-                <span className="orderbook__px text-[var(--chart-up)]">{fmtPrice(bid.price)}</span>
-                <span className="orderbook__amt">{fmtAmt(bid.amount)}</span>
-                <span className="orderbook__tot muted">{fmtAmt(bid.total)}</span>
-              </div>
-            ))}
+            {rows.map((row) => {
+              const isMid = row.price === anchorPrice;
+              const wallClass =
+                row.wall === "spoof"
+                  ? " is-spoof"
+                  : row.wall === "bid"
+                    ? " is-wall-bid"
+                    : row.wall === "ask"
+                      ? " is-wall-ask"
+                      : "";
+              return (
+                <div
+                  key={row.price}
+                  ref={isMid ? midRef : undefined}
+                  className={`orderbook__row orderbook__row--dom${isMid ? " is-mid" : ""}${wallClass}`}
+                >
+                  <button
+                    type="button"
+                    className="orderbook__cell is-bid"
+                    onClick={() => onPriceClick?.(row.price, "bid")}
+                  >
+                    {row.bid > 0 && (
+                      <span
+                        className="orderbook__hist is-bid"
+                        style={{ width: `${(row.bid / maxBid) * 100}%` }}
+                      />
+                    )}
+                    <span>{row.bid > 0 ? fmtAmt(row.bid) : ""}</span>
+                  </button>
+                  <span className="orderbook__px">{fmtPrice(row.price, priceDigits)}</span>
+                  <button
+                    type="button"
+                    className="orderbook__cell is-ask"
+                    onClick={() => onPriceClick?.(row.price, "ask")}
+                  >
+                    {row.ask > 0 && (
+                      <span
+                        className="orderbook__hist is-ask"
+                        style={{ width: `${(row.ask / maxAsk) * 100}%` }}
+                      />
+                    )}
+                    <span>{row.ask > 0 ? fmtAmt(row.ask) : ""}</span>
+                  </button>
+                  <span className="orderbook__sess">
+                    {row.vol > 0 && (
+                      <span
+                        className="orderbook__hist is-vol"
+                        style={{ width: `${(row.vol / maxVol) * 100}%` }}
+                      />
+                    )}
+                    <span>{row.vol > 0 ? fmtV(row.vol) : ""}</span>
+                  </span>
+                </div>
+              );
+            })}
           </div>
 
           <div className="orderbook__venues">

@@ -1,5 +1,8 @@
 "use client";
 
+import { useMemo } from "react";
+import { buildSmartTape, type SmartPrint, type TradeTick } from "@/lib/orderflow";
+
 export type TradePrint = {
   id: string;
   ts: string;
@@ -37,10 +40,9 @@ function fmtAmt(n: number) {
   return n.toLocaleString("en-US", { maximumFractionDigits: 5 });
 }
 
-function fmtTime(ts: string) {
+function fmtTime(ts: number) {
   try {
-    const d = new Date(ts);
-    return d.toLocaleTimeString("cs-CZ", {
+    return new Date(ts).toLocaleTimeString("cs-CZ", {
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
@@ -51,19 +53,47 @@ function fmtTime(ts: string) {
   }
 }
 
+function toTick(t: TradePrint): TradeTick {
+  return {
+    id: `${t.exchange}-${t.id}-${t.ts_ms}`,
+    ts: t.ts_ms,
+    price: t.price,
+    size: t.amount,
+    aggressorSide: t.side,
+  };
+}
+
 export function TradesTapePanel({
   tape,
   collapsed = false,
   onToggle,
+  smart = true,
+  blockSize = 0,
+  onBlockSize,
+  onSmart,
 }: {
   tape: TradesTapeData | null;
   collapsed?: boolean;
   onToggle?: () => void;
+  smart?: boolean;
+  blockSize?: number;
+  onBlockSize?: (n: number) => void;
+  onSmart?: (on: boolean) => void;
 }) {
+  const prints = useMemo<SmartPrint[]>(() => {
+    if (!tape?.trades.length) return [];
+    return buildSmartTape(tape.trades.map(toTick), { smart, blockSize });
+  }, [tape, smart, blockSize]);
+
+  const visible = useMemo(
+    () => (blockSize > 0 ? prints.filter((p) => p.size >= blockSize) : prints),
+    [prints, blockSize]
+  );
+
   const title = (
     <p className="trades-tape__title">
       {onToggle ? <span className="desk-panel__caret">{collapsed ? "▸" : "▾"}</span> : null}
-      Trady
+      Tape
     </p>
   );
 
@@ -77,7 +107,8 @@ export function TradesTapePanel({
       {title}
       {!collapsed && tape && (
         <p className="muted text-xs">
-          {tape.exchanges.join(" + ")} · {tape.count} prints
+          {tape.exchanges.join(" + ")} · {visible.length}
+          {smart ? " smart" : " prints"}
         </p>
       )}
     </button>
@@ -86,7 +117,7 @@ export function TradesTapePanel({
       {title}
       {tape && (
         <p className="muted text-xs">
-          {tape.exchanges.join(" + ")} · {tape.count} prints
+          {tape.exchanges.join(" + ")} · {visible.length}
         </p>
       )}
     </div>
@@ -101,7 +132,7 @@ export function TradesTapePanel({
     );
   }
 
-  const maxAmt = Math.max(...tape.trades.map((t) => t.amount), 0.0001);
+  const maxAmt = Math.max(...visible.map((t) => t.size), 0.0001);
   const buyShare =
     tape.buy_volume + tape.sell_volume > 0
       ? tape.buy_volume / (tape.buy_volume + tape.sell_volume)
@@ -127,6 +158,27 @@ export function TradesTapePanel({
             <span className="is-buy">buy {fmtAmt(tape.buy_volume)}</span>
             <span className="is-sell">sell {fmtAmt(tape.sell_volume)}</span>
           </div>
+          <div className="trades-tape__tools">
+            <label className="viz-menu__check">
+              <input
+                type="checkbox"
+                checked={smart}
+                onChange={(e) => onSmart?.(e.target.checked)}
+              />
+              Smart
+            </label>
+            <label className="trades-tape__block">
+              Block
+              <input
+                type="number"
+                min={0}
+                step="any"
+                value={blockSize || ""}
+                placeholder="0"
+                onChange={(e) => onBlockSize?.(Math.max(0, Number(e.target.value) || 0))}
+              />
+            </label>
+          </div>
 
           <div className="trades-tape__cols muted text-xs">
             <span>Čas</span>
@@ -135,22 +187,27 @@ export function TradesTapePanel({
           </div>
 
           <div className="trades-tape__list">
-            {tape.trades.map((t) => {
-              const w = Math.max(8, Math.min(100, (t.amount / maxAmt) * 100));
+            {visible.map((t) => {
+              const w = Math.max(8, Math.min(100, (t.size / maxAmt) * 100));
               return (
                 <div
-                  key={`${t.exchange}-${t.id}-${t.ts_ms}`}
-                  className={`trades-tape__row is-${t.side}`}
+                  key={t.id}
+                  className={`trades-tape__row is-${t.aggressorSide}${t.block ? " is-block" : ""}`}
                 >
                   <span className="trades-tape__bar" style={{ width: `${w}%` }} aria-hidden />
                   <span className="trades-tape__time">{fmtTime(t.ts)}</span>
                   <span className="trades-tape__px">{fmtPrice(t.price)}</span>
-                  <span className="trades-tape__amt">{fmtAmt(t.amount)}</span>
+                  <span className="trades-tape__amt">
+                    {fmtAmt(t.size)}
+                    {t.count > 1 ? <span className="trades-tape__n">×{t.count}</span> : null}
+                  </span>
                 </div>
               );
             })}
-            {!tape.trades.length && (
-              <p className="muted text-sm px-1 py-2">Žádné recent trady.</p>
+            {!visible.length && (
+              <p className="muted text-sm px-1 py-2">
+                {blockSize > 0 ? "Žádné block trady nad prahem." : "Žádné recent trady."}
+              </p>
             )}
           </div>
         </>

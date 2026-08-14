@@ -3,14 +3,21 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch, apiWsUrl } from "@/lib/api";
-import { PriceChart, type ChartBar, type HeatmapLevel, type HeatVizSettings, DEFAULT_HEAT_VIZ } from "@/components/PriceChart";
+import { PriceChart, type ChartBar, type HeatmapLevel, type HeatVizSettings, type ChartVizSettings, DEFAULT_HEAT_VIZ, DEFAULT_DESK_CHART_VIZ } from "@/components/PriceChart";
 import { HeaderExtra } from "@/components/HeaderExtra";
-import { FootprintChart, type FootprintData, type FpVizSettings, DEFAULT_FP_VIZ } from "@/components/FootprintChart";
+import { type FootprintData, type FpVizSettings, DEFAULT_FP_VIZ } from "@/components/FootprintChart";
 import { OrderBookPanel, type OrderBookData } from "@/components/OrderBookPanel";
 import { TradesTapePanel, type TradesTapeData } from "@/components/TradesTapePanel";
 import { LiquidityPanel } from "@/components/LiquidityPanel";
 import { analyzeLiquidity } from "@/lib/liquidity";
-import type { LinearDeskInfo } from "@/lib/desks";
+import {
+  detectBookWalls,
+  levelsFromWireBars,
+  type BookWallFlag,
+  type OrderBookLevel,
+  type SessionProfile,
+} from "@/lib/orderflow";
+import type { ChartDrawing, DrawTool } from "@/lib/chart";
 
 type DeskChartResponse = {
   symbol: string;
@@ -30,6 +37,8 @@ type DeskChartResponse = {
 export type BybitDeskConfig = LinearDeskInfo;
 
 const DESK_STORE = "stocksense-desk";
+const DEFAULT_TAPE_VIZ = { smart: true, blockSize: 0 };
+const DEFAULT_DRAWINGS = { items: [] as ChartDrawing[] };
 
 const TIMEFRAMES = [
   { id: "1s", label: "1 S", defaultLookback: "1h" },
@@ -276,10 +285,12 @@ function usePersistedJson<T extends object>(key: string, fallback: T) {
 function VizMenu({
   title,
   ariaLabel,
+  label,
   children,
 }: {
   title: string;
   ariaLabel: string;
+  label?: string;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -320,14 +331,14 @@ function VizMenu({
       <button
         ref={btnRef}
         type="button"
-        className={`chart-chip chart-chip--soft chart-chip--gear ${open ? "is-active" : ""}`}
+        className={`chart-chip chart-chip--soft ${label ? "" : "chart-chip--gear "}${open ? "is-active" : ""}`}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={ariaLabel}
         title={ariaLabel}
         onClick={() => setOpen((v) => !v)}
       >
-        ⚙
+        {label || "⚙"}
       </button>
       {open &&
         createPortal(
@@ -415,7 +426,6 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
   const [heatmapLevels, setHeatmapLevels] = useState<HeatmapLevel[]>([]);
   const [heatOpacity, setHeatOpacity] = useState(0.55);
   const [footprint, , setFootprint] = usePersistedOpen(`${DESK_STORE}-fp`, false);
-  const [fpSplit, setFpSplit] = useState(0.36);
   const [fpData, setFpData] = useState<FootprintData | null>(null);
   const [heatViz, setHeatViz, resetHeatViz] = usePersistedJson<HeatVizSettings>(
     `${DESK_STORE}-l2-viz`,
@@ -425,6 +435,18 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
     `${DESK_STORE}-fp-viz`,
     DEFAULT_FP_VIZ
   );
+  const [chartViz, setChartViz, resetChartViz] = usePersistedJson<ChartVizSettings>(
+    `${DESK_STORE}-chart-viz`,
+    DEFAULT_DESK_CHART_VIZ
+  );
+  const [drawingsStore, setDrawingsStore] = usePersistedJson<{ items: ChartDrawing[] }>(
+    `${DESK_STORE}-draw-${config.id}`,
+    DEFAULT_DRAWINGS
+  );
+  const [drawTool, setDrawTool] = useState<DrawTool>("none");
+  const [tapeViz, setTapeViz] = usePersistedJson(`${DESK_STORE}-tape-viz`, DEFAULT_TAPE_VIZ);
+  const prevBookRef = useRef<Map<number, number>>(new Map());
+  const [walls, setWalls] = useState<BookWallFlag[]>([]);
 
   const [deskPrefsReady, setDeskPrefsReady] = useState(false);
 
@@ -433,7 +455,6 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
       const tfRaw = window.localStorage.getItem(`${DESK_STORE}-tf`);
       const lbRaw = window.localStorage.getItem(`${DESK_STORE}-lb`);
       const alpha = window.localStorage.getItem(`${DESK_STORE}-alpha`);
-      const splitRaw = window.localStorage.getItem(`${DESK_STORE}-fp-split`);
       const tfOk = TIMEFRAMES.some((t) => t.id === tfRaw) ? tfRaw! : "1m";
       const allowed = LOOKBACKS_BY_TF[tfOk] || LOOKBACKS_BY_TF["1d"];
       const tfMeta = TIMEFRAMES.find((t) => t.id === tfOk);
@@ -445,10 +466,6 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
       if (alpha) {
         const n = Number(alpha);
         if (Number.isFinite(n)) setHeatOpacity(Math.min(1, Math.max(0.15, n)));
-      }
-      if (splitRaw) {
-        const n = Number(splitRaw);
-        if (Number.isFinite(n)) setFpSplit(Math.min(0.72, Math.max(0.22, n)));
       }
     } catch {
       /* ignore */
@@ -522,7 +539,6 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
   }, [loadTrades]);
 
   useEffect(() => {
-    if (!footprint) return;
     let cancelled = false;
     const tick = async () => {
       try {
@@ -535,7 +551,7 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
       }
     };
     void tick();
-    const id = window.setInterval(() => void tick(), 1000);
+    const id = window.setInterval(() => void tick(), footprint ? 1000 : 4000);
     return () => {
       cancelled = true;
       window.clearInterval(id);
@@ -660,14 +676,6 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
     }
   }, [heatOpacity]);
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(`${DESK_STORE}-fp-split`, String(fpSplit));
-    } catch {
-      /* ignore */
-    }
-  }, [fpSplit]);
-
   const up = (data?.change_pct ?? data?.change_pct_window ?? 0) >= 0;
   const ranges = LOOKBACKS_BY_TF[timeframe] || LOOKBACKS_BY_TF["1d"];
   const tfLabel = TIMEFRAMES.find((t) => t.id === timeframe)?.label ?? timeframe;
@@ -686,26 +694,21 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
     [heatmapLevels, heatViz, config.tick, lastClose]
   );
 
-  const onFpSplitDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const wrap = e.currentTarget.parentElement;
-    if (!wrap) return;
-    const y0 = e.clientY;
-    const h = wrap.getBoundingClientRect().height || 1;
-    const start = fpSplit;
-    const el = e.currentTarget;
-    el.setPointerCapture(e.pointerId);
-    const onMove = (ev: PointerEvent) => {
-      const next = Math.min(0.72, Math.max(0.22, start - (ev.clientY - y0) / h));
-      setFpSplit(next);
-    };
-    const onUp = () => {
-      el.removeEventListener("pointermove", onMove);
-      el.removeEventListener("pointerup", onUp);
-    };
-    el.addEventListener("pointermove", onMove);
-    el.addEventListener("pointerup", onUp);
-  };
+  const session: SessionProfile | null = useMemo(() => {
+    if (!fpData?.bars.length) return null;
+    const tick = (fpData.tick || config.tick) * (fpViz.tickGroup || 1);
+    return levelsFromWireBars(fpData.bars, tick);
+  }, [fpData, fpViz.tickGroup, config.tick]);
+
+  useEffect(() => {
+    if (!orderBook) return;
+    const levels: OrderBookLevel[] = [
+      ...orderBook.bids.map((l) => ({ price: l.price, size: l.amount, side: "bid" as const })),
+      ...orderBook.asks.map((l) => ({ price: l.price, size: l.amount, side: "ask" as const })),
+    ];
+    setWalls(detectBookWalls(levels, prevBookRef.current));
+    prevBookRef.current = new Map(levels.map((l) => [l.price, l.size]));
+  }, [orderBook]);
 
   return (
     <div className="gold-page oil-page">
@@ -748,6 +751,185 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
               options={ranges}
               onSelect={setLookback}
             />
+            <VizMenu title="Graf" ariaLabel="Nastavení grafu" label="Graf">
+              <p className="viz-menu__sec">Vzhled</p>
+              <div className="viz-menu__row">
+                <span className="viz-menu__lab">Styl</span>
+                <div className="viz-menu__seg">
+                  {(
+                    [
+                      ["candle", "Svíčky"],
+                      ["hollow", "Duté"],
+                      ["line", "Čára"],
+                    ] as const
+                  ).map(([id, lab]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      className={`chart-chip chart-chip--soft ${chartViz.style === id ? "is-active" : ""}`}
+                      onClick={() => setChartViz({ style: id })}
+                    >
+                      {lab}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="viz-menu__row">
+                <span className="viz-menu__lab">Kříž</span>
+                <div className="viz-menu__seg">
+                  {(
+                    [
+                      ["normal", "Normální"],
+                      ["magnet", "Magnet"],
+                      ["off", "Vyp"],
+                    ] as const
+                  ).map(([id, lab]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      className={`chart-chip chart-chip--soft ${chartViz.crosshair === id ? "is-active" : ""}`}
+                      onClick={() => setChartViz({ crosshair: id })}
+                    >
+                      {lab}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <label className="viz-menu__check">
+                <input
+                  type="checkbox"
+                  checked={chartViz.grid}
+                  onChange={(e) => setChartViz({ grid: e.target.checked })}
+                />
+                Mřížka
+              </label>
+              <label className="viz-menu__check">
+                <input
+                  type="checkbox"
+                  checked={chartViz.wicks}
+                  onChange={(e) => setChartViz({ wicks: e.target.checked })}
+                />
+                Knoty
+              </label>
+              <label className="viz-menu__check">
+                <input
+                  type="checkbox"
+                  checked={chartViz.priceLine}
+                  onChange={(e) => setChartViz({ priceLine: e.target.checked })}
+                />
+                Čára poslední ceny
+              </label>
+              <label className="viz-menu__check">
+                <input
+                  type="checkbox"
+                  checked={chartViz.lastValue}
+                  onChange={(e) => setChartViz({ lastValue: e.target.checked })}
+                />
+                Label na ose
+              </label>
+              <label className="viz-menu__check">
+                <input
+                  type="checkbox"
+                  checked={chartViz.logScale}
+                  onChange={(e) => setChartViz({ logScale: e.target.checked })}
+                />
+                Logaritmická škála
+              </label>
+              <p className="viz-menu__sec">Indikátory</p>
+              <label className="viz-menu__check">
+                <input
+                  type="checkbox"
+                  checked={chartViz.sma20}
+                  onChange={(e) => setChartViz({ sma20: e.target.checked })}
+                />
+                SMA 20
+              </label>
+              <label className="viz-menu__check">
+                <input
+                  type="checkbox"
+                  checked={chartViz.sma50}
+                  onChange={(e) => setChartViz({ sma50: e.target.checked })}
+                />
+                SMA 50
+              </label>
+              <label className="viz-menu__check">
+                <input
+                  type="checkbox"
+                  checked={chartViz.ema20}
+                  onChange={(e) => setChartViz({ ema20: e.target.checked })}
+                />
+                EMA 20
+              </label>
+              <label className="viz-menu__check">
+                <input
+                  type="checkbox"
+                  checked={chartViz.rsi}
+                  onChange={(e) => setChartViz({ rsi: e.target.checked })}
+                />
+                RSI 14
+              </label>
+              <label className="viz-menu__check">
+                <input
+                  type="checkbox"
+                  checked={chartViz.volume}
+                  onChange={(e) => setChartViz({ volume: e.target.checked })}
+                />
+                Volume histogram
+              </label>
+              <p className="viz-menu__sec">Měřítko</p>
+              <VizRow label="Šířka svíček" value={`${chartViz.barSpacing}`}>
+                <input
+                  type="range"
+                  min={4}
+                  max={28}
+                  value={chartViz.barSpacing}
+                  onChange={(e) => setChartViz({ barSpacing: Number(e.target.value) })}
+                />
+              </VizRow>
+              <VizRow label="Pravý okraj" value={`${chartViz.rightOffset}`}>
+                <input
+                  type="range"
+                  min={2}
+                  max={24}
+                  value={chartViz.rightOffset}
+                  onChange={(e) => setChartViz({ rightOffset: Number(e.target.value) })}
+                />
+              </VizRow>
+              <button type="button" className="viz-menu__reset" onClick={resetChartViz}>
+                Výchozí
+              </button>
+            </VizMenu>
+            <div className="viz-menu__seg header-desk__draw">
+              {(
+                [
+                  ["trend", "Trend"],
+                  ["ray", "Ray"],
+                  ["rect", "Box"],
+                  ["hline", "H"],
+                ] as const
+              ).map(([id, lab]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`chart-chip chart-chip--soft ${drawTool === id ? "is-active" : ""}`}
+                  onClick={() => setDrawTool((t) => (t === id ? "none" : id))}
+                  title={lab}
+                >
+                  {lab}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="chart-chip chart-chip--soft"
+                onClick={() => {
+                  setDrawingsStore({ items: [] });
+                  setDrawTool("none");
+                }}
+                title="Smazat kresby"
+              >
+                ⌫
+              </button>
+            </div>
             <button
               type="button"
               className={`chart-chip chart-chip--soft ${footprint ? "is-active" : ""}`}
@@ -758,6 +940,27 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
               FP
             </button>
             <VizMenu title="Footprint" ariaLabel="Nastavení vizualizace footprintu">
+              <div className="viz-menu__row">
+                <span className="viz-menu__lab">Buňky</span>
+                <div className="viz-menu__seg">
+                  {(
+                    [
+                      ["bidAsk", "B×A"],
+                      ["volume", "Vol"],
+                      ["delta", "Δ"],
+                    ] as const
+                  ).map(([id, lab]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      className={`chart-chip chart-chip--soft ${fpViz.view === id ? "is-active" : ""}`}
+                      onClick={() => setFpViz({ view: id })}
+                    >
+                      {lab}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <label className="viz-menu__check">
                 <input
                   type="checkbox"
@@ -773,6 +976,14 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
                   onChange={(e) => setFpViz({ poc: e.target.checked })}
                 />
                 POC
+              </label>
+              <label className="viz-menu__check">
+                <input
+                  type="checkbox"
+                  checked={fpViz.unfinished}
+                  onChange={(e) => setFpViz({ unfinished: e.target.checked })}
+                />
+                Unfinished auction
               </label>
               <label className="viz-menu__check">
                 <input
@@ -821,6 +1032,18 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
                   onChange={(e) => setFpViz({ imbalance: Number(e.target.value) / 10 })}
                 />
               </VizRow>
+              <VizRow
+                label="Stack"
+                value={fpViz.imbalanceStack <= 1 ? "1 tick" : `${fpViz.imbalanceStack} tick`}
+              >
+                <input
+                  type="range"
+                  min={1}
+                  max={6}
+                  value={fpViz.imbalanceStack || 3}
+                  onChange={(e) => setFpViz({ imbalanceStack: Number(e.target.value) })}
+                />
+              </VizRow>
               <button type="button" className="viz-menu__reset" onClick={resetFpViz}>
                 Výchozí
               </button>
@@ -839,15 +1062,13 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
       <section className="card instrument-chart gold-page__chart">
         <div className="instrument-chart__stage crypto-chart-stage gold-page__chart-pane">
           {data?.bars?.length ? (
-            <div className={`desk-charts ${footprint ? "has-fp" : ""}`}>
-              <div
-                className="desk-charts__pane"
-                style={footprint ? { flex: `${(1 - fpSplit).toFixed(3)} 1 0` } : undefined}
-              >
+            <div className="desk-charts">
+              <div className="desk-charts__pane">
                 <PriceChart
                   bars={data.bars}
                   realtime
                   showMa={false}
+                  showVolume={false}
                   secondsVisible={timeframe === "1m" || timeframe === "1s"}
                   heatmapLevels={heatmapLevels}
                   showHeatmap={showHeatmap}
@@ -856,27 +1077,15 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
                   tick={config.tick}
                   priceDigits={config.priceDigits}
                   onProfileWidthChange={(frac) => setHeatViz({ profileWidth: frac })}
+                  showFootprint={footprint}
+                  footprintData={fpData}
+                  fpViz={fpViz}
+                  chartViz={chartViz}
+                  drawTool={drawTool}
+                  drawings={drawingsStore.items}
+                  onDrawingsChange={(items) => setDrawingsStore({ items })}
                 />
               </div>
-              {footprint ? (
-                <>
-                  <div
-                    className="desk-charts__hsplit"
-                    onPointerDown={onFpSplitDown}
-                    role="separator"
-                    aria-orientation="horizontal"
-                    aria-label="Velikost footprint grafu"
-                    title="Velikost footprint grafu"
-                  />
-                  <div className="desk-charts__pane" style={{ flex: `${fpSplit.toFixed(3)} 1 0` }}>
-                    <FootprintChart
-                      key={timeframe}
-                      data={fpData || { interval: timeframe, tick: config.tick, bars: [] }}
-                      viz={fpViz}
-                    />
-                  </div>
-                </>
-              ) : null}
             </div>
           ) : (
             <div className="muted p-6 text-sm">
@@ -907,10 +1116,28 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
           />
         </div>
         <div className={`oil-page__panel ${bookOpen ? "" : "is-collapsed"}`}>
-          <OrderBookPanel book={orderBook} collapsed={!bookOpen} onToggle={toggleBook} />
+          <OrderBookPanel
+            book={orderBook}
+            session={session}
+            walls={walls}
+            priceDigits={config.priceDigits}
+            collapsed={!bookOpen}
+            onToggle={toggleBook}
+            onPriceClick={(price) => {
+              void navigator.clipboard?.writeText(String(price));
+            }}
+          />
         </div>
         <div className={`oil-page__panel ${tapeOpen ? "" : "is-collapsed"}`}>
-          <TradesTapePanel tape={tradesTape} collapsed={!tapeOpen} onToggle={toggleTape} />
+          <TradesTapePanel
+            tape={tradesTape}
+            collapsed={!tapeOpen}
+            onToggle={toggleTape}
+            smart={tapeViz.smart}
+            blockSize={tapeViz.blockSize}
+            onSmart={(on) => setTapeViz({ smart: on })}
+            onBlockSize={(n) => setTapeViz({ blockSize: n })}
+          />
         </div>
       </div>
       </div>

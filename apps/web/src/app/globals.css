@@ -1573,6 +1573,48 @@ textarea {
   color: var(--chart-down);
 }
 
+.trades-tape__tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.2rem 0.15rem 0.35rem;
+  flex-shrink: 0;
+}
+
+.trades-tape__block {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.trades-tape__block input {
+  width: 4.2rem;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+  color: var(--text);
+  padding: 0.12rem 0.3rem;
+  font: inherit;
+}
+
+.trades-tape__row.is-block {
+  font-weight: 700;
+}
+
+.trades-tape__row.is-block .trades-tape__amt {
+  color: var(--text);
+}
+
+.trades-tape__n {
+  margin-left: 0.2rem;
+  font-size: 0.68em;
+  color: var(--muted);
+  font-weight: 600;
+}
+
 .trades-tape__time {
   color: var(--muted);
   z-index: 1;
@@ -1631,6 +1673,20 @@ textarea {
   text-align: right;
 }
 
+.orderbook__cols--dom {
+  grid-template-columns: 1fr 0.95fr 1fr 0.7fr;
+}
+
+.orderbook__cols--dom span:nth-child(1),
+.orderbook__cols--dom span:nth-child(3),
+.orderbook__cols--dom span:nth-child(4) {
+  text-align: right;
+}
+
+.orderbook__cols--dom span:nth-child(2) {
+  text-align: center;
+}
+
 .orderbook__ladder {
   flex: 1 1 auto;
   min-height: 0;
@@ -1664,6 +1720,83 @@ textarea {
 
 .orderbook__row.is-ask .orderbook__depth {
   background: var(--chart-down);
+}
+
+.orderbook__row--dom {
+  grid-template-columns: 1fr 0.95fr 1fr 0.7fr;
+  gap: 0.12rem;
+  padding: 0.08rem 0.05rem;
+}
+
+.orderbook__row--dom.is-mid {
+  background: color-mix(in srgb, var(--sense) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sense) 35%, transparent);
+}
+
+.orderbook__row--dom.is-wall-bid {
+  box-shadow: inset 3px 0 0 var(--chart-up);
+}
+
+.orderbook__row--dom.is-wall-ask {
+  box-shadow: inset -3px 0 0 var(--chart-down);
+}
+
+.orderbook__row--dom.is-spoof {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--chart-down) 70%, transparent);
+  opacity: 0.72;
+}
+
+.orderbook__cell,
+.orderbook__sess {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  text-align: right;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  min-height: 1.1em;
+}
+
+.orderbook__cell.is-bid {
+  color: var(--chart-up);
+}
+
+.orderbook__cell.is-ask {
+  color: var(--chart-down);
+}
+
+.orderbook__hist {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  pointer-events: none;
+  opacity: 0.32;
+  border-radius: 2px;
+}
+
+.orderbook__hist.is-bid {
+  right: 0;
+  background: var(--chart-up);
+}
+
+.orderbook__hist.is-ask {
+  left: 0;
+  background: var(--chart-down);
+}
+
+.orderbook__hist.is-vol {
+  right: 0;
+  background: var(--muted);
+  opacity: 0.22;
+}
+
+.orderbook__row--dom .orderbook__px {
+  text-align: center;
+  font-weight: 650;
 }
 
 .orderbook__px,
@@ -1992,6 +2125,21 @@ textarea {
   opacity: 1;
 }
 
+.chart-draw {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+  overflow: hidden;
+}
+
+.chart-draw.is-active {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
 .price-chart__split {
   position: absolute;
   top: 0;
@@ -2013,21 +2161,21 @@ textarea {
 .price-chart__split::after {
   content: "";
   position: absolute;
-  left: 4px;
-  top: 10%;
-  bottom: 10%;
-  width: 2px;
-  border-radius: 1px;
-  background: color-mix(in srgb, var(--sense) 55%, var(--line));
-  opacity: 0.8;
+  left: 5px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  border-radius: 0;
+  background: #000;
+  opacity: 1;
 }
 
 .price-chart__split:hover::after,
 .price-chart__split:active::after {
-  background: var(--sense);
+  background: #000;
   opacity: 1;
-  width: 3px;
-  left: 3.5px;
+  width: 1px;
+  left: 5px;
 }
 
 .instrument-chart__stage {
@@ -4040,6 +4188,58 @@ textarea {
 .desk-charts__hsplit:hover::after,
 .desk-charts__hsplit:active::after {
   background: var(--sense);
+}
+
+.fp-profile {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--chart-bg);
+}
+
+.fp-profile__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  padding: 0.4rem 0.7rem 0.3rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--line);
+}
+
+.fp-profile__stats b {
+  color: var(--text);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.fp-profile__stats .is-up b {
+  color: var(--chart-up);
+}
+
+.fp-profile__stats .is-down b {
+  color: var(--chart-down);
+}
+
+.fp-profile__stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+
+.fp-profile__stage canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.desk-charts__pane .fp-profile {
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
 }
 
 .oil-page__ob-side {

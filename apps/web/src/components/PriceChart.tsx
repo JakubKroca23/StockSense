@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent } from "react";
 import {
   ColorType,
   CrosshairMode,
@@ -9,6 +9,7 @@ import {
   ISeriesApi,
   CandlestickData,
   LineStyle,
+  PriceScaleMode,
   Time,
   createChart,
 } from "lightweight-charts";
@@ -22,9 +23,61 @@ import {
   type HeatVizSettings,
   type LiqZone,
 } from "@/lib/liquidity";
+import { ChartDrawOverlay } from "@/components/ChartDrawOverlay";
+import { applyIndicator, type ChartDrawing, type DrawTool, type OhlcvBar } from "@/lib/chart";
+import {
+  drawFootprintOnChart,
+  DEFAULT_FP_VIZ,
+  type FootprintData,
+  type FpVizSettings,
+} from "@/components/FootprintChart";
 
 export type { HeatmapLevel, HeatVizSettings };
 export { DEFAULT_HEAT_VIZ };
+
+export type ChartStyle = "candle" | "hollow" | "line";
+export type ChartCrosshair = "normal" | "magnet" | "off";
+
+export type ChartVizSettings = {
+  style: ChartStyle;
+  grid: boolean;
+  sma20: boolean;
+  sma50: boolean;
+  ema20: boolean;
+  rsi: boolean;
+  volume: boolean;
+  priceLine: boolean;
+  lastValue: boolean;
+  wicks: boolean;
+  logScale: boolean;
+  crosshair: ChartCrosshair;
+  barSpacing: number;
+  rightOffset: number;
+};
+
+export const DEFAULT_CHART_VIZ: ChartVizSettings = {
+  style: "candle",
+  grid: true,
+  sma20: true,
+  sma50: true,
+  ema20: false,
+  rsi: false,
+  volume: true,
+  priceLine: true,
+  lastValue: true,
+  wicks: true,
+  logScale: false,
+  crosshair: "normal",
+  barSpacing: 9,
+  rightOffset: 8,
+};
+
+export const DEFAULT_DESK_CHART_VIZ: ChartVizSettings = {
+  ...DEFAULT_CHART_VIZ,
+  sma20: false,
+  sma50: false,
+  volume: false,
+};
 
 export type ChartBar = {
   ts: string;
@@ -73,6 +126,22 @@ type Props = {
   priceDigits?: number;
   /** Drag the profile divider — fraction of plot width. */
   onProfileWidthChange?: (frac: number) => void;
+  /** Bottom volume histogram. Desk hides it in favor of footprint cells. */
+  showVolume?: boolean;
+  /** Overlay buy/sell cells on candle bodies. */
+  showFootprint?: boolean;
+  footprintData?: FootprintData | null;
+  fpViz?: Partial<FpVizSettings>;
+  chartViz?: Partial<ChartVizSettings>;
+  drawTool?: DrawTool;
+  drawings?: ChartDrawing[];
+  onDrawingsChange?: (next: ChartDrawing[]) => void;
+  chartApiRef?: MutableRefObject<PriceChartHandle | null>;
+};
+
+export type PriceChartHandle = {
+  chart: () => IChartApi | null;
+  series: () => ISeriesApi<"Candlestick"> | null;
 };
 
 type Theme = {
@@ -134,22 +203,6 @@ function toUnix(ts: string): Time {
   return Math.floor(d.getTime() / 1000) as Time;
 }
 
-function smaSeries(
-  closes: { time: Time; value: number }[],
-  period: number
-): { time: Time; value: number }[] {
-  const out: { time: Time; value: number }[] = [];
-  let sum = 0;
-  for (let i = 0; i < closes.length; i++) {
-    sum += closes[i].value;
-    if (i >= period) sum -= closes[i - period].value;
-    if (i >= period - 1) {
-      out.push({ time: closes[i].time, value: sum / period });
-    }
-  }
-  return out;
-}
-
 function toCandle(b: ChartBar): CandlestickData {
   return {
     time: toUnix(b.ts),
@@ -157,6 +210,31 @@ function toCandle(b: ChartBar): CandlestickData {
     high: b.high,
     low: b.low,
     close: b.close,
+  };
+}
+
+function candleLook(
+  theme: Theme,
+  viz: ChartVizSettings,
+  fp: boolean,
+  fpWicks: boolean
+) {
+  const hide = viz.style === "line";
+  const hollow = viz.style === "hollow" || fp;
+  return {
+    upColor: hide || hollow ? "rgba(0,0,0,0)" : theme.up,
+    downColor: hide || hollow ? "rgba(0,0,0,0)" : theme.down,
+    borderUpColor: hide ? "rgba(0,0,0,0)" : theme.up,
+    borderDownColor: hide ? "rgba(0,0,0,0)" : theme.down,
+    wickUpColor: theme.up,
+    wickDownColor: theme.down,
+    wickVisible: !hide && viz.wicks && (!fp || fpWicks),
+    borderVisible: !hide,
+    priceLineVisible: viz.priceLine,
+    lastValueVisible: viz.lastValue,
+    priceLineColor: hexAlpha(theme.sense, 0.55),
+    priceLineWidth: 1 as const,
+    priceLineStyle: LineStyle.Dashed,
   };
 }
 
@@ -174,6 +252,15 @@ export function PriceChart({
   heatViz,
   tick,
   onProfileWidthChange,
+  showVolume = true,
+  showFootprint = false,
+  footprintData = null,
+  fpViz,
+  chartViz,
+  drawTool = "none",
+  drawings = [],
+  onDrawingsChange,
+  chartApiRef,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -187,6 +274,9 @@ export function PriceChart({
   const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const sma20Ref = useRef<ISeriesApi<"Line"> | null>(null);
   const sma50Ref = useRef<ISeriesApi<"Line"> | null>(null);
+  const ema20Ref = useRef<ISeriesApi<"Line"> | null>(null);
+  const rsiRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const closeLineRef = useRef<ISeriesApi<"Line"> | null>(null);
   const linesRef = useRef<IPriceLine[]>([]);
   const themeRef = useRef<Theme | null>(null);
   const prevSigRef = useRef<string>("");
@@ -196,8 +286,12 @@ export function PriceChart({
   const heatVizRef = useRef<HeatVizSettings>({ ...DEFAULT_HEAT_VIZ, ...heatViz });
   const heatTickRef = useRef(tick ?? 0);
   const lastCloseRef = useRef(0);
+  const showFpRef = useRef(showFootprint);
+  const fpDataRef = useRef<FootprintData | null>(footprintData);
+  const fpVizRef = useRef<FpVizSettings>({ ...DEFAULT_FP_VIZ, ...fpViz });
   const fill = height == null;
   const themeRev = useThemeRevision();
+  const [chartTick, setChartTick] = useState(0);
 
   heatLevelsRef.current = heatmapLevels;
   showHeatRef.current = showHeatmap;
@@ -205,6 +299,16 @@ export function PriceChart({
   heatVizRef.current = { ...DEFAULT_HEAT_VIZ, ...heatViz };
   heatTickRef.current = tick ?? 0;
   lastCloseRef.current = bars.length ? bars[bars.length - 1].close : 0;
+  showFpRef.current = showFootprint;
+  fpDataRef.current = footprintData;
+  fpVizRef.current = { ...DEFAULT_FP_VIZ, ...fpViz };
+  const viz: ChartVizSettings = {
+    ...DEFAULT_CHART_VIZ,
+    volume: showVolume,
+    sma20: showMa,
+    sma50: showMa,
+    ...chartViz,
+  };
 
   const drawHeatmap = () => {
     const canvas = heatRef.current;
@@ -235,37 +339,60 @@ export function PriceChart({
       if (splitRef.current) splitRef.current.style.visibility = "hidden";
     };
 
-    if (!showHeatRef.current) {
-      hideSplit();
-      return;
-    }
-    const raw = heatLevelsRef.current;
-    if (!raw.length) {
-      hideSplit();
-      return;
-    }
-
     const theme = themeRef.current || readTheme();
-    const opacityMul = heatOpacityRef.current;
     const viz = heatVizRef.current;
+    const raw = heatLevelsRef.current;
     const isNarrow =
       w < 720 ||
       (typeof window !== "undefined" && window.matchMedia("(max-width: 1099px)").matches);
     const leftPad = 2;
     const rightPad = isNarrow ? 54 : 68;
     const plotW = Math.max(48, w - leftPad - rightPad);
+    const showHeat = showHeatRef.current && raw.length > 0;
     const profileFrac = Math.min(0.5, Math.max(0.12, viz.profileWidth));
-    const profileW = isNarrow
-      ? Math.max(44, Math.min(plotW * Math.min(profileFrac, 0.38), plotW * 0.42))
-      : Math.max(56, Math.min(plotW * profileFrac, plotW * 0.5));
+    const profileW = showHeat
+      ? isNarrow
+        ? Math.max(44, Math.min(plotW * Math.min(profileFrac, 0.38), plotW * 0.42))
+        : Math.max(56, Math.min(plotW * profileFrac, plotW * 0.5))
+      : 0;
     const profileRight = leftPad + plotW;
-    const profileLeft = profileRight - profileW;
-    profileGeomRef.current = { left: profileLeft, plotW, frac: profileFrac };
-    if (splitRef.current) {
+    const profileLeft = showHeat ? profileRight - profileW : profileRight;
+    if (showHeat && splitRef.current) {
+      profileGeomRef.current = { left: profileLeft, plotW, frac: profileFrac };
       splitRef.current.style.left = `${profileLeft}px`;
       splitRef.current.style.visibility = "visible";
+    } else {
+      hideSplit();
     }
 
+    const paintFootprint = () => {
+      if (!showFpRef.current) return;
+      const fpSnap = fpDataRef.current;
+      if (!fpSnap?.bars?.length) return;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, profileLeft, h);
+      ctx.clip();
+      drawFootprintOnChart(
+        ctx,
+        chart,
+        series,
+        fpSnap,
+        fpVizRef.current,
+        w,
+        h,
+        profileLeft,
+        theme
+      );
+      ctx.restore();
+    };
+
+    if (!showHeat) {
+      paintFootprint();
+      return;
+    }
+
+    const opacityMul = heatOpacityRef.current;
     const lastPx = lastCloseRef.current;
     const tickSize = Math.max(1e-9, heatTickRef.current || inferTick(raw));
 
@@ -306,10 +433,15 @@ export function PriceChart({
       return Math.max(2.5, profileW * (0.04 + t * 0.96));
     };
 
-    ctx.fillStyle = hexAlpha(theme.chartBg, 0.42 * opacityMul);
+    ctx.fillStyle = theme.chartBg;
     ctx.fillRect(profileLeft, 0, profileW, h);
-    ctx.fillStyle = hexAlpha(theme.muted, 0.04 * opacityMul);
-    ctx.fillRect(profileLeft, 0, profileW, h);
+
+    ctx.strokeStyle = "#000";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(profileLeft + 0.5, 0);
+    ctx.lineTo(profileLeft + 0.5, h);
+    ctx.stroke();
 
     const yBand = (zlo: number, zhi: number, pad = 0): { y: number; h: number } | null => {
       const yHi = priceToY(zhi + pad);
@@ -481,6 +613,8 @@ export function PriceChart({
       ctx.lineTo(profileRight, lastY + 0.5);
       ctx.stroke();
     }
+
+    paintFootprint();
   };
 
   const onProfileSplitDown = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -524,8 +658,16 @@ export function PriceChart({
         fontSize: 11,
       },
       grid: {
-        vertLines: { color: theme.grid, style: LineStyle.Dotted },
-        horzLines: { color: theme.grid, style: LineStyle.Dotted },
+        vertLines: {
+          visible: viz.grid,
+          color: theme.grid,
+          style: LineStyle.Dotted,
+        },
+        horzLines: {
+          visible: viz.grid,
+          color: theme.grid,
+          style: LineStyle.Dotted,
+        },
       },
       crosshair: {
         mode: CrosshairMode.Normal,
@@ -544,16 +686,17 @@ export function PriceChart({
       },
       rightPriceScale: {
         borderVisible: false,
-        scaleMargins: { top: 0.06, bottom: 0.2 },
+        scaleMargins: { top: 0.06, bottom: viz.volume ? 0.2 : 0.06 },
         entireTextOnly: true,
+        mode: viz.logScale ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
       },
       leftPriceScale: { visible: false },
       timeScale: {
         borderVisible: false,
         timeVisible: true,
         secondsVisible,
-        rightOffset: 8,
-        barSpacing: 9,
+        rightOffset: viz.rightOffset,
+        barSpacing: viz.barSpacing,
         minBarSpacing: 3,
         fixLeftEdge: false,
         lockVisibleTimeRangeOnResize: true,
@@ -576,19 +719,12 @@ export function PriceChart({
     });
 
     // Bull = Sense green, bear = red-purple
+    const look = candleLook(theme, viz, showFootprint, fpViz?.wicks ?? true);
     const candle = chart.addCandlestickSeries({
-      upColor: theme.up,
-      downColor: theme.down,
-      borderUpColor: theme.up,
-      borderDownColor: theme.down,
-      wickUpColor: theme.up,
-      wickDownColor: theme.down,
-      borderVisible: true,
-      priceLineVisible: true,
+      ...look,
       priceLineColor: hexAlpha(theme.sense, 0.55),
       priceLineWidth: 1,
       priceLineStyle: LineStyle.Dashed,
-      lastValueVisible: true,
     });
 
     const volume = chart.addHistogramSeries({
@@ -596,9 +732,10 @@ export function PriceChart({
       priceScaleId: "volume",
       lastValueVisible: false,
       priceLineVisible: false,
+      visible: viz.volume,
     });
     chart.priceScale("volume").applyOptions({
-      scaleMargins: { top: 0.84, bottom: 0 },
+      scaleMargins: { top: viz.volume ? 0.84 : 1, bottom: 0 },
       borderVisible: false,
     });
 
@@ -617,12 +754,49 @@ export function PriceChart({
       lastValueVisible: false,
       crosshairMarkerVisible: false,
     });
+    const ema20 = chart.addLineSeries({
+      color: hexAlpha(theme.sense, 0.85),
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
+    const rsiLine = chart.addLineSeries({
+      color: hexAlpha(theme.down, 0.9),
+      lineWidth: 1,
+      priceScaleId: "rsi",
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
+    chart.priceScale("rsi").applyOptions({
+      scaleMargins: { top: 0.8, bottom: 0.02 },
+      borderVisible: false,
+    });
+
+    const closeLine = chart.addLineSeries({
+      color: hexAlpha(theme.sense, 0.95),
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: viz.style === "line" && viz.lastValue,
+      crosshairMarkerVisible: viz.style === "line",
+    });
 
     chartRef.current = chart;
     seriesRef.current = candle;
     volumeRef.current = volume;
     sma20Ref.current = sma20;
     sma50Ref.current = sma50;
+    ema20Ref.current = ema20;
+    rsiRef.current = rsiLine;
+    closeLineRef.current = closeLine;
+    if (chartApiRef) {
+      chartApiRef.current = {
+        chart: () => chartRef.current,
+        series: () => seriesRef.current,
+      };
+    }
+    setChartTick((n) => n + 1);
     prevSigRef.current = "";
 
     const ro = new ResizeObserver((entries) => {
@@ -640,6 +814,9 @@ export function PriceChart({
     const onVisible = () => drawHeatmap();
     chart.timeScale().subscribeVisibleLogicalRangeChange(onVisible);
     chart.subscribeCrosshairMove(onVisible);
+    chart.timeScale().applyOptions({
+      minBarSpacing: showFootprint ? 6 : 3,
+    });
 
     return () => {
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onVisible);
@@ -651,30 +828,110 @@ export function PriceChart({
       volumeRef.current = null;
       sma20Ref.current = null;
       sma50Ref.current = null;
+      ema20Ref.current = null;
+      rsiRef.current = null;
+      closeLineRef.current = null;
+      if (chartApiRef) chartApiRef.current = null;
+      setChartTick(0);
       linesRef.current = [];
       themeRef.current = null;
     };
   }, [height, fill, secondsVisible, themeRev]);
 
   useEffect(() => {
-    chartRef.current?.timeScale().applyOptions({
-      rightOffset: showHeatmap ? 14 : 8,
+    const chart = chartRef.current;
+    const series = seriesRef.current;
+    if (!chart || !series) return;
+    const theme = themeRef.current || readTheme();
+    const gridCol = viz.grid ? theme.grid : "rgba(0,0,0,0)";
+    chart.applyOptions({
+      grid: {
+        vertLines: { visible: viz.grid, color: gridCol, style: LineStyle.Dotted },
+        horzLines: { visible: viz.grid, color: gridCol, style: LineStyle.Dotted },
+      },
+      crosshair: {
+        mode: viz.crosshair === "magnet" ? CrosshairMode.Magnet : CrosshairMode.Normal,
+        vertLine: {
+          visible: viz.crosshair !== "off",
+          color: hexAlpha(theme.sense, 0.45),
+          width: 1,
+          style: LineStyle.Dashed,
+          labelBackgroundColor: theme.bgElevated,
+        },
+        horzLine: {
+          visible: viz.crosshair !== "off",
+          color: hexAlpha(theme.sense, 0.45),
+          width: 1,
+          style: LineStyle.Dashed,
+          labelBackgroundColor: theme.bgElevated,
+        },
+      },
+      rightPriceScale: {
+        mode: viz.logScale ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
+        scaleMargins: {
+          top: 0.06,
+          bottom: (viz.volume ? 0.18 : 0.06) + (viz.rsi ? 0.16 : 0),
+        },
+      },
+    });
+    series.applyOptions(candleLook(theme, viz, showFootprint, fpViz?.wicks ?? true));
+    volumeRef.current?.applyOptions({ visible: viz.volume });
+    chart.priceScale("volume").applyOptions({
+      scaleMargins: { top: viz.volume ? 0.84 : 1, bottom: 0 },
+    });
+    closeLineRef.current?.applyOptions({
+      visible: viz.style === "line",
+      lastValueVisible: viz.style === "line" && viz.lastValue,
+      crosshairMarkerVisible: viz.style === "line",
+    });
+    rsiRef.current?.applyOptions({ visible: viz.rsi });
+    chart.priceScale("rsi").applyOptions({
+      scaleMargins: { top: viz.volume ? 0.74 : 0.8, bottom: 0.02 },
     });
     drawHeatmap();
-  }, [showHeatmap]);
+  }, [
+    viz.style,
+    viz.grid,
+    viz.volume,
+    viz.priceLine,
+    viz.lastValue,
+    viz.wicks,
+    viz.logScale,
+    viz.crosshair,
+    viz.rsi,
+    showFootprint,
+    fpViz?.wicks,
+  ]);
+
+  useEffect(() => {
+    chartRef.current?.timeScale().applyOptions({
+      barSpacing: viz.barSpacing,
+      minBarSpacing: showFootprint ? 6 : 3,
+    });
+  }, [viz.barSpacing, showFootprint]);
+
+  useEffect(() => {
+    chartRef.current?.timeScale().applyOptions({
+      rightOffset: showHeatmap ? Math.max(viz.rightOffset, 14) : viz.rightOffset,
+    });
+    drawHeatmap();
+  }, [showHeatmap, viz.rightOffset]);
 
   useEffect(() => {
     const id = requestAnimationFrame(() => drawHeatmap());
     return () => cancelAnimationFrame(id);
-  }, [heatmapLevels, showHeatmap, heatOpacity, bars, heatViz, tick]);
+  }, [heatmapLevels, showHeatmap, heatOpacity, bars, heatViz, tick, showFootprint, footprintData, fpViz]);
 
   useEffect(() => {
-    if (!seriesRef.current || !volumeRef.current || !chartRef.current) return;
+    if (!seriesRef.current || !chartRef.current) return;
     if (!bars.length) {
       seriesRef.current.setData([]);
-      volumeRef.current.setData([]);
+      volumeRef.current?.setData([]);
       sma20Ref.current?.setData([]);
       sma50Ref.current?.setData([]);
+      ema20Ref.current?.setData([]);
+      rsiRef.current?.setData([]);
+      closeLineRef.current?.setData([]);
       prevSigRef.current = "";
       return;
     }
@@ -697,7 +954,7 @@ export function PriceChart({
     const last = bars[bars.length - 1];
     const histKey = `${unique.length}:${unique[0] ? Number(unique[0].time) : 0}:${
       unique.length > 1 ? Number(unique[unique.length - 2].time) : 0
-    }`;
+    }:${viz.volume}:${viz.sma20}:${viz.sma50}:${viz.ema20}:${viz.rsi}:${viz.style}`;
     const lastSig = last
       ? `${toUnix(last.ts)}:${last.open}:${last.high}:${last.low}:${last.close}:${last.volume ?? 0}`
       : "";
@@ -712,17 +969,39 @@ export function PriceChart({
       const lastBar = unique[unique.length - 1];
       const isUp = lastBar.close >= lastBar.open;
       seriesRef.current.update(lastBar);
-      volumeRef.current.update({
-        time: lastBar.time,
-        value: last?.volume ?? 0,
-        color: isUp ? volUp : volDown,
-      });
-      if (showMa && sma20Ref.current && sma50Ref.current && unique.length >= 20) {
-        const closes = unique.map((c) => ({ time: c.time, value: c.close }));
-        const s20 = smaSeries(closes, 20);
-        const s50 = smaSeries(closes, 50);
+      if (viz.volume) {
+        volumeRef.current?.update({
+          time: lastBar.time,
+          value: last?.volume ?? 0,
+          color: isUp ? volUp : volDown,
+        });
+      }
+      if (viz.style === "line") {
+        closeLineRef.current?.update({ time: lastBar.time, value: lastBar.close });
+      }
+      const ohlcv: OhlcvBar[] = unique.map((c) => ({
+        time: c.time,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        volume: 0,
+      }));
+      if (viz.sma20 && sma20Ref.current && unique.length >= 20) {
+        const s20 = applyIndicator(ohlcv, "sma", { period: 20 });
         if (s20.length) sma20Ref.current.update(s20[s20.length - 1]);
+      }
+      if (viz.sma50 && sma50Ref.current && unique.length >= 50) {
+        const s50 = applyIndicator(ohlcv, "sma", { period: 50 });
         if (s50.length) sma50Ref.current.update(s50[s50.length - 1]);
+      }
+      if (viz.ema20 && ema20Ref.current && unique.length >= 20) {
+        const e20 = applyIndicator(ohlcv, "ema", { period: 20 });
+        if (e20.length) ema20Ref.current.update(e20[e20.length - 1]);
+      }
+      if (viz.rsi && rsiRef.current && unique.length >= 16) {
+        const r = applyIndicator(ohlcv, "rsi", { period: 14 });
+        if (r.length) rsiRef.current.update(r[r.length - 1]);
       }
     } else {
       const volumeData = bars
@@ -746,16 +1025,25 @@ export function PriceChart({
       });
 
       seriesRef.current.setData(unique);
-      volumeRef.current.setData(uniqueVol);
+      if (viz.volume) volumeRef.current?.setData(uniqueVol);
+      else volumeRef.current?.setData([]);
 
-      if (showMa && sma20Ref.current && sma50Ref.current) {
-        const closes = unique.map((c) => ({ time: c.time, value: c.close }));
-        sma20Ref.current.setData(smaSeries(closes, 20));
-        sma50Ref.current.setData(smaSeries(closes, 50));
-      } else {
-        sma20Ref.current?.setData([]);
-        sma50Ref.current?.setData([]);
-      }
+      const closes = unique.map((c) => ({ time: c.time, value: c.close }));
+      if (viz.style === "line") closeLineRef.current?.setData(closes);
+      else closeLineRef.current?.setData([]);
+
+      const ohlcv: OhlcvBar[] = unique.map((c) => ({
+        time: c.time,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        volume: 0,
+      }));
+      sma20Ref.current?.setData(viz.sma20 ? applyIndicator(ohlcv, "sma", { period: 20 }) : []);
+      sma50Ref.current?.setData(viz.sma50 ? applyIndicator(ohlcv, "sma", { period: 50 }) : []);
+      ema20Ref.current?.setData(viz.ema20 ? applyIndicator(ohlcv, "ema", { period: 20 }) : []);
+      rsiRef.current?.setData(viz.rsi ? applyIndicator(ohlcv, "rsi", { period: 14 }) : []);
 
       if (!realtime || !prev) {
         chartRef.current.timeScale().fitContent();
@@ -763,7 +1051,7 @@ export function PriceChart({
     }
 
     prevSigRef.current = `${histKey}|${lastSig}`;
-  }, [bars, showMa, realtime]);
+  }, [bars, realtime, viz.volume, viz.sma20, viz.sma50, viz.ema20, viz.rsi, viz.style]);
 
   useEffect(() => {
     if (!seriesRef.current) return;
@@ -812,8 +1100,17 @@ export function PriceChart({
       />
       <canvas
         ref={heatRef}
-        className={`price-chart__heat ${showHeatmap ? "is-on" : ""}`}
+        className={`price-chart__heat ${showHeatmap || showFootprint ? "is-on" : ""}`}
         aria-hidden
+      />
+      <ChartDrawOverlay
+        chart={chartTick ? chartRef.current : null}
+        series={chartTick ? seriesRef.current : null}
+        wrap={wrapRef.current}
+        tool={drawTool}
+        drawings={drawings}
+        onChange={onDrawingsChange || (() => undefined)}
+        clipRight={showHeatmap ? profileGeomRef.current.left || undefined : undefined}
       />
       <div
         ref={splitRef}
