@@ -105,6 +105,17 @@ export function IconBtc(p: IconProps) {
   );
 }
 
+/** Gold — slitina / ingot */
+export function IconGold(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M6.2 14.8 8.6 8.4h6.8l2.4 6.4H6.2Z" />
+      <path d="M4.5 18.2h15l-1.4-3.4H5.9L4.5 18.2Z" />
+      <path d="M10.2 11.2h3.6" />
+    </Svg>
+  );
+}
+
 /** Nastavení — plné zelené ozubené kolo */
 export function IconSettings({ size = NAV_ICON_SIZE, className = "" }: IconProps) {
   return (
@@ -163,4 +174,6 @@ export const navIcons: Record<string, (p: IconProps) => ReactNode> = {
   "/btc": IconBtc,
   "/desk/oil": IconOil,
   "/oil": IconOil,
+  "/desk/gold": IconGold,
+  "/gold": IconGold,
 };

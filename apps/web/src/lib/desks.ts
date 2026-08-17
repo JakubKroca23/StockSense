@@ -31,6 +31,15 @@ export const LINEAR_DESKS: LinearDeskInfo[] = [
     priceDigits: 2,
     tick: 0.01,
   },
+  {
+    id: "gold",
+    title: "ZLATO",
+    navLabel: "ZLATO",
+    fallbackSymbol: "XAU",
+    liveTitle: "Live Bybit XAUUSDT",
+    priceDigits: 2,
+    tick: 0.01,
+  },
 ];
 
 const BY_ID = Object.fromEntries(LINEAR_DESKS.map((d) => [d.id, d]));

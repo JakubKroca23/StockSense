@@ -1147,3 +1147,45 @@ async def btc_ws_ohlcv(websocket: WebSocket, interval: str = "1m"):
 
     await websocket.accept()
     await _run_desk_kline_ws(websocket, BTC_DESK, interval)
+
+
+@router.get("/gold/chart")
+async def gold_chart(
+    lookback: str = "1d",
+    interval: str = "1m",
+    user: AuthUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _desk_chart_impl("gold", lookback, interval, db)
+
+
+@router.get("/gold/orderbook")
+async def gold_orderbook(limit: int = 200, user: AuthUser = Depends(get_current_user)):
+    return await desk_orderbook("gold", limit, user)
+
+
+@router.get("/gold/trades")
+async def gold_trades(limit: int = 80, user: AuthUser = Depends(get_current_user)):
+    return await desk_trades("gold", limit, user)
+
+
+@router.get("/gold/footprint")
+async def gold_footprint(
+    interval: str = "1m",
+    lookback: str = "1d",
+    user: AuthUser = Depends(get_current_user),
+):
+    return await desk_footprint("gold", interval, lookback, user)
+
+
+@router.get("/gold/live")
+async def gold_live(interval: str = "1m", user: AuthUser = Depends(get_current_user)):
+    return await desk_live("gold", interval, user)
+
+
+@router.websocket("/gold/ws/ohlcv")
+async def gold_ws_ohlcv(websocket: WebSocket, interval: str = "1m"):
+    from app.services.oil_bybit import GOLD_DESK
+
+    await websocket.accept()
+    await _run_desk_kline_ws(websocket, GOLD_DESK, interval)

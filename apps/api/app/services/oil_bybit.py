@@ -68,12 +68,27 @@ DESKS: dict[str, LinearDesk] = {
         name="Bitcoin (Bybit BTCUSDT)",
         asset_class=AssetClass.crypto,
     ),
+    "gold": LinearDesk(
+        id="gold",
+        symbol="XAUUSDT",
+        display="XAU",
+        title="ZLATO",
+        label="Gold",
+        note="Bybit XAUUSDT — live gold perp.",
+        tick=0.01,
+        tick_decimals=2,
+        source="bybit:XAUUSDT",
+        name="Gold (Bybit XAUUSDT)",
+        asset_class=AssetClass.commodity,
+    ),
 }
 
 OIL_DESK = DESKS["oil"]
 BTC_DESK = DESKS["btc"]
+GOLD_DESK = DESKS["gold"]
 OIL_BYBIT_SYMBOL = OIL_DESK.symbol
 BTC_BYBIT_SYMBOL = BTC_DESK.symbol
+GOLD_BYBIT_SYMBOL = GOLD_DESK.symbol
 _TICK = OIL_DESK.tick
 
 

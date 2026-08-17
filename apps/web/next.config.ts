@@ -5,7 +5,6 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [
       { source: "/cryptosense", destination: "/desk/btc", permanent: true },
-      { source: "/gold", destination: "/", permanent: true },
     ];
   },
 };
