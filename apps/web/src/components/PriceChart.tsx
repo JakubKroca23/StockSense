@@ -414,7 +414,10 @@ export function PriceChart({
     ctx.clearRect(0, 0, mainW, h);
 
     const hideSplit = () => {
-      if (splitRef.current) splitRef.current.style.visibility = "hidden";
+      if (splitRef.current) {
+        splitRef.current.style.visibility = "hidden";
+        splitRef.current.classList.remove("is-on");
+      }
       if (domRef.current) {
         domRef.current.classList.remove("is-on");
         const dctx = sizeCanvas(domRef.current, 1, h);
@@ -428,11 +431,15 @@ export function PriceChart({
     const showHeat = showHeatRef.current && raw.length > 0;
     const showDom = false;
     const wrapW = wrap.clientWidth;
-    const profileFrac = Math.min(0.52, Math.max(0.16, viz.profileWidth));
+    const profileFrac = Math.min(0.5, Math.max(0.12, viz.profileWidth));
+    const plotW = Math.max(32, chart.timeScale().width() || mainW - 56);
+    const overlayW = showHeat
+      ? Math.max(56, Math.min(plotW * profileFrac, plotW * 0.5))
+      : 0;
+    const overlayLeft = showHeat ? Math.max(48, plotW - overlayW) : plotW;
     const profileW = showHeat && showDom
       ? Math.max(128, Math.min(wrapW * profileFrac, wrapW * 0.54))
       : 0;
-    const plotW = Math.max(32, chart.timeScale().width() || mainW - 56);
 
     const handle = statsHandleRef.current;
     if (handle) {
@@ -440,18 +447,27 @@ export function PriceChart({
         const top = fpStatsTop(h, true, statsFracRef.current);
         handle.style.display = "block";
         handle.style.top = `${Math.max(0, top - 7)}px`;
-        handle.style.width = `${plotW}px`;
+        handle.style.width = `${overlayLeft}px`;
       } else {
         handle.style.display = "none";
       }
     }
 
-    if (showHeat && showDom && splitRef.current && domRef.current) {
-      profileGeomRef.current = { left: plotW, plotW, frac: profileFrac, domW: profileW };
+    if (showHeat && splitRef.current) {
+      profileGeomRef.current = { left: overlayLeft, plotW, frac: profileFrac, domW: overlayW };
+      splitRef.current.classList.add("is-on");
       splitRef.current.style.visibility = "visible";
-      domRef.current.classList.add("is-on");
-      domRef.current.style.width = `${profileW}px`;
-      domRef.current.style.flexBasis = `${profileW}px`;
+      splitRef.current.style.position = "absolute";
+      splitRef.current.style.left = `${overlayLeft}px`;
+      splitRef.current.style.top = "0";
+      splitRef.current.style.height = "100%";
+      if (showDom && domRef.current) {
+        domRef.current.classList.add("is-on");
+        domRef.current.style.width = `${profileW}px`;
+        domRef.current.style.flexBasis = `${profileW}px`;
+      } else if (domRef.current) {
+        domRef.current.classList.remove("is-on");
+      }
     } else {
       hideSplit();
     }
@@ -472,6 +488,7 @@ export function PriceChart({
         canvas.width,
         canvas.height,
         plotW,
+        overlayLeft,
         range?.from ?? "",
         range?.to ?? "",
         fpSnap.interval,
@@ -504,7 +521,7 @@ export function PriceChart({
         lctx.save();
         const bandTop = fpBandTop(h, true, volOnRef.current, statsFracRef.current);
         lctx.beginPath();
-        lctx.rect(0, 0, plotW, bandTop);
+        lctx.rect(0, 0, overlayLeft, bandTop);
         lctx.clip();
         try {
           drawFootprintOnChart(
@@ -515,7 +532,7 @@ export function PriceChart({
             v,
             mainW,
             h,
-            plotW,
+            overlayLeft,
             theme,
             alignTimes,
             bandTop
@@ -537,7 +554,7 @@ export function PriceChart({
           chart,
           fpDataRef.current,
           barsRef.current,
-          plotW,
+          overlayLeft,
           h,
           theme,
           alignTimes,
@@ -627,7 +644,7 @@ export function PriceChart({
     };
 
     const leftPad = 0;
-    const profileLeft = plotW;
+    const profileLeft = overlayLeft;
 
     const yBand = (zlo: number, zhi: number, pad = 0): { y: number; h: number } | null => {
       const yHi = priceToY(zhi + pad);
@@ -748,16 +765,10 @@ export function PriceChart({
       drawRows = [...merged.values()];
       drawStep = qStep;
     }
-    if (viz.cumulative) {
-      applyCumulativeDepth(drawRows, mid, drawStep);
-      let viewPeak = 0;
-      for (const r of drawRows) {
-        const y = priceToY(r.price);
-        if (y == null || y < -10 || y > h + 10) continue;
-        viewPeak = Math.max(viewPeak, r.showBid, r.showAsk);
-      }
-      if (viewPeak > 0) barPeak = viewPeak;
-    }
+    if (viz.cumulative) applyCumulativeDepth(drawRows, mid, drawStep);
+    let stripPeak = 0;
+    for (const r of drawRows) stripPeak = Math.max(stripPeak, r.showBid, r.showAsk);
+    if (!(stripPeak > 0)) stripPeak = peakShow;
 
     const byRest = [...drawRows].sort((a, b) => a.rest - b.rest);
     let peakVol = 0.0001;
@@ -793,46 +804,78 @@ export function PriceChart({
     };
 
     const paintLiqOnChart = () => {
-      if (candleW < 24 || !drawRows.length) return;
+      if (!drawRows.length) return;
+      const profileRight = plotW;
+      const stripW = Math.max(8, profileRight - overlayLeft);
+      ctx.fillStyle = theme.chartBg;
+      ctx.fillRect(overlayLeft, 0, stripW, h);
+      ctx.strokeStyle = "#000";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(overlayLeft + 0.5, 0);
+      ctx.lineTo(overlayLeft + 0.5, h);
+      ctx.stroke();
+
+      if (Number.isFinite(snap.bestBid) && Number.isFinite(snap.bestAsk) && snap.bestAsk > snap.bestBid) {
+        const yAsk = priceToY(snap.bestAsk);
+        const yBid = priceToY(snap.bestBid);
+        if (yAsk != null && yBid != null) {
+          const y0 = Math.min(yAsk, yBid);
+          ctx.fillStyle = hexAlpha(theme.sense, 0.1 * opacityMul);
+          ctx.fillRect(overlayLeft, y0, stripW, Math.max(1, Math.abs(yBid - yAsk)));
+        }
+      }
+
+      const widthOfStrip = (size: number) => {
+        const t = Math.pow(Math.min(1, size / Math.max(stripPeak, 1e-9)), gamma);
+        return Math.max(2.5, stripW * (0.04 + t * 0.96));
+      };
+      for (const r of byRest) {
+        const y = priceToY(r.price);
+        const yNext = priceToY(r.price + drawStep);
+        if (y == null || y < -10 || y > h + 10) continue;
+        const bandH = Math.max(1.2, yNext != null ? Math.abs(yNext - y) * 0.88 : 3);
+        const t = punch(r.rest);
+        const isWall = r.flag === "wall" || r.rest >= srCut;
+        const paint = (size: number, col: string) => {
+          if (size <= 0) return;
+          const bw = widthOfStrip(size);
+          const a = Math.min(0.94, (0.1 + t * (isWall ? 0.7 : 0.42)) * opacityMul);
+          if (isWall) {
+            ctx.fillStyle = hexAlpha(col, 0.12 * opacityMul);
+            ctx.fillRect(profileRight - bw - 4, y - bandH * 0.62, bw + 6, bandH * 1.24);
+          }
+          ctx.fillStyle = hexAlpha(col, a);
+          ctx.fillRect(profileRight - bw, y - bandH / 2, bw, Math.max(1.1, bandH * 0.84));
+          if (isWall) {
+            ctx.fillStyle = hexAlpha(col, Math.min(0.98, (0.5 + t * 0.45) * opacityMul));
+            ctx.fillRect(
+              profileRight - bw,
+              y - Math.max(1, bandH * 0.2),
+              Math.min(3.5, bw),
+              Math.max(1, bandH * 0.4)
+            );
+          }
+        };
+        if (r.bid > 0) paint(r.showBid, theme.up);
+        if (r.ask > 0) paint(r.showAsk, theme.down);
+      }
+
+      const lastY = last > 0 ? priceToY(last) : priceToY(mid);
+      if (lastY != null && lastY >= 0 && lastY <= h) {
+        ctx.strokeStyle = hexAlpha(theme.sense, 0.75 * opacityMul);
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(overlayLeft, lastY + 0.5);
+        ctx.lineTo(profileRight, lastY + 0.5);
+        ctx.stroke();
+      }
+
+      if (candleW < 24) return;
       ctx.save();
       ctx.beginPath();
       ctx.rect(leftPad, 0, candleW, h);
       ctx.clip();
-      const heatW = Math.min(168, candleW * 0.28);
-      const heatX = leftPad + candleW - heatW;
-      const fade = ctx.createLinearGradient(heatX, 0, leftPad + candleW, 0);
-      fade.addColorStop(0, "rgba(0,0,0,0)");
-      fade.addColorStop(0.22, "rgba(0,0,0,0)");
-      fade.addColorStop(1, "rgba(4,8,16,0.38)");
-      ctx.fillStyle = fade;
-      ctx.fillRect(heatX, 0, heatW, h);
-
-      const nearDist = tickSize * (12 + Math.min(1, Math.max(0, viz.reach || 1)) * 48);
-      const farDist = nearDist * 2.6;
-      const midPx = lastPx > 0 ? lastPx : snap.mid;
-
-      for (const r of byRest) {
-        const yHi = priceToY(r.price + drawStep / 2);
-        const yLo = priceToY(r.price - drawStep / 2);
-        if (yHi == null || yLo == null) continue;
-        const top = Math.min(yHi, yLo);
-        let hh = Math.abs(yLo - yHi);
-        if (hh < 1.2) hh = 1.2;
-        const dist = Math.abs(r.price - midPx);
-        if (dist > farDist) continue;
-        const prox = Math.max(0, 1 - dist / farDist);
-        const nearBoost = dist <= nearDist ? 1 : 0.45;
-        const mag = Math.min(1, r.rest / peakRest);
-        const w = Math.max(8, mag * prox * nearBoost * heatW * 0.96);
-        const x = leftPad + candleW - w;
-        const a = (0.1 + mag * prox * 0.48) * opacityMul * nearBoost;
-        ctx.fillStyle = r.bid >= r.ask ? hexAlpha(theme.up, a) : hexAlpha(theme.down, a);
-        ctx.fillRect(x, top, w, hh);
-        if (mag > 0.55 && prox > 0.4) {
-          ctx.fillStyle = r.bid >= r.ask ? hexAlpha(theme.up, 0.55 * opacityMul) : hexAlpha(theme.down, 0.55 * opacityMul);
-          ctx.fillRect(leftPad + candleW - 3, top, 3, hh);
-        }
-      }
 
       let peakIce = peakRest;
       for (const r of drawRows) {
@@ -1131,11 +1174,11 @@ export function PriceChart({
     e.stopPropagation();
     const startX = e.clientX;
     const startFrac = profileGeomRef.current.frac;
-    const wrapW = Math.max(48, wrapRef.current?.clientWidth || 400);
+    const plotW = Math.max(48, profileGeomRef.current.plotW);
     const el = e.currentTarget;
     el.setPointerCapture(e.pointerId);
     const onMove = (ev: PointerEvent) => {
-      const next = Math.min(0.52, Math.max(0.16, startFrac + (startX - ev.clientX) / wrapW));
+      const next = Math.min(0.5, Math.max(0.12, startFrac + (startX - ev.clientX) / plotW));
       profileGeomRef.current.frac = next;
       onWidthRef.current?.(next);
     };

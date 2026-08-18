@@ -481,6 +481,12 @@ export function FootprintSettingsPanel({
               onChange={(e) => onChange({ imbalanceStack: Number(e.target.value) })}
             />
           </Item>
+          <Toggle
+            checked={!!v.imbExtend}
+            onChange={(on) => onChange({ imbExtend: on })}
+            label="Prodloužit doprava"
+            hint="Čáry od stacked imbalance vedou k poslední svíčce. Když se cena později vrátí na tu úroveň, čára tam skončí — vidíš, jestli už to trh sebral."
+          />
           <Item
             label="Síla zvýraznění"
             value={`${Math.round((v.imbFill ?? 0.22) * 100)}%`}

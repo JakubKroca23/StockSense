@@ -121,6 +121,8 @@ export type FpVizSettings = {
   imbalanceStack: number;
   /** Extra fill on imbalanced side. */
   imbFill: number;
+  /** Extend stacked imbalance levels right until price trades through them. */
+  imbExtend: boolean;
   /** Bottom stats table height as a fraction of the chart. */
   statsFrac: number;
 };
@@ -170,6 +172,7 @@ export const DEFAULT_FP_VIZ: FpVizSettings = {
   imbalance: 3,
   imbalanceStack: 1,
   imbFill: 0.22,
+  imbExtend: false,
   statsFrac: 0.22,
 };
 
@@ -768,7 +771,7 @@ export function drawFootprintOnChart(
   const numCol = viz.numberColor || theme.text;
   const imbAskCol = viz.imbAskColor || buyCol;
   const imbBidCol = viz.imbBidColor || sellCol;
-  const imb = fancy && viz.imbalance > 0 ? viz.imbalance : 0;
+  const imb = viz.imbalance > 0 && (fancy || viz.imbExtend) ? viz.imbalance : 0;
   const stackMin = Math.max(1, Math.round(viz.imbalanceStack || 1));
   const imbFill = Math.min(0.55, Math.max(0, viz.imbFill ?? 0.22));
   const view = viz.view || "bidAsk";
@@ -1064,6 +1067,73 @@ export function drawFootprintOnChart(
       };
       if (ua.high) mark(hiP, true);
       if (ua.low) mark(loP, false);
+    }
+  }
+
+  if (viz.imbExtend && imb > 0 && bars.length > 1) {
+    const lastBar = bars[bars.length - 1];
+    const lastX = timeCoordinate(chart, lastBar.ts, alignTimes);
+    if (lastX != null) {
+      const liveRight = Math.min(clipRight, lastX + colW / 2);
+      const eps = tick * 0.05;
+      const byTs = new Map<string, PrepBar>();
+      for (const g of grouped) byTs.set(g.bar.ts, g);
+      let rays = 0;
+      ctx.save();
+      ctx.lineCap = "butt";
+      for (let i = 0; i < bars.length - 1 && rays < 160; i++) {
+        const src = bars[i];
+        if (to != null && Number(toUnix(src.ts)) > to) break;
+        const hit = byTs.get(src.ts) || {
+          ...prepBar(src, data.tick || 0.01, tick, groupN, viz, imb, stackMin, fancy, view),
+          bar: src,
+        };
+        if (!hit.imbBid.size && !hit.imbAsk.size) continue;
+        const x = timeCoordinate(chart, src.ts, alignTimes);
+        if (x == null) continue;
+        const x0 = x + colW / 2;
+        if (x0 >= clipRight) continue;
+
+        const paint = (price: number, color: string) => {
+          if (rays >= 160) return;
+          let end = liveRight;
+          let filled = false;
+          for (let j = i + 1; j < bars.length; j++) {
+            const b = bars[j];
+            if (b.low - eps <= price && b.high + eps >= price) {
+              const fx = timeCoordinate(chart, b.ts, alignTimes);
+              if (fx != null) {
+                end = Math.min(clipRight, fx - colW / 2);
+                filled = true;
+              }
+              break;
+            }
+          }
+          const yTop = series.priceToCoordinate(price);
+          const yBot = series.priceToCoordinate(price - tick);
+          if (yTop == null) return;
+          const y = yBot == null ? yTop : (yTop + yBot) / 2;
+          if (y < -2 || y > yMax + 2) return;
+          const xStart = Math.max(0, x0);
+          const xEnd = Math.min(clipRight, end);
+          if (xEnd - xStart < 3) return;
+          rays += 1;
+          ctx.strokeStyle = hexAlpha(color, filled ? 0.4 : 0.82);
+          ctx.lineWidth = filled ? 1 : Math.max(1.15, Math.min(2.2, colW * 0.05 + 1));
+          ctx.beginPath();
+          ctx.moveTo(xStart, y + 0.5);
+          ctx.lineTo(xEnd, y + 0.5);
+          ctx.stroke();
+          if (!filled) {
+            ctx.fillStyle = hexAlpha(color, 0.9);
+            ctx.fillRect(xEnd - 1.5, y - 2.2, 3, 4.4);
+          }
+        };
+
+        for (const p of hit.imbBid) paint(p, imbBidCol);
+        for (const p of hit.imbAsk) paint(p, imbAskCol);
+      }
+      ctx.restore();
     }
   }
 }
