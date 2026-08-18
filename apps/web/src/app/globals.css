@@ -800,26 +800,6 @@ a {
     drop-shadow(0 0 10px color-mix(in srgb, var(--sense) 55%, transparent));
 }
 
-.brand-logo--vision {
-  overflow: visible;
-}
-
-.brand-logo__vision {
-  position: relative;
-  z-index: 1;
-  margin-left: -0.72em;
-  font-family: var(--font-brand), "Space Grotesk", sans-serif;
-  font-weight: 650;
-  letter-spacing: -0.07em;
-  line-height: 1;
-  text-transform: uppercase;
-  color: var(--sense);
-  filter:
-    drop-shadow(0 0 2px var(--sense))
-    drop-shadow(0 0 6px var(--sense-glow))
-    drop-shadow(0 0 10px color-mix(in srgb, var(--sense) 55%, transparent));
-}
-
 .brand-logo__sense {
   display: inline-flex;
   align-items: center;
@@ -920,10 +900,6 @@ a {
 
   .brand-logo__word {
     display: none;
-  }
-
-  .brand-logo__vision {
-    display: inline;
   }
 
   .header-desk__bars {
@@ -1069,6 +1045,18 @@ a {
   margin-top: auto;
   padding-top: 0.35rem;
   border-top: 1px solid var(--glass-border);
+}
+
+.app-rail__legacy {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.app-rail__legacy-list {
+  display: grid;
+  gap: 0.15rem;
+  max-height: min(50vh, 22rem);
+  overflow: auto;
 }
 
 .app-rail__link {

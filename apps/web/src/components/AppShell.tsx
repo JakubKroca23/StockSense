@@ -7,6 +7,7 @@ import { StockSenseLogo } from "@/components/StockSenseLogo";
 import { SettingsPanel } from "@/components/SettingsPanel";
 import { HeaderExtraSlot } from "@/components/HeaderExtra";
 import {
+  IconAnalysis,
   IconClose,
   IconDesk,
   IconMenu,
@@ -20,11 +21,11 @@ import {
 import { applyTheme, ColorMode, getStoredTheme } from "@/lib/theme";
 import { LINEAR_DESKS, deskHref } from "@/lib/desks";
 
-const links: { href: string; label: string }[] = [
-  { href: "/", label: "Home" },
-  { href: "/trading", label: "Trading Vision" },
-  ...LINEAR_DESKS.map((d) => ({ href: deskHref(d.id), label: d.navLabel })),
-];
+const homeLink = { href: "/", label: "Home" };
+const visionLink = { href: "/trading", label: "Trading Vision" };
+const deskLinks = LINEAR_DESKS.map((d) => ({ href: deskHref(d.id), label: d.navLabel }));
+const stocksenseLinks = [homeLink, ...deskLinks];
+const links = [homeLink, visionLink, ...deskLinks];
 
 const RAIL_KEY = "stocksense-rail-collapsed";
 const DESKTOP_MQ = "(min-width: 768px)";
@@ -94,6 +95,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [desktop, setDesktop] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [legacyMenuOpen, setLegacyMenuOpen] = useState(false);
   const [theme, setTheme] = useState<ColorMode>(() => getStoredTheme());
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
   useLockPageZoom();
@@ -120,6 +122,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     setMenuOpen(false);
+    setLegacyMenuOpen(false);
   }, [pathname]);
 
   useEffect(() => {
@@ -250,7 +253,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </button>
           </div>
           <nav className="app-rail__nav">
-            {links.map((l) => {
+            {(isTradingVision ? [visionLink] : links).map((l) => {
               const active = isActive(pathname, l.href);
               return (
                 <Link
@@ -284,6 +287,44 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </nav>
           {isTradingVision ? (
             <div className="app-rail__foot">
+              <div className={`app-rail__legacy ${legacyMenuOpen ? "is-open" : ""}`}>
+                {legacyMenuOpen ? (
+                  <div className="app-rail__legacy-list" role="menu">
+                    {stocksenseLinks.map((l) => {
+                      const active = isActive(pathname, l.href);
+                      return (
+                        <Link
+                          key={l.href}
+                          href={l.href}
+                          className={`app-rail__link ${active ? "is-active" : ""}`}
+                          role="menuitem"
+                          aria-current={active ? "page" : undefined}
+                          title={l.label}
+                          onClick={() => {
+                            setLegacyMenuOpen(false);
+                            setMenuOpen(false);
+                          }}
+                        >
+                          <NavLabel href={l.href} label={l.label} size={RAIL_ICON_SIZE} />
+                        </Link>
+                      );
+                    })}
+                  </div>
+                ) : null}
+                <button
+                  type="button"
+                  className={`app-rail__link ${legacyMenuOpen ? "is-active" : ""}`}
+                  aria-label="Staré menu"
+                  aria-expanded={legacyMenuOpen}
+                  title="Staré menu"
+                  onClick={() => setLegacyMenuOpen((v) => !v)}
+                >
+                  <span className="nav-item">
+                    <IconAnalysis size={RAIL_ICON_SIZE} />
+                    <span className="nav-item__label">Staré menu</span>
+                  </span>
+                </button>
+              </div>
               <button
                 type="button"
                 className="app-rail__link"

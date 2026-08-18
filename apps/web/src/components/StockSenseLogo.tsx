@@ -25,13 +25,12 @@ export function StockSenseLogo({
   const eyeH = Math.round(height * 0.7);
   const eyeW = Math.round(eyeH * (229 / 108));
   const stockSize = Math.round(height * 0.46);
-  const visionSize = Math.round(height * 0.42);
   const gap = Math.round(height * 0.1);
 
   if (variant === "trading-vision") {
     return (
       <span
-        className={`brand-logo__mark brand-logo--vision inline-flex items-center ${className}`}
+        className={`brand-logo__mark inline-flex items-center ${className}`}
         style={{ height }}
         role="img"
         aria-label={title ?? "Trading Vision"}
@@ -44,9 +43,6 @@ export function StockSenseLogo({
           className="brand-logo__eye"
           priority
         />
-        <span className="brand-logo__vision" style={{ fontSize: visionSize }}>
-          VISION
-        </span>
       </span>
     );
   }
