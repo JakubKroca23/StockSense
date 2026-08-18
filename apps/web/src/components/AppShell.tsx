@@ -22,6 +22,7 @@ import { LINEAR_DESKS, deskHref } from "@/lib/desks";
 
 const links: { href: string; label: string }[] = [
   { href: "/", label: "Home" },
+  { href: "/trading", label: "Trading Vision" },
   ...LINEAR_DESKS.map((d) => ({ href: deskHref(d.id), label: d.navLabel })),
 ];
 
@@ -178,8 +179,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             >
               {menuOpen ? <IconClose size={22} /> : <IconMenu size={22} />}
             </button>
-            <Link href="/" className="brand-logo shrink-0" aria-label="StockSense">
-              <StockSenseLogo height={36} />
+            <Link
+              href={pathname.startsWith("/trading") ? "/trading" : "/"}
+              className="brand-logo shrink-0"
+              aria-label={pathname.startsWith("/trading") ? "Trading Vision" : "StockSense"}
+            >
+              <StockSenseLogo
+                height={36}
+                variant={pathname.startsWith("/trading") ? "trading-vision" : "stocksense"}
+              />
             </Link>
           </div>
 
