@@ -69,16 +69,12 @@ export function TradesTapePanel({
   onToggle,
   smart = true,
   blockSize = 0,
-  onBlockSize,
-  onSmart,
 }: {
   tape: TradesTapeData | null;
   collapsed?: boolean;
   onToggle?: () => void;
   smart?: boolean;
   blockSize?: number;
-  onBlockSize?: (n: number) => void;
-  onSmart?: (on: boolean) => void;
 }) {
   const prints = useMemo<SmartPrint[]>(() => {
     if (!tape?.trades.length) return [];
@@ -158,28 +154,6 @@ export function TradesTapePanel({
             <span className="is-buy">buy {fmtAmt(tape.buy_volume)}</span>
             <span className="is-sell">sell {fmtAmt(tape.sell_volume)}</span>
           </div>
-          <div className="trades-tape__tools">
-            <label className="viz-menu__check">
-              <input
-                type="checkbox"
-                checked={smart}
-                onChange={(e) => onSmart?.(e.target.checked)}
-              />
-              Smart
-            </label>
-            <label className="trades-tape__block">
-              Block
-              <input
-                type="number"
-                min={0}
-                step="any"
-                value={blockSize || ""}
-                placeholder="0"
-                onChange={(e) => onBlockSize?.(Math.max(0, Number(e.target.value) || 0))}
-              />
-            </label>
-          </div>
-
           <div className="trades-tape__cols muted text-xs">
             <span>Čas</span>
             <span>Cena</span>

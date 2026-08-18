@@ -304,11 +304,16 @@ body {
 .header-desk__tools {
   display: flex;
   align-items: stretch;
-  gap: 0.28rem;
-  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 0.22rem;
+  flex: 1 1 auto;
+  justify-content: flex-end;
   height: calc(100% - 0.4rem);
+  min-width: 0;
   align-self: center;
   padding: 0 0.15rem;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .header-desk .chart-controls {
@@ -335,11 +340,11 @@ body {
   align-items: center;
   justify-content: center;
   height: 100%;
-  font-size: 0.95rem;
+  font-size: 0.82rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  padding: 0 0.78rem;
+  padding: 0 0.58rem;
   border-radius: 8px;
   border: 1px solid color-mix(in srgb, var(--sense) 38%, var(--glass-border));
   background: color-mix(in srgb, var(--sense) 12%, transparent);
@@ -4234,6 +4239,10 @@ textarea {
   overflow: hidden;
 }
 
+.oil-page__desk.is-side-off {
+  grid-template-rows: minmax(0, 1fr);
+}
+
 .oil-page .gold-page__chart.instrument-chart {
   min-height: 0;
   height: 100%;
@@ -4275,6 +4284,44 @@ textarea {
   flex: 1 1 auto;
   height: 100%;
   min-height: 0;
+}
+
+.draw-toolbar {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 24;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.28rem;
+  padding: 0.38rem;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-elevated, #121a2b) 92%, transparent);
+  border: 1px solid color-mix(in srgb, #9eb6ff 18%, #243049);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+
+.draw-toolbar__btn {
+  padding: 0.38rem 0.62rem;
+  border: 1px solid color-mix(in srgb, #9eb6ff 16%, #243049);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted, #93a0b8);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.draw-toolbar__btn:hover {
+  color: var(--text, #e8eefc);
+}
+
+.draw-toolbar__btn.is-active {
+  color: var(--bg, #060a12);
+  background: var(--sense, #5dde8a);
+  border-color: var(--sense, #5dde8a);
 }
 
 .desk-charts__hsplit {
@@ -4356,6 +4403,7 @@ textarea {
 }
 
 .oil-page__ob-side {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
@@ -4363,8 +4411,37 @@ textarea {
   max-height: 38%;
 }
 
-.oil-page__desk.is-fp-settings .oil-page__ob-side {
+.oil-page__desk.is-drawer .oil-page__ob-side {
   max-height: 52%;
+}
+
+.desk-drawer-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  z-index: 12;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.desk-drawer-handle::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  width: 3px;
+  height: 44px;
+  transform: translateY(-50%);
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--sense, #5dde8a) 55%, #9eb6ff);
+}
+
+.desk-drawer-handle:hover::after,
+.desk-drawer-handle:active::after {
+  background: var(--sense, #5dde8a);
+  height: 56px;
 }
 
 .oil-page__panel {
@@ -4523,6 +4600,18 @@ textarea {
   width: 100%;
   height: 1.35rem;
   accent-color: var(--sense, #5dde8a);
+}
+
+.fp-drawer__item input[type="number"] {
+  width: 100%;
+  margin-top: 0.15rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, #9eb6ff 16%, #243049);
+  background: color-mix(in srgb, var(--bg-soft, #0c1220) 80%, transparent);
+  color: var(--text, #e8eefc);
+  font-size: 0.92rem;
+  font-weight: 650;
 }
 
 .fp-drawer__seg {
@@ -5029,14 +5118,18 @@ textarea {
     grid-template-columns: minmax(0, 1fr) 9.6rem;
   }
 
-  .oil-page__desk.is-fp-settings,
-  .oil-page__desk.is-fp-settings:not(:has(.oil-page__panel:not(.is-collapsed))) {
-    grid-template-columns: minmax(0, 1fr) minmax(340px, 26rem);
+  .oil-page__desk.is-drawer,
+  .oil-page__desk.is-drawer:not(:has(.oil-page__panel:not(.is-collapsed))) {
+    grid-template-columns: minmax(0, 1fr) var(--desk-drawer-w, 360px);
   }
 
-  .oil-page__desk.is-fp-settings .oil-page__ob-side {
+  .oil-page__desk.is-drawer .oil-page__ob-side {
     max-height: none;
     height: 100%;
+  }
+
+  .oil-page__desk.is-side-off {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

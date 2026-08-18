@@ -1,12 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch, apiWsUrl } from "@/lib/api";
 import { PriceChart, type ChartBar, type HeatmapLevel, type HeatVizSettings, type ChartVizSettings, DEFAULT_HEAT_VIZ, DEFAULT_DESK_CHART_VIZ } from "@/components/PriceChart";
 import { HeaderExtra } from "@/components/HeaderExtra";
 import { type FootprintData, type FpVizSettings, DEFAULT_FP_VIZ } from "@/components/FootprintChart";
 import { FootprintSettingsPanel } from "@/components/FootprintSettingsPanel";
+import { ChartSettingsPanel } from "@/components/ChartSettingsPanel";
+import { LiquiditySettingsPanel } from "@/components/LiquiditySettingsPanel";
+import { TapeSettingsPanel } from "@/components/TapeSettingsPanel";
 import { type OrderBookData } from "@/components/OrderBookPanel";
 import { TradesTapePanel, type TradesTapeData } from "@/components/TradesTapePanel";
 import { LiquidityPanel } from "@/components/LiquidityPanel";
@@ -38,6 +41,9 @@ export type BybitDeskConfig = LinearDeskInfo;
 const DESK_STORE = "stocksense-desk";
 const DEFAULT_TAPE_VIZ = { smart: true, blockSize: 0 };
 const DEFAULT_DRAWINGS = { items: [] as ChartDrawing[] };
+const DRAWER_W_MIN = 280;
+const DRAWER_W_MAX = 640;
+type DeskDrawer = "chart" | "fp" | "liq" | "tape" | null;
 
 const TIMEFRAMES = [
   { id: "1s", label: "1 S", defaultLookback: "1h" },
@@ -281,104 +287,6 @@ function usePersistedJson<T extends object>(key: string, fallback: T) {
   return [value, update, reset] as const;
 }
 
-function VizMenu({
-  title,
-  ariaLabel,
-  label,
-  wide,
-  children,
-}: {
-  title: string;
-  ariaLabel: string;
-  label?: string;
-  wide?: boolean;
-  children: ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    const onPtr = (e: PointerEvent) => {
-      const t = e.target;
-      if (!(t instanceof Node)) return;
-      if (btnRef.current?.contains(t) || menuRef.current?.contains(t)) return;
-      setOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("pointerdown", onPtr);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("pointerdown", onPtr);
-    };
-  }, [open]);
-
-  useLayoutEffect(() => {
-    if (!open || !btnRef.current) return;
-    const r = btnRef.current.getBoundingClientRect();
-    const width = wide ? 360 : 300;
-    let left = r.left;
-    if (left + width > window.innerWidth - 8) left = Math.max(8, r.right - width);
-    setPos({ top: r.bottom + 4, left });
-  }, [open, wide]);
-
-  return (
-    <>
-      <button
-        ref={btnRef}
-        type="button"
-        className={`chart-chip chart-chip--soft ${label ? "" : "chart-chip--gear "}${open ? "is-active" : ""}`}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        aria-label={ariaLabel}
-        title={ariaLabel}
-        onClick={() => setOpen((v) => !v)}
-      >
-        {label || "⚙"}
-      </button>
-      {open &&
-        createPortal(
-          <div
-            ref={menuRef}
-            className={`tf-menu viz-menu${wide ? " viz-menu--wide" : ""}`}
-            role="dialog"
-            aria-label={title}
-            style={{ top: pos.top, left: pos.left }}
-          >
-            <p className="viz-menu__title">{title}</p>
-            {children}
-          </div>,
-          document.body
-        )}
-    </>
-  );
-}
-
-function VizRow({
-  label,
-  value,
-  children,
-}: {
-  label: string;
-  value: string;
-  children: ReactNode;
-}) {
-  return (
-    <label className="viz-menu__row">
-      <span className="viz-menu__lab">
-        {label}
-        <span className="muted">{value}</span>
-      </span>
-      {children}
-    </label>
-  );
-}
-
 function usePersistedOpen(key: string, fallback = true) {
   const [open, setOpen] = useState(fallback);
   useEffect(() => {
@@ -427,7 +335,9 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
   const bookSrcRef = useRef<HeatmapLevel[] | null>(null);
   const [heatOpacity, setHeatOpacity] = useState(0.55);
   const [footprint, , setFootprint] = usePersistedOpen(`${DESK_STORE}-fp`, false);
-  const [fpSettingsOpen, , setFpSettingsOpen] = usePersistedOpen(`${DESK_STORE}-fp-settings`, false);
+  const [drawer, setDrawer] = useState<DeskDrawer>(null);
+  const [drawerW, setDrawerW] = useState(360);
+  const [drawBarOpen, setDrawBarOpen] = useState(false);
   const [fpData, setFpData] = useState<FootprintData | null>(null);
   const [heatViz, setHeatViz, resetHeatViz] = usePersistedJson<HeatVizSettings>(
     `${DESK_STORE}-l2-viz`,
@@ -466,6 +376,11 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
       if (alpha) {
         const n = Number(alpha);
         if (Number.isFinite(n)) setHeatOpacity(Math.min(1, Math.max(0.15, n)));
+      }
+      const dw = window.localStorage.getItem(`${DESK_STORE}-drawer-w`);
+      if (dw) {
+        const w = Number(dw);
+        if (Number.isFinite(w)) setDrawerW(Math.min(DRAWER_W_MAX, Math.max(DRAWER_W_MIN, w)));
       }
     } catch {
       /* ignore */
@@ -747,6 +662,42 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
     return snap;
   }, [heatmapLevels, heatViz, config.tick, lastClose, session, fpData, tradesTape]);
 
+  const drawerOpen = drawer != null;
+  const sideOpen = drawerOpen || tapeOpen || liqOpen;
+  const drawerWRef = useRef(drawerW);
+  drawerWRef.current = drawerW;
+
+  const toggleDrawer = (kind: Exclude<DeskDrawer, null>) => {
+    setDrawer((d) => (d === kind ? null : kind));
+  };
+
+  const onDrawerResizeDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startW = drawerWRef.current;
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    const onMove = (ev: PointerEvent) => {
+      const next = Math.min(DRAWER_W_MAX, Math.max(DRAWER_W_MIN, startW + (startX - ev.clientX)));
+      drawerWRef.current = next;
+      setDrawerW(next);
+    };
+    const onUp = () => {
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup", onUp);
+      try {
+        window.localStorage.setItem(`${DESK_STORE}-drawer-w`, String(drawerWRef.current));
+      } catch {
+        /* ignore */
+      }
+    };
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerup", onUp);
+  };
+
+  const closeDrawer = () => setDrawer(null);
+
   return (
     <div className="gold-page oil-page">
       <HeaderExtra>
@@ -774,6 +725,15 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
             </p>
           </div>
           <div className="header-desk__tools">
+            <button
+              type="button"
+              className={`chart-chip chart-chip--soft ${drawer === "chart" ? "is-active" : ""}`}
+              onClick={() => toggleDrawer("chart")}
+              aria-pressed={drawer === "chart"}
+              title="Nastavení grafu — panel vpravo"
+            >
+              Nastavení
+            </button>
             <HeaderPick
               label={tfLabel}
               ariaLabel="Timeframe"
@@ -788,185 +748,21 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
               options={ranges}
               onSelect={setLookback}
             />
-            <VizMenu title="Graf" ariaLabel="Nastavení grafu" label="Graf">
-              <p className="viz-menu__sec">Vzhled</p>
-              <div className="viz-menu__row">
-                <span className="viz-menu__lab">Styl</span>
-                <div className="viz-menu__seg">
-                  {(
-                    [
-                      ["candle", "Svíčky"],
-                      ["hollow", "Duté"],
-                      ["line", "Čára"],
-                    ] as const
-                  ).map(([id, lab]) => (
-                    <button
-                      key={id}
-                      type="button"
-                      className={`chart-chip chart-chip--soft ${chartViz.style === id ? "is-active" : ""}`}
-                      onClick={() => setChartViz({ style: id })}
-                    >
-                      {lab}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="viz-menu__row">
-                <span className="viz-menu__lab">Kříž</span>
-                <div className="viz-menu__seg">
-                  {(
-                    [
-                      ["normal", "Normální"],
-                      ["magnet", "Magnet"],
-                      ["off", "Vyp"],
-                    ] as const
-                  ).map(([id, lab]) => (
-                    <button
-                      key={id}
-                      type="button"
-                      className={`chart-chip chart-chip--soft ${chartViz.crosshair === id ? "is-active" : ""}`}
-                      onClick={() => setChartViz({ crosshair: id })}
-                    >
-                      {lab}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <label className="viz-menu__check">
-                <input
-                  type="checkbox"
-                  checked={chartViz.grid}
-                  onChange={(e) => setChartViz({ grid: e.target.checked })}
-                />
-                Mřížka
-              </label>
-              <label className="viz-menu__check">
-                <input
-                  type="checkbox"
-                  checked={chartViz.wicks}
-                  onChange={(e) => setChartViz({ wicks: e.target.checked })}
-                />
-                Knoty
-              </label>
-              <label className="viz-menu__check">
-                <input
-                  type="checkbox"
-                  checked={chartViz.priceLine}
-                  onChange={(e) => setChartViz({ priceLine: e.target.checked })}
-                />
-                Čára poslední ceny
-              </label>
-              <label className="viz-menu__check">
-                <input
-                  type="checkbox"
-                  checked={chartViz.lastValue}
-                  onChange={(e) => setChartViz({ lastValue: e.target.checked })}
-                />
-                Label na ose
-              </label>
-              <label className="viz-menu__check">
-                <input
-                  type="checkbox"
-                  checked={chartViz.logScale}
-                  onChange={(e) => setChartViz({ logScale: e.target.checked })}
-                />
-                Logaritmická škála
-              </label>
-              <p className="viz-menu__sec">Indikátory</p>
-              <label className="viz-menu__check">
-                <input
-                  type="checkbox"
-                  checked={chartViz.sma20}
-                  onChange={(e) => setChartViz({ sma20: e.target.checked })}
-                />
-                SMA 20
-              </label>
-              <label className="viz-menu__check">
-                <input
-                  type="checkbox"
-                  checked={chartViz.sma50}
-                  onChange={(e) => setChartViz({ sma50: e.target.checked })}
-                />
-                SMA 50
-              </label>
-              <label className="viz-menu__check">
-                <input
-                  type="checkbox"
-                  checked={chartViz.ema20}
-                  onChange={(e) => setChartViz({ ema20: e.target.checked })}
-                />
-                EMA 20
-              </label>
-              <label className="viz-menu__check">
-                <input
-                  type="checkbox"
-                  checked={chartViz.rsi}
-                  onChange={(e) => setChartViz({ rsi: e.target.checked })}
-                />
-                RSI 14
-              </label>
-              <label className="viz-menu__check">
-                <input
-                  type="checkbox"
-                  checked={chartViz.volume}
-                  onChange={(e) => setChartViz({ volume: e.target.checked })}
-                />
-                Volume histogram
-              </label>
-              <p className="viz-menu__sec">Měřítko</p>
-              <VizRow label="Šířka svíček" value={`${chartViz.barSpacing} px`}>
-                <input
-                  type="range"
-                  min={4}
-                  max={72}
-                  value={chartViz.barSpacing}
-                  onChange={(e) => setChartViz({ barSpacing: Number(e.target.value) })}
-                />
-              </VizRow>
-              <VizRow label="Pravý okraj" value={chartViz.rightOffset <= 0 ? "lepit" : `${chartViz.rightOffset}`}>
-                <input
-                  type="range"
-                  min={0}
-                  max={12}
-                  value={chartViz.rightOffset >= 6 ? 0 : chartViz.rightOffset}
-                  onChange={(e) => setChartViz({ rightOffset: Number(e.target.value) })}
-                />
-              </VizRow>
-              <button type="button" className="viz-menu__reset" onClick={resetChartViz}>
-                Výchozí
-              </button>
-            </VizMenu>
-            <div className="viz-menu__seg header-desk__draw">
-              {(
-                [
-                  ["trend", "Trend"],
-                  ["ray", "Ray"],
-                  ["rect", "Box"],
-                  ["hline", "H"],
-                ] as const
-              ).map(([id, lab]) => (
-                <button
-                  key={id}
-                  type="button"
-                  className={`chart-chip chart-chip--soft ${drawTool === id ? "is-active" : ""}`}
-                  onClick={() => setDrawTool((t) => (t === id ? "none" : id))}
-                  title={lab}
-                >
-                  {lab}
-                </button>
-              ))}
-              <button
-                type="button"
-                className="chart-chip chart-chip--soft"
-                onClick={() => {
-                  setDrawingsStore({ items: [] });
-                  setDrawTool("none");
-                }}
-                title="Smazat kresby"
-              >
-                ⌫
-              </button>
-            </div>
+            <button
+              type="button"
+              className={`chart-chip chart-chip--soft ${drawBarOpen ? "is-active" : ""}`}
+              onClick={() => {
+                setDrawBarOpen((open) => {
+                  const next = !open;
+                  if (!next) setDrawTool("none");
+                  return next;
+                });
+              }}
+              aria-pressed={drawBarOpen}
+              title="Kreslení — trend, ray, box, horizontála"
+            >
+              Kreslení
+            </button>
             <button
               type="button"
               className={`chart-chip chart-chip--soft ${footprint ? "is-active" : ""}`}
@@ -983,21 +779,57 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
             </button>
             <button
               type="button"
-              className={`chart-chip chart-chip--soft ${fpSettingsOpen ? "is-active" : ""}`}
+              className={`chart-chip chart-chip--soft ${drawer === "fp" ? "is-active" : ""}`}
               onClick={() => {
-                setFpSettingsOpen((open) => {
-                  const next = !open;
-                  if (next) {
+                setDrawer((d) => {
+                  const next = d === "fp" ? null : "fp";
+                  if (next === "fp") {
                     setFootprint(true);
                     if (chartViz.barSpacing < 20) setChartViz({ barSpacing: 24 });
                   }
                   return next;
                 });
               }}
-              aria-pressed={fpSettingsOpen}
-              title="Nastavení footprintu — panel vpravo, zůstane otevřený"
+              aria-pressed={drawer === "fp"}
+              title="Nastavení footprintu"
             >
               FP nastavení
+            </button>
+            <button
+              type="button"
+              className={`chart-chip chart-chip--soft ${tapeOpen ? "is-active" : ""}`}
+              onClick={() => toggleTape()}
+              aria-pressed={tapeOpen}
+              title="Zapnout / vypnout tape"
+            >
+              Tape
+            </button>
+            <button
+              type="button"
+              className={`chart-chip chart-chip--soft ${drawer === "tape" ? "is-active" : ""}`}
+              onClick={() => toggleDrawer("tape")}
+              aria-pressed={drawer === "tape"}
+              title="Nastavení tape"
+            >
+              Tape nastavení
+            </button>
+            <button
+              type="button"
+              className={`chart-chip chart-chip--soft ${liqOpen ? "is-active" : ""}`}
+              onClick={() => toggleLiq()}
+              aria-pressed={liqOpen}
+              title="Zapnout / vypnout likviditu"
+            >
+              Liq
+            </button>
+            <button
+              type="button"
+              className={`chart-chip chart-chip--soft ${drawer === "liq" ? "is-active" : ""}`}
+              onClick={() => toggleDrawer("liq")}
+              aria-pressed={drawer === "liq"}
+              title="Nastavení likvidity"
+            >
+              Liq nastavení
             </button>
           </div>
         </div>
@@ -1009,7 +841,10 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
         </p>
       )}
 
-      <div className={`oil-page__desk${fpSettingsOpen ? " is-fp-settings" : ""}`}>
+      <div
+        className={`oil-page__desk${drawerOpen ? " is-drawer" : ""}${sideOpen ? "" : " is-side-off"}`}
+        style={drawerOpen ? ({ "--desk-drawer-w": `${drawerW}px` } as CSSProperties) : undefined}
+      >
       <section className="card instrument-chart gold-page__chart">
         <div className="instrument-chart__stage crypto-chart-stage gold-page__chart-pane">
           {data?.bars?.length ? (
@@ -1039,6 +874,49 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
                   drawings={drawingsStore.items}
                   onDrawingsChange={(items) => setDrawingsStore({ items })}
                 />
+                {drawBarOpen ? (
+                  <div className="draw-toolbar" role="toolbar" aria-label="Kreslení">
+                    {(
+                      [
+                        ["trend", "Trend"],
+                        ["ray", "Ray"],
+                        ["rect", "Box"],
+                        ["hline", "H"],
+                      ] as const
+                    ).map(([id, lab]) => (
+                      <button
+                        key={id}
+                        type="button"
+                        className={`draw-toolbar__btn ${drawTool === id ? "is-active" : ""}`}
+                        onClick={() => setDrawTool((t) => (t === id ? "none" : id))}
+                      >
+                        {lab}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      className="draw-toolbar__btn"
+                      onClick={() => {
+                        setDrawingsStore({ items: [] });
+                        setDrawTool("none");
+                      }}
+                      title="Smazat kresby"
+                    >
+                      Smazat
+                    </button>
+                    <button
+                      type="button"
+                      className="draw-toolbar__btn"
+                      onClick={() => {
+                        setDrawBarOpen(false);
+                        setDrawTool("none");
+                      }}
+                      title="Zavřít kreslení"
+                    >
+                      Hotovo
+                    </button>
+                  </div>
+                ) : null}
               </div>
             </div>
           ) : (
@@ -1053,8 +931,28 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
           ) : null}
         </div>
       </section>
+      {sideOpen ? (
       <div className="oil-page__ob-side">
-        {fpSettingsOpen ? (
+        {drawerOpen ? (
+          <div
+            className="desk-drawer-handle"
+            onPointerDown={onDrawerResizeDown}
+            title="Šířka panelu"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Šířka nastavení"
+          />
+        ) : null}
+        {drawer === "chart" ? (
+          <div className="oil-page__panel oil-page__panel--fp">
+            <ChartSettingsPanel
+              viz={chartViz}
+              onChange={setChartViz}
+              onReset={resetChartViz}
+              onClose={closeDrawer}
+            />
+          </div>
+        ) : drawer === "fp" ? (
           <div className="oil-page__panel oil-page__panel--fp">
             <FootprintSettingsPanel
               viz={fpViz}
@@ -1062,40 +960,52 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
               onReset={resetFpViz}
               barSpacing={chartViz.barSpacing}
               onBarSpacing={(n) => setChartViz({ barSpacing: n })}
-              onClose={() => setFpSettingsOpen(false)}
+              onClose={closeDrawer}
+            />
+          </div>
+        ) : drawer === "liq" ? (
+          <div className="oil-page__panel oil-page__panel--fp">
+            <LiquiditySettingsPanel
+              showHeatmap={showHeatmap}
+              onToggleHeatmap={(on) => setShowHeatmap(on)}
+              heatViz={heatViz}
+              onHeatViz={setHeatViz}
+              onReset={resetHeatViz}
+              heatOpacity={heatOpacity}
+              onOpacity={setHeatOpacity}
+              onClose={closeDrawer}
+            />
+          </div>
+        ) : drawer === "tape" ? (
+          <div className="oil-page__panel oil-page__panel--fp">
+            <TapeSettingsPanel
+              smart={tapeViz.smart}
+              blockSize={tapeViz.blockSize}
+              onSmart={(on) => setTapeViz({ smart: on })}
+              onBlockSize={(n) => setTapeViz({ blockSize: n })}
+              onClose={closeDrawer}
             />
           </div>
         ) : (
           <>
-        <div className={`oil-page__panel ${liqOpen ? "" : "is-collapsed"}`}>
-          <LiquidityPanel
-            snapshot={liqSnap}
-            showHeatmap={showHeatmap}
-            onToggleHeatmap={(on) => setShowHeatmap(on)}
-            heatViz={heatViz}
-            onHeatViz={setHeatViz}
-            onReset={resetHeatViz}
-            heatOpacity={heatOpacity}
-            onOpacity={setHeatOpacity}
-            priceDigits={config.priceDigits}
-            collapsed={!liqOpen}
-            onToggle={toggleLiq}
-          />
-        </div>
-        <div className={`oil-page__panel ${tapeOpen ? "" : "is-collapsed"}`}>
-          <TradesTapePanel
-            tape={tradesTape}
-            collapsed={!tapeOpen}
-            onToggle={toggleTape}
-            smart={tapeViz.smart}
-            blockSize={tapeViz.blockSize}
-            onSmart={(on) => setTapeViz({ smart: on })}
-            onBlockSize={(n) => setTapeViz({ blockSize: n })}
-          />
-        </div>
+            {liqOpen ? (
+              <div className="oil-page__panel">
+                <LiquidityPanel snapshot={liqSnap} priceDigits={config.priceDigits} />
+              </div>
+            ) : null}
+            {tapeOpen ? (
+              <div className="oil-page__panel">
+                <TradesTapePanel
+                  tape={tradesTape}
+                  smart={tapeViz.smart}
+                  blockSize={tapeViz.blockSize}
+                />
+              </div>
+            ) : null}
           </>
         )}
       </div>
+      ) : null}
       </div>
     </div>
   );
