@@ -497,6 +497,16 @@ body {
   color: var(--muted, #93a0b8);
 }
 
+.viz-menu__hint {
+  margin: -0.1rem 0 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 550;
+  line-height: 1.35;
+  color: var(--muted, #93a0b8);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
 .viz-menu__title + .viz-menu__sec {
   margin-top: 0;
 }
@@ -578,6 +588,23 @@ body {
 .viz-menu__reset:hover {
   color: var(--text, #e8eefc);
   border-color: color-mix(in srgb, var(--sense, #5dde8a) 45%, #243049);
+}
+
+.viz-menu--wide {
+  min-width: 21.5rem;
+  max-width: min(24rem, calc(100vw - 1rem));
+  max-height: min(44rem, calc(100vh - 1.25rem));
+}
+
+.viz-menu__checks {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.12rem 0.45rem;
+  margin: 0 0 0.5rem;
+}
+
+.viz-menu__checks .viz-menu__check {
+  margin: 0;
 }
 
 .app-no-drag {

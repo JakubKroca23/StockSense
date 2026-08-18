@@ -101,3 +101,15 @@ export type ImbalanceZone = {
   side: "bid" | "ask";
   prices: number[];
 };
+
+/** Single price cell inside a footprint candle (prompt: TickData). */
+export type TickData = FootprintLevel;
+
+export type CandleStats = {
+  totalVolume: number;
+  netDelta: number;
+  maxDelta: number;
+  minDelta: number;
+  cumulativeDelta: number;
+  deltaPercentage: number;
+};

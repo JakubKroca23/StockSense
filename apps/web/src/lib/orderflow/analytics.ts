@@ -1,5 +1,6 @@
 import type {
   BookWallFlag,
+  CandleStats,
   FootprintLevel,
   FootprintLevelWire,
   ImbalanceZone,
@@ -98,6 +99,87 @@ export function stackedImbalanceZones(
   return zones;
 }
 
+function priceKey(price: number, tick: number): number {
+  return Math.round(price / tick);
+}
+
+/**
+ * Classic order-flow diagonal imbalance:
+ * bid at P vs ask at P+tick, ask at P vs bid at P−tick.
+ */
+export function diagonalImbalances(
+  levels: FootprintLevel[],
+  tick: number,
+  ratio: number,
+  minStack = 1
+): { bid: Set<number>; ask: Set<number> } {
+  const empty = { bid: new Set<number>(), ask: new Set<number>() };
+  if (ratio <= 0 || tick <= 0 || !levels.length) return empty;
+  const byK = new Map<number, FootprintLevel>();
+  for (const l of levels) byK.set(priceKey(l.price, tick), l);
+  const bidRaw: number[] = [];
+  const askRaw: number[] = [];
+  for (const [k, l] of byK) {
+    const up = byK.get(k + 1);
+    const dn = byK.get(k - 1);
+    if (up && l.bidVolume > 0 && up.askVolume > 0 && l.bidVolume >= up.askVolume * ratio) {
+      bidRaw.push(l.price);
+    }
+    if (dn && l.askVolume > 0 && dn.bidVolume > 0 && l.askVolume >= dn.bidVolume * ratio) {
+      askRaw.push(l.price);
+    }
+  }
+  const keepRun = (prices: number[]) => {
+    if (minStack <= 1) return new Set(prices);
+    const sorted = [...prices].sort((a, b) => a - b);
+    const out = new Set<number>();
+    let run: number[] = [];
+    for (const p of sorted) {
+      if (!run.length || Math.abs(p - run[run.length - 1] - tick) < tick * 0.05) {
+        run.push(p);
+      } else {
+        if (run.length >= minStack) for (const x of run) out.add(x);
+        run = [p];
+      }
+    }
+    if (run.length >= minStack) for (const x of run) out.add(x);
+    return out;
+  };
+  return { bid: keepRun(bidRaw), ask: keepRun(askRaw) };
+}
+
+export function buildCandleStats(
+  bars: { volume?: number; delta?: number; levels?: { buy?: number; sell?: number }[] }[]
+): CandleStats[] {
+  let cvd = 0;
+  const out: CandleStats[] = new Array(bars.length);
+  for (let i = 0; i < bars.length; i++) {
+    const bar = bars[i];
+    const net = bar.delta || 0;
+    cvd += net;
+    let maxD = net;
+    let minD = net;
+    const lvls = bar.levels;
+    if (lvls) {
+      for (let j = 0; j < lvls.length; j++) {
+        const d = (lvls[j].buy || 0) - (lvls[j].sell || 0);
+        if (d > maxD) maxD = d;
+        if (d < minD) minD = d;
+      }
+    }
+    const vol = bar.volume || 0;
+    out[i] = {
+      totalVolume: vol,
+      netDelta: net,
+      maxDelta: maxD,
+      minDelta: minD,
+      cumulativeDelta: cvd,
+      deltaPercentage: vol > 0 ? net / vol : 0,
+    };
+  }
+  return out;
+}
+
 export function unfinishedAuction(candle: {
   high: number;
   low: number;
@@ -117,7 +199,7 @@ export function unfinishedAuction(candle: {
 }
 
 /** Lowest-volume valley in a candle (not the POC). */
-export function lowVolumeNodes(levels: FootprintLevel[]): number[] {
+export function lowVolumeNodes(levels: FootprintLevel[], cutFrac = 0.2): number[] {
   if (levels.length < 2) return [];
   const sorted = [...levels].sort((a, b) => a.price - b.price);
   let peak = 0;
@@ -129,7 +211,7 @@ export function lowVolumeNodes(levels: FootprintLevel[]): number[] {
     }
   }
   if (peak <= 0) return [];
-  const cut = peak * 0.2;
+  const cut = peak * Math.min(0.6, Math.max(0.04, cutFrac));
   const out: number[] = [];
   for (let i = 0; i < sorted.length; i++) {
     const l = sorted[i];
@@ -146,6 +228,32 @@ export function lowVolumeNodes(levels: FootprintLevel[]): number[] {
       if (l.totalVolume < min.totalVolume) min = l;
     }
     if (min.price !== peakPx && min.totalVolume <= cut) out.push(min.price);
+  }
+  return out;
+}
+
+/** High-volume nodes: local peaks at ≥ `cutFrac` of candle POC volume. */
+export function highVolumeNodes(levels: FootprintLevel[], cutFrac = 0.75): number[] {
+  if (levels.length < 2) return [];
+  const sorted = [...levels].sort((a, b) => a.price - b.price);
+  let peak = 0;
+  let peakPx = sorted[0].price;
+  for (const l of sorted) {
+    if (l.totalVolume > peak) {
+      peak = l.totalVolume;
+      peakPx = l.price;
+    }
+  }
+  if (peak <= 0) return [];
+  const cut = peak * Math.min(0.98, Math.max(0.4, cutFrac));
+  const out: number[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const l = sorted[i];
+    if (l.price === peakPx) continue;
+    if (l.totalVolume < cut) continue;
+    const prev = i > 0 ? sorted[i - 1].totalVolume : 0;
+    const next = i < sorted.length - 1 ? sorted[i + 1].totalVolume : 0;
+    if (l.totalVolume >= prev && l.totalVolume >= next) out.push(l.price);
   }
   return out;
 }

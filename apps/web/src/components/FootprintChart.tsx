@@ -14,10 +14,17 @@ import { useThemeRevision } from "@/lib/theme";
 import {
   fromWireLevel,
   levelsFromWireBars,
-  stackedImbalanceZones,
+  diagonalImbalances,
   unfinishedAuction,
   lowVolumeNodes,
+  highVolumeNodes,
+  valueArea,
+  emptyLevel,
+  buildCandleStats,
+  type FootprintLevel as OfLevel,
   type FootprintViewMode,
+  type CandleStats,
+  type TickData,
 } from "@/lib/orderflow";
 
 export type FootprintLevel = {
@@ -44,16 +51,34 @@ export type FootprintData = {
   bars: FootprintBar[];
 };
 
+export type { CandleStats, TickData };
+
+export type FpNumberMode = "auto" | "bidAsk" | "volume" | "delta";
+export type FpHistAlign = "left" | "center" | "split";
+export type FpPocStyle = "box" | "fill" | "both";
+
 export type FpVizSettings = {
   numbers: boolean;
   poc: boolean;
   lvn: boolean;
+  hvn: boolean;
   wicks: boolean;
   unfinished: boolean;
-  /** Cluster cell mode. */
+  valueArea: boolean;
+  candleDelta: boolean;
+  candleVolume: boolean;
+  showZeros: boolean;
+  cellGrid: boolean;
+  textShadow: boolean;
+  numberBySide: boolean;
+  /** Cluster cell coloring. */
   view: FootprintViewMode;
-  /** Group adjacent ticks: 1 = native, 2 / 5 = coarser cells. */
-  tickGroup: 1 | 2 | 5;
+  /** Numbers can differ from cell mode. */
+  numberMode: FpNumberMode;
+  histAlign: FpHistAlign;
+  pocStyle: FpPocStyle;
+  /** Group adjacent ticks: 1 = native. */
+  tickGroup: number;
   /** Contrast curve for buy/sell fill (lower = punchier). */
   gamma: number;
   /** Overall cell fill 0–1. */
@@ -62,36 +87,87 @@ export type FpVizSettings = {
   scale: "candle" | "session";
   /** Width-based volume histogram inside the candle (not only opacity). */
   histogram: boolean;
+  /** Cluster width as a fraction of bar spacing. */
+  bodyWidth: number;
+  /** Vertical gap between cells in px. */
+  cellGap: number;
+  /** Number size multiplier. */
+  fontScale: number;
+  /** Dark cell background opacity 0–1. */
+  cellBg: number;
+  /** Hide cells below this total volume. */
+  minVolume: number;
+  /** Hide numbers below this volume / |delta|. */
+  numberMin: number;
+  /** LVN cut as a fraction of candle peak. */
+  lvnPct: number;
+  /** HVN cut as a fraction of candle peak. */
+  hvnPct: number;
+  /** Unfinished-auction marker size. */
+  uaScale: number;
   buyColor: string;
   sellColor: string;
   pocColor: string;
   lvnColor: string;
+  hvnColor: string;
   uaColor: string;
+  vaColor: string;
+  numberColor: string;
+  imbAskColor: string;
+  imbBidColor: string;
   /** Highlight stacked imbalance when one side ≥ this × the other. 0 = off. */
   imbalance: number;
   /** Min consecutive imbalanced ticks to mark a stack. */
   imbalanceStack: number;
+  /** Extra fill on imbalanced side. */
+  imbFill: number;
 };
 
 export const DEFAULT_FP_VIZ: FpVizSettings = {
   numbers: true,
   poc: true,
   lvn: true,
+  hvn: false,
   wicks: true,
   unfinished: true,
+  valueArea: false,
+  candleDelta: false,
+  candleVolume: false,
+  showZeros: false,
+  cellGrid: false,
+  textShadow: false,
+  numberBySide: false,
   view: "bidAsk",
+  numberMode: "auto",
+  histAlign: "split",
+  pocStyle: "box",
   tickGroup: 1,
   gamma: 0.55,
   fill: 0.88,
   scale: "candle",
-  histogram: true,
+  histogram: false,
+  bodyWidth: 0.9,
+  cellGap: 0.4,
+  fontScale: 1,
+  cellBg: 0.16,
+  minVolume: 0,
+  numberMin: 0,
+  lvnPct: 0.2,
+  hvnPct: 0.75,
+  uaScale: 1,
   buyColor: "#5dde8a",
   sellColor: "#e05a8a",
-  pocColor: "#5dde8a",
+  pocColor: "#fff3b0",
   lvnColor: "#6ec8ff",
+  hvnColor: "#c9a0ff",
   uaColor: "#ffe066",
+  vaColor: "#9eb6ff",
+  numberColor: "#e8eefc",
+  imbAskColor: "#5dde8a",
+  imbBidColor: "#e05a8a",
   imbalance: 3,
-  imbalanceStack: 3,
+  imbalanceStack: 1,
+  imbFill: 0.22,
 };
 
 export function groupLevels(levels: FootprintLevel[], tick: number, n: number): FootprintLevel[] {
@@ -109,6 +185,22 @@ export function groupLevels(levels: FootprintLevel[], tick: number, n: number): 
     }
   }
   return [...map.values()].sort((a, b) => a.price - b.price);
+}
+
+function fillEmptyLevels(levels: OfLevel[], lo: number, hi: number, tick: number): OfLevel[] {
+  if (!levels.length || tick <= 0) return levels;
+  const start = Math.round(Math.min(lo, hi) / tick) * tick;
+  const end = Math.round(Math.max(lo, hi) / tick) * tick;
+  const n = Math.round((end - start) / tick);
+  if (n < 1 || n > 400) return levels;
+  const key = (p: number) => Number(p.toFixed(10));
+  const map = new Map(levels.map((l) => [key(l.price), l]));
+  const out: OfLevel[] = [];
+  for (let i = 0; i <= n; i++) {
+    const p = key(start + i * tick);
+    out.push(map.get(p) || emptyLevel(p));
+  }
+  return out;
 }
 
 function readTheme() {
@@ -183,17 +275,27 @@ export function fmtDelta(n: number) {
   return `${n > 0 ? "+" : "−"}${fmtV(n)}`;
 }
 
-function barLevelDeltaRange(bar: FootprintBar): { max: number; min: number } {
-  if (!bar.levels?.length) return { max: bar.delta, min: bar.delta };
-  let max = -Infinity;
-  let min = Infinity;
-  for (const lvl of bar.levels) {
-    const d = (lvl.buy || 0) - (lvl.sell || 0);
-    if (d > max) max = d;
-    if (d < min) min = d;
-  }
-  if (!Number.isFinite(max)) return { max: bar.delta, min: bar.delta };
-  return { max, min };
+/** Bottom band for candle stats when footprint is on (fraction of chart height). */
+export const FP_STATS_FRAC = 0.26;
+
+export function fpBandTop(h: number, footprint: boolean, volume = false): number {
+  if (footprint) return Math.round(h * (1 - FP_STATS_FRAC));
+  if (volume) return Math.round(h * 0.84);
+  return h;
+}
+
+function contrastInk(hex: string, alpha: number): string {
+  const raw = hex.replace("#", "").trim();
+  if (raw.length !== 6) return "#f3f6ff";
+  const r = parseInt(raw.slice(0, 2), 16) / 255;
+  const g = parseInt(raw.slice(2, 4), 16) / 255;
+  const b = parseInt(raw.slice(4, 6), 16) / 255;
+  const bg = 0.045;
+  const R = r * alpha + bg * (1 - alpha);
+  const G = g * alpha + bg * (1 - alpha);
+  const B = b * alpha + bg * (1 - alpha);
+  const lum = 0.2126 * R + 0.7152 * G + 0.0722 * B;
+  return lum > 0.48 ? "#10141c" : "#f3f6ff";
 }
 
 type VolumeStatsTheme = {
@@ -205,7 +307,40 @@ type VolumeStatsTheme = {
   bgElevated: string;
 };
 
-/** Labels on the bottom volume histogram: volume, CVD, max/min delta. */
+type StatsMemo = {
+  bars: FootprintBar[];
+  lastTs: string;
+  lastVol: number;
+  lastDelta: number;
+  rows: CandleStats[];
+};
+let statsMemo: StatsMemo | null = null;
+
+function candleStatsOf(bars: FootprintBar[]): CandleStats[] {
+  const last = bars[bars.length - 1];
+  if (
+    statsMemo &&
+    statsMemo.bars === bars &&
+    statsMemo.lastTs === last?.ts &&
+    statsMemo.lastVol === last?.volume &&
+    statsMemo.lastDelta === last?.delta
+  ) {
+    return statsMemo.rows;
+  }
+  const rows = buildCandleStats(bars);
+  statsMemo = {
+    bars,
+    lastTs: last?.ts || "",
+    lastVol: last?.volume || 0,
+    lastDelta: last?.delta || 0,
+    rows,
+  };
+  return rows;
+}
+
+const STATS_LABELS = ["Vol", "Δ", "MaxΔ", "MinΔ", "CVD"] as const;
+
+/** Aligned candle stats grid in the bottom band. */
 export function drawVolumeBarStats(
   ctx: CanvasRenderingContext2D,
   chart: IChartApi,
@@ -214,109 +349,88 @@ export function drawVolumeBarStats(
   clipRight: number,
   h: number,
   theme: VolumeStatsTheme,
-  alignTimes?: number[]
+  alignTimes?: number[],
+  footprintOn = false
 ) {
-  const volTop = Math.round(h * 0.84);
+  const volTop = fpBandTop(h, footprintOn && !!data?.bars?.length, true);
   const bandH = h - volTop;
-  if (bandH < 26 || clipRight < 24) return;
+  if (bandH < 28 || clipRight < 24) return;
 
-  const byTs = new Map<number, { vol: number; cvd: number; max: number; min: number; delta: number }>();
-  let cvd = 0;
-  let sessVol = 0;
-  let sessMax = -Infinity;
-  let sessMin = Infinity;
-  const fpBars = data?.bars?.length
-    ? [...data.bars].sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime())
-    : [];
-  for (const bar of fpBars) {
-    cvd += bar.delta || 0;
-    sessVol += bar.volume || 0;
-    const range = barLevelDeltaRange(bar);
-    if (bar.delta > sessMax) sessMax = bar.delta;
-    if (bar.delta < sessMin) sessMin = bar.delta;
-    byTs.set(Number(toUnix(bar.ts)), {
-      vol: bar.volume,
-      cvd,
-      max: range.max,
-      min: range.min,
-      delta: bar.delta,
-    });
-  }
-  if (!fpBars.length) {
-    for (const b of ohlcv) {
-      sessVol += b.volume || 0;
-    }
-  }
+  const fpBars = data?.bars?.length ? data.bars : [];
+  const stats = fpBars.length ? candleStatsOf(fpBars) : null;
+  const spacing = chart.timeScale().options().barSpacing || 9;
+  const colW = Math.max(4, spacing * 0.88);
+  const showAll = colW >= 26;
+  const showCvd = colW >= 16;
+  const showVol = colW >= 10;
+  if (!showVol) return;
 
+  const rowH = Math.max(11, Math.min(14, Math.floor((bandH - 4) / 5)));
+  const labW = 30;
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, volTop, clipRight, bandH);
   ctx.clip();
+  ctx.fillStyle = hexAlpha(theme.bgElevated, 0.72);
+  ctx.fillRect(0, volTop, clipRight, bandH);
+  ctx.strokeStyle = hexAlpha(theme.muted, 0.22);
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, volTop + 0.5);
+  ctx.lineTo(clipRight, volTop + 0.5);
+  ctx.stroke();
 
-  const spacing = chart.timeScale().options().barSpacing || 9;
-  const colW = Math.max(4, spacing * 0.88);
-  const showAll = colW >= 34;
-  const showCvd = colW >= 22;
-  const showVol = colW >= 13;
-  const fs = colW >= 40 ? 9 : colW >= 22 ? 8 : 7;
-  ctx.font = `700 ${fs}px ${theme.font}`;
-  ctx.textBaseline = "top";
-  ctx.textAlign = "center";
-  ctx.shadowColor = "rgba(0,0,0,0.85)";
-  ctx.shadowBlur = 3;
+  ctx.font = `700 9px ${theme.font}`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  const labels = showAll
+    ? STATS_LABELS
+    : showCvd
+      ? (["Vol", "Δ", "CVD"] as const)
+      : (["Vol", "Δ"] as const);
+  for (let i = 0; i < labels.length; i++) {
+    ctx.fillStyle = hexAlpha(theme.muted, 0.95);
+    ctx.fillText(labels[i], 4, volTop + 3 + rowH * (i + 0.5));
+  }
 
-  const paintCol = (ts: string, fallbackVol: number) => {
-    if (!showVol) return;
+  const paintAt = (ts: string, st: CandleStats | null, fallbackVol: number) => {
     const x = timeCoordinate(chart, ts, alignTimes);
     if (x == null) return;
     const left = x - colW / 2;
-    if (left > clipRight || left + colW < 0) return;
-    const key = Number(toUnix(ts));
-    const st = byTs.get(key);
-    const vol = st?.vol ?? fallbackVol;
+    if (left > clipRight || left + colW < labW) return;
     const mid = left + Math.min(colW, clipRight - left) / 2;
-    let y = volTop + 3;
-    const line = (text: string, color: string) => {
-      ctx.fillStyle = color;
-      ctx.fillText(text, mid, y);
-      y += fs + 1;
-    };
-    line(fmtV(vol), theme.text);
-    if (st && showCvd) line(fmtDelta(st.cvd), st.cvd >= 0 ? theme.up : theme.down);
-    if (st && showAll) {
-      line(fmtDelta(st.max), theme.up);
-      line(fmtDelta(st.min), theme.down);
+    if (mid < labW + 4) return;
+    const fs = colW >= 40 ? 9 : colW >= 22 ? 8 : 7;
+    ctx.font = `650 ${fs}px ${theme.font}`;
+    ctx.textAlign = "center";
+    const vals: { t: string; c: string }[] = st
+      ? [
+          { t: fmtV(st.totalVolume), c: theme.text },
+          { t: fmtDelta(st.netDelta), c: st.netDelta >= 0 ? theme.up : theme.down },
+          { t: fmtDelta(st.maxDelta), c: theme.up },
+          { t: fmtDelta(st.minDelta), c: theme.down },
+          { t: fmtDelta(st.cumulativeDelta), c: st.cumulativeDelta >= 0 ? theme.up : theme.down },
+        ]
+      : [{ t: fmtV(fallbackVol), c: theme.text }];
+    const pick = showAll ? vals : showCvd ? [vals[0], vals[1], vals[4] || vals[1]] : [vals[0], vals[1]];
+    for (let i = 0; i < pick.length; i++) {
+      ctx.fillStyle = pick[i].c;
+      ctx.fillText(pick[i].t, mid, volTop + 3 + rowH * (i + 0.5), colW - 2);
     }
   };
 
-  if (fpBars.length) {
-    for (const bar of fpBars) paintCol(bar.ts, bar.volume);
+  if (fpBars.length && stats) {
+    const vis = chart.timeScale().getVisibleRange();
+    const from = vis ? Number(vis.from) - 120 : -Infinity;
+    const to = vis ? Number(vis.to) + 120 : Infinity;
+    const n = Math.min(fpBars.length, stats.length);
+    for (let i = 0; i < n; i++) {
+      const t = Number(toUnix(fpBars[i].ts));
+      if (t < from || t > to) continue;
+      paintAt(fpBars[i].ts, stats[i], fpBars[i].volume);
+    }
   } else {
-    for (const b of ohlcv) paintCol(b.ts, b.volume ?? 0);
-  }
-
-  const bits: { t: string; c: string }[] = [{ t: `Vol ${fmtV(sessVol)}`, c: theme.text }];
-  if (fpBars.length) {
-    bits.push({ t: `CVD ${fmtDelta(cvd)}`, c: cvd >= 0 ? theme.up : theme.down });
-    if (Number.isFinite(sessMax)) bits.push({ t: `MaxΔ ${fmtDelta(sessMax)}`, c: theme.up });
-    if (Number.isFinite(sessMin)) bits.push({ t: `MinΔ ${fmtDelta(sessMin)}`, c: theme.down });
-  }
-  ctx.shadowBlur = 0;
-  ctx.font = `700 9px ${theme.font}`;
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
-  const padX = 8;
-  const gap = 12;
-  const textW = bits.reduce((w, b, i) => w + ctx.measureText(b.t).width + (i ? gap : 0), 0);
-  const tw = Math.min(clipRight - 8, textW + padX * 2);
-  const ly = h - 11;
-  ctx.fillStyle = hexAlpha(theme.bgElevated, 0.82);
-  ctx.fillRect(4, ly - 8, tw, 16);
-  let lx = 4 + padX;
-  for (const bit of bits) {
-    ctx.fillStyle = bit.c;
-    ctx.fillText(bit.t, lx, ly);
-    lx += ctx.measureText(bit.t).width + gap;
+    for (const b of ohlcv) paintAt(b.ts, null, b.volume ?? 0);
   }
 
   ctx.restore();
@@ -374,6 +488,128 @@ type FpDrawTheme = {
   font: string;
 };
 
+function intervalPadSec(interval: string): number {
+  const m: Record<string, number> = {
+    "1s": 2,
+    "1m": 120,
+    "5m": 600,
+    "15m": 1800,
+    "30m": 3600,
+    "1h": 7200,
+    "4h": 28800,
+    "1d": 172800,
+    "1wk": 1209600,
+  };
+  return m[interval] ?? 180;
+}
+
+function levelPeak(lvl: { buy?: number; sell?: number }, view: FootprintViewMode): number {
+  const buy = lvl.buy || 0;
+  const sell = lvl.sell || 0;
+  if (view === "volume") return buy + sell;
+  if (view === "delta") return Math.abs(buy - sell);
+  return Math.max(buy, sell, buy + sell);
+}
+
+type PrepBar = {
+  bar: FootprintBar;
+  levels: OfLevel[];
+  poc: number | null;
+  localPeak: number;
+  imbBid: Set<number>;
+  imbAsk: Set<number>;
+  ua: { high: boolean; low: boolean };
+  lvn: Set<number>;
+  hvn: Set<number>;
+  va: { poc: number | null; vah: number | null; val: number | null } | null;
+  hiP: number;
+  loP: number;
+};
+
+const prepCache = new Map<string, PrepBar>();
+
+function prepBar(
+  b: FootprintBar,
+  nativeTick: number,
+  tick: number,
+  groupN: number,
+  viz: FpVizSettings,
+  imb: number,
+  stackMin: number,
+  fancy: boolean,
+  view: FootprintViewMode
+): Omit<PrepBar, "bar"> {
+  const key = `${b.ts}|${b.volume}|${b.delta}|${b.levels?.length}|${groupN}|${imb}|${stackMin}|${viz.showZeros ? 1 : 0}|${fancy && viz.unfinished ? 1 : 0}|${fancy && viz.lvn !== false ? viz.lvnPct : 0}|${fancy && viz.hvn ? viz.hvnPct : 0}|${fancy && viz.valueArea ? 1 : 0}|${view}`;
+  const hit = prepCache.get(key);
+  if (hit) return hit;
+  const wire = groupLevels(b.levels, nativeTick, groupN);
+  let levels = wire.map(fromWireLevel);
+  let poc = b.poc;
+  let localPeak = 0;
+  if (levels.length) {
+    let best = levels[0];
+    for (const lvl of levels) {
+      if (lvl.totalVolume > best.totalVolume) best = lvl;
+    }
+    poc = best.price;
+  }
+  let hiP = b.high;
+  let loP = b.low;
+  if (levels.length) {
+    hiP = levels[0].price;
+    loP = levels[0].price;
+    for (const lvl of levels) {
+      if (lvl.price > hiP) hiP = lvl.price;
+      if (lvl.price < loP) loP = lvl.price;
+    }
+  }
+  if (viz.showZeros) levels = fillEmptyLevels(levels, Math.min(loP, b.low), Math.max(hiP, b.high), tick);
+  const diag = imb > 0 ? diagonalImbalances(levels, tick, imb, stackMin) : { bid: new Set<number>(), ask: new Set<number>() };
+  const ua =
+    fancy && viz.unfinished
+      ? unfinishedAuction({ high: b.high, low: b.low, levels })
+      : { high: false, low: false };
+  const lvn =
+    fancy && viz.lvn !== false ? new Set(lowVolumeNodes(levels, viz.lvnPct ?? 0.2)) : new Set<number>();
+  const hvn =
+    fancy && viz.hvn ? new Set(highVolumeNodes(levels, viz.hvnPct ?? 0.75)) : new Set<number>();
+  const va =
+    fancy && viz.valueArea
+      ? valueArea(
+          levels.map((l) => ({
+            price: l.price,
+            bidVolume: l.bidVolume,
+            askVolume: l.askVolume,
+            totalVolume: l.totalVolume,
+            delta: l.delta,
+          })),
+          0.7
+        )
+      : null;
+  for (const lvl of levels) {
+    if (view === "volume") localPeak = Math.max(localPeak, lvl.totalVolume);
+    else if (view === "delta") localPeak = Math.max(localPeak, Math.abs(lvl.delta));
+    else localPeak = Math.max(localPeak, lvl.askVolume, lvl.bidVolume);
+  }
+  const prep: PrepBar = {
+    bar: b,
+    levels,
+    poc,
+    localPeak,
+    imbBid: diag.bid,
+    imbAsk: diag.ask,
+    ua,
+    lvn,
+    hvn,
+    va,
+    hiP,
+    loP,
+  };
+  if (prepCache.size > 1200) prepCache.clear();
+  prepCache.set(key, prep);
+  return prep;
+}
+
 export function drawFootprintOnChart(
   ctx: CanvasRenderingContext2D,
   chart: IChartApi,
@@ -384,69 +620,75 @@ export function drawFootprintOnChart(
   h: number,
   clipRight: number,
   theme: FpDrawTheme,
-  alignTimes?: number[]
+  alignTimes?: number[],
+  clipBottom?: number
 ) {
   const bars = data.bars;
   if (!bars.length) return;
-  const tick = (data.tick || 0.01) * viz.tickGroup;
+  const yMax = clipBottom ?? h;
+  const groupN = Math.max(1, Math.round(viz.tickGroup || 1));
+  const tick = (data.tick || 0.01) * groupN;
   const spacing = chart.timeScale().options().barSpacing || 9;
-  const colW = Math.max(4, spacing * 0.9);
-  const showText = viz.numbers && colW >= 14;
+  const body = Math.min(1, Math.max(0.4, viz.bodyWidth ?? 0.9));
+  const colW = Math.max(4, spacing * body);
+  const zoomedOut = colW < 14;
+  const showText = viz.numbers && colW >= 16 && !zoomedOut;
+  const fancy = colW >= 14 && !zoomedOut;
   const stroke = Math.max(1.1, Math.min(3.4, colW * 0.05 + 0.75));
   const gamma = Math.min(1.45, Math.max(0.28, viz.gamma ?? 0.55));
   const fill = Math.min(1, Math.max(0.2, viz.fill ?? 0.88));
-  const hist = viz.histogram !== false;
+  const hist = viz.histogram === true;
   const perCandle = (viz.scale || "candle") === "candle";
   const buyCol = viz.buyColor || theme.up;
   const sellCol = viz.sellColor || theme.down;
-  const pocCol = viz.pocColor || theme.sense;
+  const pocCol = viz.pocColor || "#fff3b0";
   const lvnCol = viz.lvnColor || "#6ec8ff";
+  const hvnCol = viz.hvnColor || "#c9a0ff";
   const uaCol = viz.uaColor || "#ffe066";
-  const imb = viz.imbalance > 0 ? viz.imbalance : 0;
+  const vaCol = viz.vaColor || "#9eb6ff";
+  const numCol = viz.numberColor || theme.text;
+  const imbAskCol = viz.imbAskColor || buyCol;
+  const imbBidCol = viz.imbBidColor || sellCol;
+  const imb = fancy && viz.imbalance > 0 ? viz.imbalance : 0;
   const stackMin = Math.max(1, Math.round(viz.imbalanceStack || 1));
+  const imbFill = Math.min(0.55, Math.max(0, viz.imbFill ?? 0.22));
   const view = viz.view || "bidAsk";
+  const nMode: FootprintViewMode =
+    viz.numberMode && viz.numberMode !== "auto" ? viz.numberMode : view;
+  const histAlign = viz.histAlign || "split";
+  const pocStyle = viz.pocStyle || "box";
+  const gap = Math.min(4, Math.max(0, viz.cellGap ?? 0.4));
+  const fontScale = Math.min(1.9, Math.max(0.55, viz.fontScale ?? 1));
+  const cellBg = Math.min(0.7, Math.max(0, viz.cellBg ?? 0.16));
+  const minVol = Math.max(0, viz.minVolume || 0);
+  const numMin = Math.max(0, viz.numberMin || 0);
+  const vis = chart.timeScale().getVisibleRange();
+  const padT = intervalPadSec(data.interval);
+  const from = vis ? Number(vis.from) - padT : null;
+  const to = vis ? Number(vis.to) + padT : null;
 
   let sessionPeak = 0;
-  const grouped = bars.map((b) => {
-    const wire = groupLevels(b.levels, data.tick || 0.01, viz.tickGroup);
-    const levels = wire.map(fromWireLevel);
-    let poc = b.poc;
-    let localPeak = 0;
-    if (levels.length) {
-      let best = levels[0];
-      for (const lvl of levels) {
-        if (lvl.totalVolume > best.totalVolume) best = lvl;
-      }
-      poc = best.price;
+  const grouped: PrepBar[] = [];
+  for (const b of bars) {
+    if (from != null && to != null) {
+      const t = Number(toUnix(b.ts));
+      if (t < from || t > to) continue;
     }
-    const zones = imb > 0 ? stackedImbalanceZones(levels, tick, imb, stackMin) : [];
-    const imbAt = new Map<number, "ask" | "bid">();
-    for (const z of zones) {
-      for (const p of z.prices) imbAt.set(p, z.side);
+    const prep = prepBar(b, data.tick || 0.01, tick, groupN, viz, imb, stackMin, fancy, view);
+    sessionPeak = Math.max(sessionPeak, prep.localPeak);
+    grouped.push({ ...prep, bar: b });
+  }
+  if (!perCandle && sessionPeak <= 0) {
+    for (const b of bars) {
+      for (const lvl of b.levels || []) sessionPeak = Math.max(sessionPeak, levelPeak(lvl, view));
     }
-    const ua = viz.unfinished
-      ? unfinishedAuction({ high: b.high, low: b.low, levels })
-      : { high: false, low: false };
-    const lvn = viz.lvn !== false ? new Set(lowVolumeNodes(levels)) : new Set<number>();
-    let hiP = b.high;
-    let loP = b.low;
-    if (levels.length) {
-      hiP = levels[0].price;
-      loP = levels[0].price;
-      for (const lvl of levels) {
-        if (lvl.price > hiP) hiP = lvl.price;
-        if (lvl.price < loP) loP = lvl.price;
-      }
-    }
-    for (const lvl of levels) {
-      if (view === "volume") localPeak = Math.max(localPeak, lvl.totalVolume);
-      else if (view === "delta") localPeak = Math.max(localPeak, Math.abs(lvl.delta));
-      else localPeak = Math.max(localPeak, lvl.askVolume, lvl.bidVolume, lvl.totalVolume);
-    }
-    sessionPeak = Math.max(sessionPeak, localPeak);
-    return { bar: b, levels, poc, imbAt, ua, lvn, hiP, loP, localPeak };
-  });
-  if (sessionPeak <= 0) return;
+  }
+  if (sessionPeak <= 0 && grouped.length === 0) return;
+
+  const allowText = showText && grouped.length <= 90;
+  const allowFancy = fancy && grouped.length <= 90;
+  let textCells = 0;
+  const MAX_TEXT_CELLS = 900;
 
   ctx.textBaseline = "middle";
 
@@ -457,10 +699,10 @@ export function drawFootprintOnChart(
     const yBot = y2 == null ? y + 4 : y2;
     const top = Math.min(y, yBot);
     const bot = Math.max(y, yBot);
-    return { top, bot, cellH: Math.max(1.2, bot - top - 0.4) };
+    return { top, bot, cellH: Math.max(1.2, bot - top - gap) };
   };
 
-  for (const { bar, levels, poc, imbAt, ua, lvn, hiP, loP, localPeak } of grouped) {
+  for (const { bar, levels, poc, imbBid, imbAsk, ua, lvn, hvn, va, hiP, loP, localPeak } of grouped) {
     const x = timeCoordinate(chart, bar.ts, alignTimes);
     if (x == null) continue;
     const left = x - colW / 2;
@@ -470,124 +712,215 @@ export function drawFootprintOnChart(
     const half = cellW / 2;
     const peak = Math.max(1e-12, perCandle ? localPeak : sessionPeak);
 
-    for (const lvl of levels) {
-      const box = cellBox(lvl.price);
-      if (!box || box.top > h || box.bot < 0) continue;
-      const { top, cellH } = box;
+    if (viz.wicks !== false) {
+      const yH = series.priceToCoordinate(bar.high);
+      const yL = series.priceToCoordinate(bar.low);
+      if (yH != null && yL != null) {
+        ctx.strokeStyle = hexAlpha(bar.close >= bar.open ? buyCol : sellCol, 0.7);
+        ctx.lineWidth = Math.max(1, Math.min(2.4, cellW * 0.045));
+        ctx.beginPath();
+        ctx.moveTo(midX + 0.5, Math.max(0, Math.min(yH, yL)));
+        ctx.lineTo(midX + 0.5, Math.min(yMax, Math.max(yH, yL)));
+        ctx.stroke();
+      }
+    }
 
-      ctx.fillStyle = "rgba(0,0,0,0.28)";
-      ctx.fillRect(left, top, cellW, cellH);
+    for (const lvl of levels) {
+      const isImbBid = imbBid.has(lvl.price);
+      const isImbAsk = imbAsk.has(lvl.price);
+      if (minVol > 0 && lvl.totalVolume < minVol && !isImbBid && !isImbAsk) continue;
+      const box = cellBox(lvl.price);
+      if (!box || box.top > yMax || box.bot < 0) continue;
+      const { top, cellH } = box;
+      if (top > yMax) continue;
+      const drawH = Math.min(cellH, yMax - top);
+      if (drawH < 1) continue;
+      const isPoc = viz.poc && poc != null && Math.abs(lvl.price - poc) < tick / 2;
+      const inVa =
+        va &&
+        va.val != null &&
+        va.vah != null &&
+        lvl.price >= Math.min(va.val, va.vah) - tick / 2 &&
+        lvl.price <= Math.max(va.val, va.vah) + tick / 2;
+
+      if (cellBg > 0) {
+        ctx.fillStyle = `rgba(0,0,0,${cellBg})`;
+        ctx.fillRect(left, top, cellW, drawH);
+      }
+      if (inVa && !isPoc) {
+        ctx.fillStyle = hexAlpha(vaCol, 0.12);
+        ctx.fillRect(left, top, cellW, drawH);
+      }
+
+      const sellT = Math.pow(Math.min(1, lvl.bidVolume / peak), gamma);
+      const buyT = Math.pow(Math.min(1, lvl.askVolume / peak), gamma);
+      const sellA = fill * (0.1 + 0.9 * sellT);
+      const buyA = fill * (0.1 + 0.9 * buyT);
 
       if (view === "volume") {
         const t = Math.pow(lvl.totalVolume / peak, gamma);
         const bw = hist ? Math.max(1.5, cellW * t) : Math.max(2, cellW * (0.12 + t * 0.88));
         ctx.fillStyle = hexAlpha(lvl.delta >= 0 ? buyCol : sellCol, fill * (0.22 + 0.78 * t));
-        ctx.fillRect(hist ? left : midX - bw / 2, top, bw, cellH);
+        if (histAlign === "center" || !hist) ctx.fillRect(midX - bw / 2, top, bw, drawH);
+        else ctx.fillRect(left, top, bw, drawH);
       } else if (view === "delta") {
         const t = Math.pow(Math.abs(lvl.delta) / peak, gamma);
         const bw = hist ? Math.max(1.5, half * t) : Math.max(2, half * (0.1 + t * 0.9));
         ctx.fillStyle = hexAlpha(lvl.delta >= 0 ? buyCol : sellCol, fill * (0.22 + 0.78 * t));
-        if (lvl.delta >= 0) ctx.fillRect(midX, top, bw, cellH);
-        else ctx.fillRect(midX - bw, top, bw, cellH);
+        if (histAlign === "center") ctx.fillRect(midX - bw / 2, top, bw, drawH);
+        else if (lvl.delta >= 0) ctx.fillRect(midX, top, bw, drawH);
+        else ctx.fillRect(midX - bw, top, bw, drawH);
       } else if (hist) {
-        const buyT = Math.pow(lvl.askVolume / peak, gamma);
-        const sellT = Math.pow(lvl.bidVolume / peak, gamma);
-        ctx.fillStyle = hexAlpha(sellCol, fill * (0.28 + 0.72 * sellT));
-        ctx.fillRect(midX - Math.max(0, half * sellT), top, Math.max(0, half * sellT), cellH);
-        ctx.fillStyle = hexAlpha(buyCol, fill * (0.28 + 0.72 * buyT));
-        ctx.fillRect(midX, top, Math.max(0, half * buyT), cellH);
+        ctx.fillStyle = hexAlpha(sellCol, sellA);
+        ctx.fillRect(midX - Math.max(0, half * sellT), top, Math.max(0, half * sellT), drawH);
+        ctx.fillStyle = hexAlpha(buyCol, buyA);
+        ctx.fillRect(midX, top, Math.max(0, half * buyT), drawH);
       } else {
-        ctx.fillStyle = hexAlpha(sellCol, fill * (0.12 + 0.78 * Math.pow(lvl.bidVolume / peak, gamma)));
-        ctx.fillRect(left, top, half, cellH);
-        ctx.fillStyle = hexAlpha(buyCol, fill * (0.12 + 0.78 * Math.pow(lvl.askVolume / peak, gamma)));
-        ctx.fillRect(midX, top, half, cellH);
+        ctx.fillStyle = hexAlpha(sellCol, sellA);
+        ctx.fillRect(left, top, half, drawH);
+        ctx.fillStyle = hexAlpha(buyCol, buyA);
+        ctx.fillRect(midX, top, half, drawH);
       }
 
-      const stackSide = imbAt.get(lvl.price);
-      if (stackSide) {
-        ctx.strokeStyle = hexAlpha(stackSide === "ask" ? buyCol : sellCol, 0.95);
-        ctx.lineWidth = stroke;
-        ctx.strokeRect(
-          stackSide === "ask" ? midX + 0.5 : left + 0.5,
-          top + 0.5,
-          half - 1,
-          cellH - 1
-        );
-        ctx.fillStyle = hexAlpha(stackSide === "ask" ? buyCol : sellCol, 0.18);
-        ctx.fillRect(
-          stackSide === "ask" ? midX : left,
-          top,
-          Math.max(2, Math.min(7, cellW * 0.08)),
-          cellH
-        );
+      if (colW >= 16 && view === "bidAsk") {
+        ctx.strokeStyle = hexAlpha(theme.text, 0.18);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(midX + 0.5, top);
+        ctx.lineTo(midX + 0.5, top + drawH);
+        ctx.stroke();
       }
 
-      if (viz.poc && poc != null && Math.abs(lvl.price - poc) < tick / 2) {
-        ctx.strokeStyle = hexAlpha(pocCol, 0.95);
-        ctx.lineWidth = stroke;
-        ctx.strokeRect(left + 0.5, top + 0.5, cellW - 1, cellH - 1);
+      if (isImbBid) {
+        ctx.fillStyle = hexAlpha(imbBidCol, imbFill + 0.12);
+        ctx.fillRect(left, top, half, drawH);
+      }
+      if (isImbAsk) {
+        ctx.fillStyle = hexAlpha(imbAskCol, imbFill + 0.12);
+        ctx.fillRect(midX, top, half, drawH);
       }
 
-      if (lvn.has(lvl.price)) {
-        ctx.setLineDash([Math.max(3, stroke * 2), Math.max(2, stroke)]);
-        ctx.strokeStyle = hexAlpha(lvnCol, 0.95);
+      if (isPoc) {
+        if (pocStyle === "fill" || pocStyle === "both") {
+          ctx.fillStyle = hexAlpha(pocCol, pocStyle === "both" ? 0.2 : 0.36);
+          ctx.fillRect(left, top, cellW, drawH);
+        }
+        if (pocStyle === "box" || pocStyle === "both") {
+          ctx.strokeStyle = hexAlpha(pocCol, 0.98);
+          ctx.lineWidth = Math.max(1.8, stroke);
+          ctx.strokeRect(left + 0.5, top + 0.5, cellW - 1, drawH - 1);
+        }
+      }
+
+      if (allowFancy && hvn.has(lvl.price) && !isPoc) {
+        ctx.strokeStyle = hexAlpha(hvnCol, 0.9);
         ctx.lineWidth = stroke;
-        ctx.strokeRect(left + 1, top + 1, cellW - 2, cellH - 2);
-        ctx.setLineDash([]);
-        ctx.fillStyle = hexAlpha(lvnCol, 0.16);
-        ctx.fillRect(left, top, cellW, cellH);
+        ctx.strokeRect(left + 0.5, top + 0.5, cellW - 1, drawH - 1);
+      }
+
+      if (allowFancy && lvn.has(lvl.price)) {
+        ctx.strokeStyle = hexAlpha(lvnCol, 0.85);
+        ctx.lineWidth = stroke;
+        ctx.strokeRect(left + 1, top + 1, cellW - 2, drawH - 2);
       }
 
       const isUa =
-        (ua.high && Math.abs(lvl.price - hiP) < tick / 2) ||
-        (ua.low && Math.abs(lvl.price - loP) < tick / 2);
+        allowFancy &&
+        ((ua.high && Math.abs(lvl.price - hiP) < tick / 2) ||
+          (ua.low && Math.abs(lvl.price - loP) < tick / 2));
       if (isUa) {
-        ctx.fillStyle = hexAlpha(uaCol, 0.28);
-        ctx.fillRect(left, top, cellW, cellH);
+        ctx.fillStyle = hexAlpha(uaCol, 0.22);
+        ctx.fillRect(left, top, cellW, drawH);
         ctx.strokeStyle = uaCol;
-        ctx.lineWidth = stroke + 0.6;
-        ctx.strokeRect(left + 0.5, top + 0.5, cellW - 1, cellH - 1);
+        ctx.lineWidth = stroke + 0.4;
+        ctx.strokeRect(left + 0.5, top + 0.5, cellW - 1, drawH - 1);
+      }
+
+      if (viz.cellGrid) {
+        ctx.strokeStyle = hexAlpha(theme.text, 0.12);
+        ctx.lineWidth = 0.6;
+        ctx.strokeRect(left + 0.5, top + 0.5, cellW - 1, drawH - 1);
       }
 
       const fontPx = Math.max(
-        7,
-        Math.min(22, Math.min(colW * (view === "bidAsk" ? 0.2 : 0.28), cellH * 0.72))
+        6,
+        Math.min(22, Math.min(colW * (nMode === "bidAsk" ? 0.18 : 0.26), drawH * 0.7) * fontScale)
       );
-      if (showText && cellH >= fontPx + 1) {
-        ctx.font = `650 ${fontPx}px ${theme.font}`;
-        ctx.shadowColor = "rgba(0,0,0,0.92)";
-        ctx.shadowBlur = Math.max(2, fontPx * 0.28);
-        ctx.fillStyle = hexAlpha(theme.text, 0.96);
-        const pad = Math.max(2, fontPx * 0.28);
-        const write = (n: number, align: CanvasTextAlign, x: number) => {
-          if (!(n > 0)) return;
+      if (allowText && drawH >= fontPx + 1 && textCells < MAX_TEXT_CELLS) {
+        textCells += 1;
+        ctx.font = `${isImbBid || isImbAsk ? 750 : 650} ${fontPx}px ${theme.font}`;
+        const useShadow = viz.textShadow === true && colW >= 28 && drawH >= 14;
+        if (useShadow) {
+          ctx.shadowColor = "rgba(0,0,0,0.85)";
+          ctx.shadowBlur = 2;
+        }
+        const padN = Math.max(2, fontPx * 0.28);
+        const cy = top + drawH / 2;
+        const writeSide = (n: number, align: CanvasTextAlign, px: number, bgHex: string, alpha: number, hot: boolean) => {
+          if (!(n > 0) || n < numMin) return;
           ctx.textAlign = align;
-          ctx.fillText(fmtV(n), x, top + cellH / 2);
-        };
-        if (view === "volume") {
-          write(lvl.totalVolume, "center", midX);
-        } else if (view === "delta") {
-          if (Math.abs(lvl.delta) > 0) {
-            ctx.textAlign = "center";
-            const sign = lvl.delta > 0 ? "+" : "−";
-            ctx.fillText(`${sign}${fmtV(Math.abs(lvl.delta))}`, midX, top + cellH / 2);
+          if (hot) {
+            const tw = Math.min(half - 2, fontPx * 2.4);
+            ctx.fillStyle = hexAlpha(bgHex, 0.92);
+            ctx.fillRect(align === "right" ? px - tw : px, cy - fontPx * 0.55, tw, fontPx * 1.1);
+            ctx.fillStyle = contrastInk(bgHex, 0.92);
+          } else {
+            ctx.fillStyle = viz.numberBySide ? contrastInk(bgHex, alpha) : hexAlpha(numCol, 0.96);
           }
-        } else if (colW >= 20) {
-          write(lvl.bidVolume, "right", midX - pad);
-          write(lvl.askVolume, "left", midX + pad);
+          ctx.fillText(fmtV(n), px, cy);
+        };
+        if (nMode === "volume") {
+          ctx.textAlign = "center";
+          ctx.fillStyle = viz.numberBySide
+            ? contrastInk(lvl.delta >= 0 ? buyCol : sellCol, fill)
+            : hexAlpha(numCol, 0.96);
+          ctx.fillText(fmtV(lvl.totalVolume), midX, cy);
+        } else if (nMode === "delta") {
+          if (Math.abs(lvl.delta) >= Math.max(numMin, 1e-9)) {
+            ctx.textAlign = "center";
+            ctx.fillStyle = contrastInk(lvl.delta >= 0 ? buyCol : sellCol, fill * 0.7);
+            const sign = lvl.delta > 0 ? "+" : lvl.delta < 0 ? "−" : "";
+            ctx.fillText(`${sign}${fmtV(Math.abs(lvl.delta))}`, midX, cy);
+          }
+        } else if (colW >= 22) {
+          writeSide(lvl.bidVolume, "right", midX - padN, sellCol, sellA, isImbBid);
+          writeSide(lvl.askVolume, "left", midX + padN, buyCol, buyA, isImbAsk);
         } else {
-          write(lvl.totalVolume, "center", midX);
+          ctx.textAlign = "center";
+          ctx.fillStyle = hexAlpha(numCol, 0.96);
+          ctx.fillText(fmtV(lvl.totalVolume), midX, cy);
         }
         ctx.shadowBlur = 0;
         ctx.shadowColor = "transparent";
       }
     }
 
-    if (ua.high || ua.low) {
+    if (viz.candleDelta || viz.candleVolume) {
+      const yHi = series.priceToCoordinate(hiP);
+      if (yHi != null && yHi > 10 && yHi < yMax) {
+        const fs = Math.max(8, Math.min(12, colW * 0.22));
+        ctx.font = `700 ${fs}px ${theme.font}`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
+        let ly = yHi - 2;
+        if (viz.candleVolume) {
+          ctx.fillStyle = hexAlpha(theme.text, 0.9);
+          ctx.fillText(fmtV(bar.volume), midX, ly);
+          ly -= fs + 1;
+        }
+        if (viz.candleDelta) {
+          ctx.fillStyle = hexAlpha(bar.delta >= 0 ? buyCol : sellCol, 0.95);
+          ctx.fillText(fmtDelta(bar.delta), midX, ly);
+        }
+        ctx.textBaseline = "middle";
+      }
+    }
+
+    if (allowFancy && (ua.high || ua.low)) {
       const mark = (price: number, up: boolean) => {
         const y = series.priceToCoordinate(price);
-        if (y == null) return;
-        const size = Math.max(8, Math.min(22, colW * 0.4));
+        if (y == null || y > yMax) return;
+        const size = Math.max(8, Math.min(22, colW * 0.4)) * Math.min(1.6, Math.max(0.5, viz.uaScale ?? 1));
         const dir = up ? 1 : -1;
         const base = y + dir * size;
         ctx.beginPath();
@@ -597,15 +930,6 @@ export function drawFootprintOnChart(
         ctx.closePath();
         ctx.fillStyle = uaCol;
         ctx.fill();
-        ctx.strokeStyle = "#0a0a0a";
-        ctx.lineWidth = Math.max(1.2, stroke * 0.7);
-        ctx.stroke();
-        ctx.strokeStyle = uaCol;
-        ctx.lineWidth = stroke + 0.6;
-        ctx.beginPath();
-        ctx.moveTo(left + 1, y + 0.5);
-        ctx.lineTo(left + cellW - 1, y + 0.5);
-        ctx.stroke();
       };
       if (ua.high) mark(hiP, true);
       if (ua.low) mark(loP, false);
@@ -656,7 +980,14 @@ export function FootprintChart({
     ctx.clearRect(0, 0, w, h);
     const snap = dataRef.current;
     if (!snap.bars.length) return;
-    drawFootprintOnChart(ctx, chart, series, snap, vizRef.current, w, h, w - 68, readTheme());
+    const bandTop = fpBandTop(h, true, true);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, w - 68, bandTop);
+    ctx.clip();
+    drawFootprintOnChart(ctx, chart, series, snap, vizRef.current, w, h, w - 68, readTheme(), undefined, bandTop);
+    ctx.restore();
+    drawVolumeBarStats(ctx, chart, snap, snap.bars, w - 68, h, readTheme(), undefined, true);
   };
 
   useEffect(() => {

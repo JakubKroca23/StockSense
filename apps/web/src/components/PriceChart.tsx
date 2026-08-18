@@ -31,6 +31,8 @@ import { applyIndicator, type ChartDrawing, type DrawTool, type OhlcvBar } from 
 import {
   drawFootprintOnChart,
   drawVolumeBarStats,
+  fpBandTop,
+  FP_STATS_FRAC,
   fmtV,
   DEFAULT_FP_VIZ,
   type FootprintData,
@@ -271,7 +273,7 @@ function candleLook(
     borderDownColor: hide ? "rgba(0,0,0,0)" : theme.down,
     wickUpColor: theme.up,
     wickDownColor: theme.down,
-    wickVisible: !hide && viz.wicks && (!fp || fpWicks),
+    wickVisible: !hide && viz.wicks && !fp,
     borderVisible: !hide,
     priceLineVisible: viz.priceLine,
     lastValueVisible: viz.lastValue,
@@ -344,6 +346,10 @@ export function PriceChart({
   const lastIdxRef = useRef(0);
   const realtimeRef = useRef(realtime);
   const drawRef = useRef<() => void>(() => undefined);
+  const heatFnRef = useRef<() => void>(() => undefined);
+  const drawRafRef = useRef(0);
+  const fpLayerRef = useRef<HTMLCanvasElement | null>(null);
+  const fpLayerKeyRef = useRef("");
   const bookMemRef = useRef<BookMem>(new Map());
   const bookSrcRef = useRef<HeatmapLevel[] | null>(null);
   const fill = height == null;
@@ -430,31 +436,71 @@ export function PriceChart({
       if (!showFpRef.current) return;
       const fpSnap = fpDataRef.current;
       if (!fpSnap?.bars?.length) return;
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(0, 0, plotW, h);
-      ctx.clip();
-      try {
-        drawFootprintOnChart(
-          ctx,
-          chart,
-          series,
-          fpSnap,
-          fpVizRef.current,
-          mainW,
-          h,
-          plotW,
-          theme,
-          alignTimes
-        );
-      } catch {
-        /* keep book / volume */
+      const range = chart.timeScale().getVisibleLogicalRange();
+      const last = fpSnap.bars[fpSnap.bars.length - 1];
+      const v = fpVizRef.current;
+      const key = [
+        canvas.width,
+        canvas.height,
+        plotW,
+        range?.from ?? "",
+        range?.to ?? "",
+        fpSnap.interval,
+        fpSnap.tick,
+        fpSnap.bars.length,
+        last?.ts,
+        last?.volume,
+        last?.delta,
+        last?.close,
+        JSON.stringify(v),
+      ].join("|");
+      let layer = fpLayerRef.current;
+      if (!layer) {
+        layer = document.createElement("canvas");
+        fpLayerRef.current = layer;
       }
-      ctx.restore();
+      if (
+        fpLayerKeyRef.current !== key ||
+        layer.width !== canvas.width ||
+        layer.height !== canvas.height
+      ) {
+        layer.width = canvas.width;
+        layer.height = canvas.height;
+        const lctx = layer.getContext("2d");
+        if (!lctx) return;
+        const dpr = Math.min(window.devicePixelRatio || 1, 3);
+        lctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        lctx.clearRect(0, 0, mainW, h);
+        lctx.save();
+        const bandTop = fpBandTop(h, true, volOnRef.current);
+        lctx.beginPath();
+        lctx.rect(0, 0, plotW, bandTop);
+        lctx.clip();
+        try {
+          drawFootprintOnChart(
+            lctx,
+            chart,
+            series,
+            fpSnap,
+            v,
+            mainW,
+            h,
+            plotW,
+            theme,
+            alignTimes,
+            bandTop
+          );
+        } catch {
+          /* keep book / volume */
+        }
+        lctx.restore();
+        fpLayerKeyRef.current = key;
+      }
+      ctx.drawImage(layer, 0, 0, mainW, h);
     };
 
     const paintVolumeStats = () => {
-      if (!volOnRef.current) return;
+      if (!volOnRef.current && !showFpRef.current) return;
       try {
         drawVolumeBarStats(
           ctx,
@@ -464,7 +510,8 @@ export function PriceChart({
           plotW,
           h,
           theme,
-          alignTimes
+          alignTimes,
+          showFpRef.current
         );
       } catch {
         /* keep book */
@@ -1004,7 +1051,14 @@ export function PriceChart({
       /* overlay must not kill the chart */
     }
   };
-  drawRef.current = drawHeatmap;
+  heatFnRef.current = drawHeatmap;
+  drawRef.current = () => {
+    if (drawRafRef.current) return;
+    drawRafRef.current = requestAnimationFrame(() => {
+      drawRafRef.current = 0;
+      heatFnRef.current();
+    });
+  };
 
   const onProfileSplitDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -1077,7 +1131,7 @@ export function PriceChart({
       rightPriceScale: {
         visible: true,
         borderVisible: false,
-        scaleMargins: { top: 0.06, bottom: viz.volume ? 0.2 : 0.06 },
+        scaleMargins: { top: 0.06, bottom: showFootprint ? FP_STATS_FRAC : viz.volume ? 0.2 : 0.06 },
         entireTextOnly: true,
         mode: viz.logScale ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
       },
@@ -1128,7 +1182,7 @@ export function PriceChart({
       visible: viz.volume,
     });
     chart.priceScale("volume").applyOptions({
-      scaleMargins: { top: viz.volume ? 0.84 : 1, bottom: 0 },
+      scaleMargins: { top: showFootprint ? 1 - FP_STATS_FRAC : viz.volume ? 0.84 : 1, bottom: 0 },
       borderVisible: false,
     });
 
@@ -1232,16 +1286,19 @@ export function PriceChart({
       if (realtimeRef.current) clampPast();
       drawRef.current();
     };
-    const onCrosshair = () => drawRef.current();
     chart.timeScale().subscribeVisibleLogicalRangeChange(onRange);
-    chart.subscribeCrosshairMove(onCrosshair);
     chart.timeScale().applyOptions({
       minBarSpacing: showFootprint ? 8 : 3,
     });
 
     return () => {
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange);
-      chart.unsubscribeCrosshairMove(onCrosshair);
+      if (drawRafRef.current) {
+        cancelAnimationFrame(drawRafRef.current);
+        drawRafRef.current = 0;
+      }
+      fpLayerRef.current = null;
+      fpLayerKeyRef.current = "";
       ro.disconnect();
       chart.remove();
       chartRef.current = null;
@@ -1293,14 +1350,14 @@ export function PriceChart({
         mode: viz.logScale ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
         scaleMargins: {
           top: 0.06,
-          bottom: (viz.volume ? 0.18 : 0.06) + (viz.rsi ? 0.16 : 0),
+          bottom: (showFootprint ? FP_STATS_FRAC : viz.volume ? 0.18 : 0.06) + (viz.rsi ? 0.16 : 0),
         },
       },
     });
     series.applyOptions(candleLook(theme, viz, showFootprint, fpViz?.wicks ?? true));
     volumeRef.current?.applyOptions({ visible: viz.volume });
     chart.priceScale("volume").applyOptions({
-      scaleMargins: { top: viz.volume ? 0.84 : 1, bottom: 0 },
+      scaleMargins: { top: showFootprint ? 1 - FP_STATS_FRAC : viz.volume ? 0.84 : 1, bottom: 0 },
     });
     closeLineRef.current?.applyOptions({
       visible: viz.style === "line",
@@ -1342,8 +1399,7 @@ export function PriceChart({
   }, [viz.rightOffset]);
 
   useEffect(() => {
-    const id = requestAnimationFrame(() => drawRef.current());
-    return () => cancelAnimationFrame(id);
+    drawRef.current();
   });
 
   useEffect(() => {

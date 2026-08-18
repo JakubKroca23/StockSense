@@ -1,6 +1,7 @@
 export type {
   AggressorSide,
   BookWallFlag,
+  CandleStats,
   CvdPoint,
   FootprintLevel,
   FootprintLevelWire,
@@ -11,6 +12,7 @@ export type {
   SessionProfile,
   SessionProfileRow,
   SmartPrint,
+  TickData,
   TradeTick,
   UnfinishedAuction,
 } from "./types";
@@ -27,9 +29,12 @@ export {
   sessionFromLevels,
   snapTick,
   stackedImbalanceZones,
+  diagonalImbalances,
+  buildCandleStats,
   toWireLevel,
   unfinishedAuction,
   lowVolumeNodes,
+  highVolumeNodes,
   valueArea,
 } from "./analytics";
 
