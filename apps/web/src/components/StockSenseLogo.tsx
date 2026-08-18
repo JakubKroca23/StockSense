@@ -10,19 +10,6 @@ const STOCK_LETTERS = [
 
 export type LogoVariant = "stocksense" | "trading-vision";
 
-const VARIANTS = {
-  stocksense: {
-    title: "StockSense",
-    letters: STOCK_LETTERS,
-    tagline: "sense",
-  },
-  "trading-vision": {
-    title: "Trading Vision",
-    word: "VISION",
-    tagline: "trading",
-  },
-} as const;
-
 /** Wordmark — oko + pootočený název + tagline v rámečku */
 export function StockSenseLogo({
   className = "",
@@ -35,18 +22,41 @@ export function StockSenseLogo({
   title?: string;
   variant?: LogoVariant;
 }) {
-  const cfg = VARIANTS[variant];
   const eyeH = Math.round(height * 0.7);
   const eyeW = Math.round(eyeH * (229 / 108));
-  const stockSize = Math.round(height * (variant === "trading-vision" ? 0.44 : 0.46));
+  const stockSize = Math.round(height * 0.46);
+  const visionSize = Math.round(height * 0.42);
   const gap = Math.round(height * 0.1);
+
+  if (variant === "trading-vision") {
+    return (
+      <span
+        className={`brand-logo__mark brand-logo--vision inline-flex items-center ${className}`}
+        style={{ height }}
+        role="img"
+        aria-label={title ?? "Trading Vision"}
+      >
+        <Image
+          src="/logo-eye-transparent.png"
+          alt=""
+          width={eyeW}
+          height={eyeH}
+          className="brand-logo__eye"
+          priority
+        />
+        <span className="brand-logo__vision" style={{ fontSize: visionSize }}>
+          VISION
+        </span>
+      </span>
+    );
+  }
 
   return (
     <span
       className={`brand-logo__mark inline-flex items-center ${className}`}
       style={{ height, gap }}
       role="img"
-      aria-label={title ?? cfg.title}
+      aria-label={title ?? "StockSense"}
     >
       <Image
         src="/logo-eye-transparent.png"
@@ -57,22 +67,18 @@ export function StockSenseLogo({
         priority
       />
       <span className="brand-logo__word" style={{ fontSize: stockSize }}>
-        {"letters" in cfg ? (
-          <span className="brand-logo__stock">
-            {cfg.letters.map(({ ch, rotate }) => (
-              <span
-                key={`${ch}-${rotate}`}
-                className="brand-logo__stock-letter"
-                style={{ transform: `rotate(${rotate}deg)` }}
-              >
-                {ch}
-              </span>
-            ))}
-          </span>
-        ) : (
-          <span className="brand-logo__stock brand-logo__stock--straight">{cfg.word}</span>
-        )}
-        <span className="brand-logo__sense">{cfg.tagline}</span>
+        <span className="brand-logo__stock">
+          {STOCK_LETTERS.map(({ ch, rotate }) => (
+            <span
+              key={`${ch}-${rotate}`}
+              className="brand-logo__stock-letter"
+              style={{ transform: `rotate(${rotate}deg)` }}
+            >
+              {ch}
+            </span>
+          ))}
+        </span>
+        <span className="brand-logo__sense">sense</span>
       </span>
     </span>
   );
