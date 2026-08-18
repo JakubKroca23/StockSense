@@ -8,16 +8,6 @@ const STOCK_LETTERS = [
   { ch: "K", rotate: -6 },
 ] as const;
 
-const TRADING_LETTERS = [
-  { ch: "T", rotate: -7 },
-  { ch: "R", rotate: 5 },
-  { ch: "A", rotate: -4 },
-  { ch: "D", rotate: 8 },
-  { ch: "I", rotate: -6 },
-  { ch: "N", rotate: 5 },
-  { ch: "G", rotate: -7 },
-] as const;
-
 export type LogoVariant = "stocksense" | "trading-vision";
 
 const VARIANTS = {
@@ -28,8 +18,8 @@ const VARIANTS = {
   },
   "trading-vision": {
     title: "Trading Vision",
-    letters: TRADING_LETTERS,
-    tagline: "vision",
+    word: "VISION",
+    tagline: "trading",
   },
 } as const;
 
@@ -48,7 +38,7 @@ export function StockSenseLogo({
   const cfg = VARIANTS[variant];
   const eyeH = Math.round(height * 0.7);
   const eyeW = Math.round(eyeH * (229 / 108));
-  const stockSize = Math.round(height * (variant === "trading-vision" ? 0.4 : 0.46));
+  const stockSize = Math.round(height * (variant === "trading-vision" ? 0.44 : 0.46));
   const gap = Math.round(height * 0.1);
 
   return (
@@ -67,17 +57,21 @@ export function StockSenseLogo({
         priority
       />
       <span className="brand-logo__word" style={{ fontSize: stockSize }}>
-        <span className="brand-logo__stock">
-          {cfg.letters.map(({ ch, rotate }) => (
-            <span
-              key={`${ch}-${rotate}`}
-              className="brand-logo__stock-letter"
-              style={{ transform: `rotate(${rotate}deg)` }}
-            >
-              {ch}
-            </span>
-          ))}
-        </span>
+        {"letters" in cfg ? (
+          <span className="brand-logo__stock">
+            {cfg.letters.map(({ ch, rotate }) => (
+              <span
+                key={`${ch}-${rotate}`}
+                className="brand-logo__stock-letter"
+                style={{ transform: `rotate(${rotate}deg)` }}
+              >
+                {ch}
+              </span>
+            ))}
+          </span>
+        ) : (
+          <span className="brand-logo__stock brand-logo__stock--straight">{cfg.word}</span>
+        )}
         <span className="brand-logo__sense">{cfg.tagline}</span>
       </span>
     </span>

@@ -800,6 +800,17 @@ a {
     drop-shadow(0 0 10px color-mix(in srgb, var(--sense) 55%, transparent));
 }
 
+.brand-logo__stock--straight {
+  font-family: var(--font-brand), "Space Grotesk", sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.06em;
+  justify-content: center;
+  filter:
+    drop-shadow(0 0 2px var(--sense))
+    drop-shadow(0 0 6px var(--sense-glow))
+    drop-shadow(0 0 10px color-mix(in srgb, var(--sense) 55%, transparent));
+}
+
 .brand-logo__sense {
   display: inline-flex;
   align-items: center;
@@ -1017,6 +1028,34 @@ a {
   display: grid;
   gap: 0.15rem;
   width: 100%;
+}
+
+.app-rail__foot {
+  display: none;
+}
+
+.app-shell.is-trading-vision .app-rail__panel {
+  display: flex;
+  flex-direction: column;
+  align-content: stretch;
+  overflow: hidden;
+}
+
+.app-shell.is-trading-vision .app-rail__nav {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-content: start;
+  overflow: auto;
+}
+
+.app-shell.is-trading-vision .app-rail__foot {
+  display: grid;
+  gap: 0.15rem;
+  width: 100%;
+  flex: 0 0 auto;
+  margin-top: auto;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--glass-border);
 }
 
 .app-rail__link {

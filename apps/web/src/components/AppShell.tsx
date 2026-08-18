@@ -152,11 +152,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setMenuOpen((v) => !v);
   }
 
+  const isTradingVision = pathname.startsWith("/trading");
+
+  function toggleTheme() {
+    const next = theme === "light" ? "dark" : "light";
+    setTheme(next);
+    applyTheme(next);
+  }
+
   return (
     <div
       className={`app-shell min-h-screen pb-8 ${menuOpen ? "is-menu-open" : ""} ${
         railCollapsed ? "is-rail-collapsed" : ""
-      }`}
+      } ${isTradingVision ? "is-trading-vision" : ""}`}
     >
       <header className="app-header sticky top-0 z-40">
         <div className="app-header__inner">
@@ -193,34 +201,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           <HeaderExtraSlot />
 
-          <div className="app-header__actions app-no-drag">
-            <button
-              type="button"
-              className="theme-toggle"
-              aria-label={theme === "light" ? "Přepnout na tmavý režim" : "Přepnout na světlý režim"}
-              title={theme === "light" ? "Tmavý režim" : "Světlý režim"}
-              onClick={() => {
-                const next = theme === "light" ? "dark" : "light";
-                setTheme(next);
-                applyTheme(next);
-              }}
-            >
-              {theme === "light" ? <IconMoon size={22} /> : <IconSun size={22} />}
-            </button>
-            <button
-              type="button"
-              className={`settings-gear ${settingsOpen ? "settings-gear--active" : ""}`}
-              aria-label="Nastavení"
-              aria-expanded={settingsOpen}
-              title="Nastavení"
-              onClick={() => {
-                setMenuOpen(false);
-                setSettingsOpen((v) => !v);
-              }}
-            >
-              <IconSettings size={22} />
-            </button>
-          </div>
+          {!isTradingVision ? (
+            <div className="app-header__actions app-no-drag">
+              <button
+                type="button"
+                className="theme-toggle"
+                aria-label={theme === "light" ? "Přepnout na tmavý režim" : "Přepnout na světlý režim"}
+                title={theme === "light" ? "Tmavý režim" : "Světlý režim"}
+                onClick={toggleTheme}
+              >
+                {theme === "light" ? <IconMoon size={22} /> : <IconSun size={22} />}
+              </button>
+              <button
+                type="button"
+                className={`settings-gear ${settingsOpen ? "settings-gear--active" : ""}`}
+                aria-label="Nastavení"
+                aria-expanded={settingsOpen}
+                title="Nastavení"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setSettingsOpen((v) => !v);
+                }}
+              >
+                <IconSettings size={22} />
+              </button>
+            </div>
+          ) : null}
         </div>
       </header>
 
@@ -259,21 +265,61 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </Link>
               );
             })}
-            <button
-              type="button"
-              className={`app-rail__link app-rail__link--settings ${settingsOpen ? "is-active" : ""}`}
-              title="Nastavení"
-              onClick={() => {
-                setMenuOpen(false);
-                setSettingsOpen(true);
-              }}
-            >
-              <span className="nav-item">
-                <IconSettings size={RAIL_ICON_SIZE} />
-                <span className="nav-item__label">Nastavení</span>
-              </span>
-            </button>
+            {!isTradingVision ? (
+              <button
+                type="button"
+                className={`app-rail__link app-rail__link--settings ${settingsOpen ? "is-active" : ""}`}
+                title="Nastavení"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setSettingsOpen(true);
+                }}
+              >
+                <span className="nav-item">
+                  <IconSettings size={RAIL_ICON_SIZE} />
+                  <span className="nav-item__label">Nastavení</span>
+                </span>
+              </button>
+            ) : null}
           </nav>
+          {isTradingVision ? (
+            <div className="app-rail__foot">
+              <button
+                type="button"
+                className="app-rail__link"
+                aria-label={theme === "light" ? "Přepnout na tmavý režim" : "Přepnout na světlý režim"}
+                title={theme === "light" ? "Tmavý režim" : "Světlý režim"}
+                onClick={toggleTheme}
+              >
+                <span className="nav-item">
+                  {theme === "light" ? (
+                    <IconMoon size={RAIL_ICON_SIZE} />
+                  ) : (
+                    <IconSun size={RAIL_ICON_SIZE} />
+                  )}
+                  <span className="nav-item__label">
+                    {theme === "light" ? "Tmavý režim" : "Světlý režim"}
+                  </span>
+                </span>
+              </button>
+              <button
+                type="button"
+                className={`app-rail__link ${settingsOpen ? "is-active" : ""}`}
+                aria-label="Nastavení"
+                aria-expanded={settingsOpen}
+                title="Nastavení"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setSettingsOpen((v) => !v);
+                }}
+              >
+                <span className="nav-item">
+                  <IconSettings size={RAIL_ICON_SIZE} />
+                  <span className="nav-item__label">Nastavení</span>
+                </span>
+              </button>
+            </div>
+          ) : null}
         </div>
       </aside>
 
