@@ -21,6 +21,9 @@ import {
   snapAutoGroup,
   rememberBook,
   DEFAULT_HEAT_VIZ,
+  clampLiqProfile,
+  LIQ_PROFILE_MIN,
+  LIQ_PROFILE_MAX,
   type HeatmapLevel,
   type HeatVizSettings,
   type LiqZone,
@@ -214,10 +217,6 @@ function stickLiveToPriceScale(chart: IChartApi, lastIndex: number) {
   const visible = width / spacing;
   const rangeTo = lastIndex + LIVE_RIGHT_PAD;
   ts.setVisibleLogicalRange({ from: rangeTo - visible, to: rangeTo });
-}
-
-function lookingAtFuture(rangeTo: number, lastIndex: number) {
-  return rangeTo > lastIndex + LIVE_RIGHT_PAD + 1;
 }
 
 function sizeCanvas(canvas: HTMLCanvasElement, w: number, h: number) {
@@ -431,10 +430,10 @@ export function PriceChart({
     const showHeat = showHeatRef.current && raw.length > 0;
     const showDom = false;
     const wrapW = wrap.clientWidth;
-    const profileFrac = Math.min(0.5, Math.max(0.12, viz.profileWidth));
+    const profileFrac = clampLiqProfile(viz.profileWidth);
     const plotW = Math.max(32, chart.timeScale().width() || mainW - 56);
     const overlayW = showHeat
-      ? Math.max(56, Math.min(plotW * profileFrac, plotW * 0.5))
+      ? Math.max(12, Math.min(plotW * profileFrac, plotW * LIQ_PROFILE_MAX))
       : 0;
     const overlayLeft = showHeat ? Math.max(48, plotW - overlayW) : plotW;
     const profileW = showHeat && showDom
@@ -1178,7 +1177,7 @@ export function PriceChart({
     const el = e.currentTarget;
     el.setPointerCapture(e.pointerId);
     const onMove = (ev: PointerEvent) => {
-      const next = Math.min(0.5, Math.max(0.12, startFrac + (startX - ev.clientX) / plotW));
+      const next = Math.min(LIQ_PROFILE_MAX, Math.max(LIQ_PROFILE_MIN, startFrac + (startX - ev.clientX) / plotW));
       profileGeomRef.current.frac = next;
       onWidthRef.current?.(next);
     };
@@ -1414,37 +1413,12 @@ export function PriceChart({
         ? Math.max(containerRef.current.clientHeight, 240)
         : height!;
       chartRef.current.applyOptions({ width: w, height: h });
-      if (realtimeRef.current) {
-        const ts = chartRef.current.timeScale();
-        const range = ts.getVisibleLogicalRange();
-        const last = lastIdxRef.current;
-        if (!range || !lookingAtFuture(range.to, last)) {
-          stickLiveToPriceScale(chartRef.current, last);
-        }
-      }
       drawRef.current();
     });
     if (wrapRef.current) ro.observe(wrapRef.current);
     ro.observe(containerRef.current);
 
-    let clampLock = false;
-    const clampPast = () => {
-      if (clampLock) return;
-      const ts = chart.timeScale();
-      const range = ts.getVisibleLogicalRange();
-      const last = lastIdxRef.current;
-      const minTo = last + LIVE_RIGHT_PAD;
-      if (!range || range.to >= minTo - 0.15) return;
-      const span = Math.max(range.to - range.from, 8);
-      clampLock = true;
-      ts.setVisibleLogicalRange({ from: minTo - span, to: minTo });
-      requestAnimationFrame(() => {
-        clampLock = false;
-      });
-    };
-
     const onRange = () => {
-      if (realtimeRef.current) clampPast();
       drawRef.current();
     };
     chart.timeScale().subscribeVisibleLogicalRangeChange(onRange);
@@ -1687,9 +1661,8 @@ export function PriceChart({
       ema20Ref.current?.setData(viz.ema20 ? applyIndicator(ohlcv, "ema", { period: 20 }) : []);
       rsiRef.current?.setData(viz.rsi ? applyIndicator(ohlcv, "rsi", { period: 14 }) : []);
 
-      if (!realtime || !prev) {
+      if (!prev) {
         const ts = chartRef.current.timeScale();
-        ts.applyOptions({ rightOffset: LIVE_RIGHT_PAD, fixRightEdge: false });
         if (realtime) stickLiveToPriceScale(chartRef.current, unique.length - 1);
         else ts.fitContent();
       }

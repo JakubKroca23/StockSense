@@ -13,7 +13,7 @@ import { TapeSettingsPanel } from "@/components/TapeSettingsPanel";
 import { type OrderBookData } from "@/components/OrderBookPanel";
 import { TradesTapePanel, type TradesTapeData } from "@/components/TradesTapePanel";
 import { LiquidityPanel } from "@/components/LiquidityPanel";
-import { analyzeLiquidity, rememberBook, type BookMem } from "@/lib/liquidity";
+import { analyzeLiquidity, rememberBook, clampBookLimit, type BookMem } from "@/lib/liquidity";
 import {
   levelsFromWireBars,
   type SessionProfile,
@@ -408,12 +408,13 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
 
   const loadOrderBook = useCallback(async () => {
       try {
-        const res = await apiFetch<OrderBookData>(`${apiBase}/orderbook?limit=400`);
+        const limit = clampBookLimit(heatViz.bookLimit);
+        const res = await apiFetch<OrderBookData>(`${apiBase}/orderbook?limit=${limit}`);
         applyHeatLevels(res);
       } catch {
         /* keep last book */
       }
-    }, [applyHeatLevels, apiBase]);
+    }, [applyHeatLevels, apiBase, heatViz.bookLimit]);
 
   const loadTrades = useCallback(async () => {
     try {

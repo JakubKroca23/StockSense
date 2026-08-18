@@ -20,7 +20,26 @@ export type HeatVizSettings = {
   volumeWeight: number;
   cumulative: boolean;
   gamma: number;
+  /** Bybit L2 levels per side: 50 | 200 | 500. */
+  bookLimit: number;
 };
+
+export const LIQ_PROFILE_MIN = 0.035;
+export const LIQ_PROFILE_MAX = 0.5;
+export const BOOK_LIMITS = [50, 200, 500] as const;
+
+export function clampLiqProfile(n: number | undefined): number {
+  if (!Number.isFinite(n as number)) return 0.22;
+  return Math.min(LIQ_PROFILE_MAX, Math.max(LIQ_PROFILE_MIN, n as number));
+}
+
+export function clampBookLimit(n: number | undefined): number {
+  if (!Number.isFinite(n as number)) return 200;
+  const v = Number(n);
+  if (v <= 75) return 50;
+  if (v <= 350) return 200;
+  return 500;
+}
 
 export const DEFAULT_HEAT_VIZ: HeatVizSettings = {
   noisePct: 0.18,
@@ -37,6 +56,7 @@ export const DEFAULT_HEAT_VIZ: HeatVizSettings = {
   volumeWeight: 0.7,
   cumulative: false,
   gamma: 0.7,
+  bookLimit: 200,
 };
 
 export type LiqZone = {
