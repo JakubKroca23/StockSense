@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import {
   DEFAULT_FP_VIZ,
+  clampFpStatsFrac,
   fmtV,
   type FpHistAlign,
   type FpNumberMode,
@@ -121,6 +122,19 @@ export function FootprintSettingsPanel({
         <section className="fp-drawer__sec">
           <h3>Sloupec a cena</h3>
           <p className="fp-drawer__lead">Jak široký je jeden časový sloupec a jak jemně se láme cena.</p>
+          <Item
+            label="Výška tabulky dole"
+            value={`${Math.round(clampFpStatsFrac(v.statsFrac) * 100)} %`}
+            hint="Chytni horní hranu tabulky na grafu a táhni. Dvojklik na hranu vrátí výchozí výšku."
+          >
+            <input
+              type="range"
+              min={10}
+              max={48}
+              value={Math.round(clampFpStatsFrac(v.statsFrac) * 100)}
+              onChange={(e) => onChange({ statsFrac: Number(e.target.value) / 100 })}
+            />
+          </Item>
           <Item
             label="Šířka sloupce"
             value={`${barSpacing} px`}

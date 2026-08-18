@@ -121,6 +121,8 @@ export type FpVizSettings = {
   imbalanceStack: number;
   /** Extra fill on imbalanced side. */
   imbFill: number;
+  /** Bottom stats table height as a fraction of the chart. */
+  statsFrac: number;
 };
 
 export const DEFAULT_FP_VIZ: FpVizSettings = {
@@ -168,6 +170,7 @@ export const DEFAULT_FP_VIZ: FpVizSettings = {
   imbalance: 3,
   imbalanceStack: 1,
   imbFill: 0.22,
+  statsFrac: 0.22,
 };
 
 export function groupLevels(levels: FootprintLevel[], tick: number, n: number): FootprintLevel[] {
@@ -279,29 +282,42 @@ export function fmtDelta(n: number) {
 export const FP_VOL_FRAC = 0.13;
 /** Stats table at the bottom edge. */
 export const FP_STATS_FRAC = 0.22;
+export const FP_STATS_FRAC_MIN = 0.1;
+export const FP_STATS_FRAC_MAX = 0.48;
 
-export function fpOverlayBottom(footprint: boolean, volume: boolean): number {
-  if (footprint) return FP_STATS_FRAC + (volume ? FP_VOL_FRAC : 0);
+export function clampFpStatsFrac(n: number | undefined): number {
+  if (!Number.isFinite(n as number)) return FP_STATS_FRAC;
+  return Math.min(FP_STATS_FRAC_MAX, Math.max(FP_STATS_FRAC_MIN, n as number));
+}
+
+export function fpOverlayBottom(footprint: boolean, volume: boolean, statsFrac = FP_STATS_FRAC): number {
+  const stats = clampFpStatsFrac(statsFrac);
+  if (footprint) return stats + (volume ? FP_VOL_FRAC : 0);
   if (volume) return 0.18;
   return 0.06;
 }
 
-export function fpVolumeMargins(footprint: boolean, volume: boolean): { top: number; bottom: number } {
-  if (footprint && volume) return { top: 1 - FP_VOL_FRAC - FP_STATS_FRAC, bottom: FP_STATS_FRAC };
+export function fpVolumeMargins(
+  footprint: boolean,
+  volume: boolean,
+  statsFrac = FP_STATS_FRAC
+): { top: number; bottom: number } {
+  const stats = clampFpStatsFrac(statsFrac);
+  if (footprint && volume) return { top: 1 - FP_VOL_FRAC - stats, bottom: stats };
   if (volume) return { top: 0.84, bottom: 0 };
   return { top: 1, bottom: 0 };
 }
 
 /** Top of overlay (volume + stats, or stats only) — footprint/candles clip here. */
-export function fpBandTop(h: number, footprint: boolean, volume = false): number {
-  if (footprint) return Math.round(h * (1 - fpOverlayBottom(true, volume)));
+export function fpBandTop(h: number, footprint: boolean, volume = false, statsFrac = FP_STATS_FRAC): number {
+  if (footprint) return Math.round(h * (1 - fpOverlayBottom(true, volume, statsFrac)));
   if (volume) return Math.round(h * 0.84);
   return h;
 }
 
-export function fpStatsTop(h: number, footprint: boolean): number {
+export function fpStatsTop(h: number, footprint: boolean, statsFrac = FP_STATS_FRAC): number {
   if (!footprint) return h;
-  return Math.round(h * (1 - FP_STATS_FRAC));
+  return Math.round(h * (1 - clampFpStatsFrac(statsFrac)));
 }
 
 function contrastInk(hex: string, alpha: number): string {
@@ -387,10 +403,11 @@ export function drawVolumeBarStats(
   h: number,
   theme: VolumeStatsTheme,
   alignTimes?: number[],
-  footprintOn = false
+  footprintOn = false,
+  statsFrac = FP_STATS_FRAC
 ) {
   if (!footprintOn) return;
-  const statsTop = fpStatsTop(h, true);
+  const statsTop = fpStatsTop(h, true, statsFrac);
   const bandH = h - statsTop;
   if (bandH < 44 || clipRight < 24) return;
 
@@ -1094,14 +1111,15 @@ export function FootprintChart({
     ctx.clearRect(0, 0, w, h);
     const snap = dataRef.current;
     if (!snap.bars.length) return;
-    const bandTop = fpBandTop(h, true, false);
+    const statsFrac = clampFpStatsFrac(vizRef.current.statsFrac);
+    const bandTop = fpBandTop(h, true, false, statsFrac);
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, 0, w - 68, bandTop);
     ctx.clip();
     drawFootprintOnChart(ctx, chart, series, snap, vizRef.current, w, h, w - 68, readTheme(), undefined, bandTop);
     ctx.restore();
-    drawVolumeBarStats(ctx, chart, snap, snap.bars, w - 68, h, readTheme(), undefined, true);
+    drawVolumeBarStats(ctx, chart, snap, snap.bars, w - 68, h, readTheme(), undefined, true, statsFrac);
   };
 
   useEffect(() => {
@@ -1137,7 +1155,7 @@ export function FootprintChart({
       },
       rightPriceScale: {
         borderVisible: false,
-        scaleMargins: { top: 0.04, bottom: FP_STATS_FRAC },
+        scaleMargins: { top: 0.04, bottom: clampFpStatsFrac(vizRef.current.statsFrac) },
         entireTextOnly: true,
       },
       leftPriceScale: { visible: false },

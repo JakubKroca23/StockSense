@@ -35,6 +35,9 @@ import {
   fpBandTop,
   fpOverlayBottom,
   fpVolumeMargins,
+  fpStatsTop,
+  clampFpStatsFrac,
+  FP_STATS_FRAC,
   fmtV,
   DEFAULT_FP_VIZ,
   type FootprintData,
@@ -144,6 +147,7 @@ type Props = {
   showFootprint?: boolean;
   footprintData?: FootprintData | null;
   fpViz?: Partial<FpVizSettings>;
+  onFpVizChange?: (patch: Partial<FpVizSettings>) => void;
   /** Live tape prints — iceberg detection uses last ~12s of aggression into rest. */
   tapePrints?: TapePrint[] | null;
   chartViz?: Partial<ChartVizSettings>;
@@ -305,6 +309,7 @@ export function PriceChart({
   showFootprint = false,
   footprintData = null,
   fpViz,
+  onFpVizChange,
   tapePrints = null,
   chartViz,
   drawTool = "none",
@@ -343,6 +348,12 @@ export function PriceChart({
   const fpDataRef = useRef<FootprintData | null>(footprintData);
   const tapeRef = useRef<TapePrint[] | null>(tapePrints);
   const fpVizRef = useRef<FpVizSettings>({ ...DEFAULT_FP_VIZ, ...fpViz });
+  const statsFracRef = useRef(clampFpStatsFrac(fpViz?.statsFrac));
+  const statsDragRef = useRef(false);
+  const statsHandleRef = useRef<HTMLDivElement>(null);
+  const onFpVizRef = useRef(onFpVizChange);
+  onFpVizRef.current = onFpVizChange;
+  const rsiOnRef = useRef(false);
   const volOnRef = useRef(false);
   const barsRef = useRef(bars);
   const lastIdxRef = useRef(0);
@@ -368,6 +379,9 @@ export function PriceChart({
   fpDataRef.current = footprintData;
   tapeRef.current = tapePrints;
   fpVizRef.current = { ...DEFAULT_FP_VIZ, ...fpViz };
+  if (!statsDragRef.current) {
+    statsFracRef.current = clampFpStatsFrac(fpVizRef.current.statsFrac);
+  }
   sessionRef.current = session;
   lastIdxRef.current = Math.max(0, bars.length - 1);
   realtimeRef.current = realtime;
@@ -380,6 +394,7 @@ export function PriceChart({
     volume: showVolume,
   };
   volOnRef.current = viz.volume;
+  rsiOnRef.current = viz.rsi;
 
   const drawHeatmap = () => {
     try {
@@ -419,6 +434,18 @@ export function PriceChart({
       : 0;
     const plotW = Math.max(32, chart.timeScale().width() || mainW - 56);
 
+    const handle = statsHandleRef.current;
+    if (handle) {
+      if (showFpRef.current) {
+        const top = fpStatsTop(h, true, statsFracRef.current);
+        handle.style.display = "block";
+        handle.style.top = `${Math.max(0, top - 7)}px`;
+        handle.style.width = `${plotW}px`;
+      } else {
+        handle.style.display = "none";
+      }
+    }
+
     if (showHeat && showDom && splitRef.current && domRef.current) {
       profileGeomRef.current = { left: plotW, plotW, frac: profileFrac, domW: profileW };
       splitRef.current.style.visibility = "visible";
@@ -455,6 +482,7 @@ export function PriceChart({
         last?.delta,
         last?.close,
         JSON.stringify(v),
+        statsFracRef.current,
       ].join("|");
       let layer = fpLayerRef.current;
       if (!layer) {
@@ -474,7 +502,7 @@ export function PriceChart({
         lctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         lctx.clearRect(0, 0, mainW, h);
         lctx.save();
-        const bandTop = fpBandTop(h, true, volOnRef.current);
+        const bandTop = fpBandTop(h, true, volOnRef.current, statsFracRef.current);
         lctx.beginPath();
         lctx.rect(0, 0, plotW, bandTop);
         lctx.clip();
@@ -513,7 +541,8 @@ export function PriceChart({
           h,
           theme,
           alignTimes,
-          showFpRef.current
+          showFpRef.current,
+          statsFracRef.current
         );
       } catch {
         /* keep book */
@@ -1118,6 +1147,58 @@ export function PriceChart({
     el.addEventListener("pointerup", onUp);
   };
 
+  const applyFpLayout = (frac: number) => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const fp = showFpRef.current;
+    const vol = volOnRef.current;
+    const rsi = rsiOnRef.current;
+    chart.priceScale("right").applyOptions({
+      scaleMargins: { top: 0.06, bottom: fpOverlayBottom(fp, vol, frac) + (rsi ? 0.16 : 0) },
+    });
+    chart.priceScale("volume").applyOptions({
+      scaleMargins: fpVolumeMargins(fp, vol, frac),
+    });
+    fpLayerKeyRef.current = "";
+    drawRef.current();
+  };
+
+  const onStatsHandleDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const main = mainRef.current;
+    if (!main) return;
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    el.classList.add("is-drag");
+    statsDragRef.current = true;
+    const apply = (clientY: number) => {
+      const rect = main.getBoundingClientRect();
+      const next = clampFpStatsFrac(1 - (clientY - rect.top) / Math.max(1, rect.height));
+      statsFracRef.current = next;
+      applyFpLayout(next);
+    };
+    apply(e.clientY);
+    const onMove = (ev: PointerEvent) => apply(ev.clientY);
+    const onUp = () => {
+      statsDragRef.current = false;
+      el.classList.remove("is-drag");
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup", onUp);
+      onFpVizRef.current?.({ statsFrac: statsFracRef.current });
+    };
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerup", onUp);
+  };
+
+  const onStatsHandleDblClick = (e: { preventDefault: () => void }) => {
+    e.preventDefault();
+    statsDragRef.current = false;
+    statsFracRef.current = FP_STATS_FRAC;
+    applyFpLayout(FP_STATS_FRAC);
+    onFpVizRef.current?.({ statsFrac: FP_STATS_FRAC });
+  };
+
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -1168,7 +1249,7 @@ export function PriceChart({
       rightPriceScale: {
         visible: true,
         borderVisible: false,
-        scaleMargins: { top: 0.06, bottom: fpOverlayBottom(showFootprint, viz.volume) },
+        scaleMargins: { top: 0.06, bottom: fpOverlayBottom(showFootprint, viz.volume, statsFracRef.current) },
         entireTextOnly: true,
         mode: viz.logScale ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
       },
@@ -1219,7 +1300,7 @@ export function PriceChart({
       visible: viz.volume,
     });
     chart.priceScale("volume").applyOptions({
-      scaleMargins: fpVolumeMargins(showFootprint, viz.volume),
+      scaleMargins: fpVolumeMargins(showFootprint, viz.volume, statsFracRef.current),
       borderVisible: false,
     });
 
@@ -1387,14 +1468,14 @@ export function PriceChart({
         mode: viz.logScale ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
         scaleMargins: {
           top: 0.06,
-          bottom: fpOverlayBottom(showFootprint, viz.volume) + (viz.rsi ? 0.16 : 0),
+          bottom: fpOverlayBottom(showFootprint, viz.volume, statsFracRef.current) + (viz.rsi ? 0.16 : 0),
         },
       },
     });
     series.applyOptions(candleLook(theme, viz, showFootprint, fpViz?.wicks ?? true));
     volumeRef.current?.applyOptions({ visible: viz.volume });
     chart.priceScale("volume").applyOptions({
-      scaleMargins: fpVolumeMargins(showFootprint, viz.volume),
+      scaleMargins: fpVolumeMargins(showFootprint, viz.volume, statsFracRef.current),
     });
     closeLineRef.current?.applyOptions({
       visible: viz.style === "line",
@@ -1418,6 +1499,7 @@ export function PriceChart({
     viz.rsi,
     showFootprint,
     fpViz?.wicks,
+    fpViz?.statsFrac,
     showHeatmap,
   ]);
 
@@ -1631,6 +1713,16 @@ export function PriceChart({
           tool={drawTool}
           drawings={drawings}
           onChange={onDrawingsChange || (() => undefined)}
+        />
+        <div
+          ref={statsHandleRef}
+          className="price-chart__fp-stats-handle"
+          onPointerDown={onStatsHandleDown}
+          onDoubleClick={onStatsHandleDblClick}
+          title="Táhni pro výšku tabulky (dvojklik = výchozí)"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Výška tabulky footprintu"
         />
       </div>
       <div

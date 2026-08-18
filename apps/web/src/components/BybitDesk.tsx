@@ -1033,6 +1033,7 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
                   footprintData={fpData}
                   tapePrints={tradesTape?.trades ?? null}
                   fpViz={fpViz}
+                  onFpVizChange={setFpViz}
                   chartViz={chartViz}
                   drawTool={drawTool}
                   drawings={drawingsStore.items}
