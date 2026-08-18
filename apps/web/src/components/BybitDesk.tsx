@@ -1,10 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch, apiWsUrl } from "@/lib/api";
 import { PriceChart, type ChartBar, type HeatmapLevel, type HeatVizSettings, type ChartVizSettings, DEFAULT_HEAT_VIZ, DEFAULT_DESK_CHART_VIZ } from "@/components/PriceChart";
 import { HeaderExtra } from "@/components/HeaderExtra";
+import {
+  IconDraw,
+  IconFootprint,
+  IconLiq,
+  IconSettings,
+  IconTape,
+  IconTools,
+} from "@/components/NavIcons";
 import { type FootprintData, type FpVizSettings, DEFAULT_FP_VIZ } from "@/components/FootprintChart";
 import { FootprintSettingsPanel } from "@/components/FootprintSettingsPanel";
 import { ChartSettingsPanel } from "@/components/ChartSettingsPanel";
@@ -243,6 +251,125 @@ function HeaderPick({
                 {opt.label}
               </button>
             ))}
+          </div>,
+          document.body
+        )}
+    </>
+  );
+}
+
+function ToolsMenu({
+  footprint,
+  tapeOn,
+  liqOn,
+  drawer,
+  onToggleFp,
+  onToggleTape,
+  onToggleLiq,
+  onOpenSettings,
+}: {
+  footprint: boolean;
+  tapeOn: boolean;
+  liqOn: boolean;
+  drawer: DeskDrawer;
+  onToggleFp: () => void;
+  onToggleTape: () => void;
+  onToggleLiq: () => void;
+  onOpenSettings: (kind: "fp" | "tape" | "liq") => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const anyOn = footprint || tapeOn || liqOn;
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    const onPtr = (e: PointerEvent) => {
+      const t = e.target;
+      if (!(t instanceof Node)) return;
+      if (btnRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", onPtr);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onPtr);
+    };
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) return;
+    const r = btnRef.current.getBoundingClientRect();
+    setPos({ top: r.bottom + 4, left: r.left });
+  }, [open]);
+
+  const row = (
+    id: "fp" | "tape" | "liq",
+    on: boolean,
+    label: string,
+    icon: ReactNode,
+    toggle: () => void
+  ) => (
+    <div className="desk-tools-menu__row">
+      <button
+        type="button"
+        className={`desk-tools-menu__main ${on ? "is-on" : ""}`}
+        onClick={toggle}
+        aria-pressed={on}
+        aria-label={on ? `Vypnout ${label}` : `Zapnout ${label}`}
+        title={on ? `Vypnout ${label}` : `Zapnout ${label}`}
+      >
+        {icon}
+      </button>
+      <button
+        type="button"
+        className={`desk-tools-menu__gear ${drawer === id ? "is-active" : ""}`}
+        onClick={() => {
+          onOpenSettings(id);
+          setOpen(false);
+        }}
+        aria-label={`Nastavení: ${label}`}
+        title={`Nastavení: ${label}`}
+      >
+        <IconSettings size={15} />
+      </button>
+    </div>
+  );
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        className={`chart-chip chart-chip--soft chart-chip--icon ${open || anyOn ? "is-active" : ""}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Nástroje"
+        title="Nástroje"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <IconTools size={18} />
+        <span className="header-desk__tf-caret" aria-hidden>
+          ▾
+        </span>
+      </button>
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="tf-menu desk-tools-menu"
+            role="menu"
+            aria-label="Nástroje"
+            style={{ top: pos.top, left: pos.left }}
+          >
+            {row("fp", footprint, "Footprint", <IconFootprint size={18} />, onToggleFp)}
+            {row("tape", tapeOn, "Tape", <IconTape size={18} />, onToggleTape)}
+            {row("liq", liqOn, "Likvidita", <IconLiq size={18} />, onToggleLiq)}
           </div>,
           document.body
         )}
@@ -703,6 +830,69 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
     <div className="gold-page oil-page">
       <HeaderExtra>
         <div className="header-desk">
+          <div className="header-desk__tools">
+            <button
+              type="button"
+              className={`chart-chip chart-chip--soft chart-chip--icon ${drawBarOpen ? "is-active" : ""}`}
+              onClick={() => {
+                setDrawBarOpen((open) => {
+                  const next = !open;
+                  if (!next) setDrawTool("none");
+                  return next;
+                });
+              }}
+              aria-pressed={drawBarOpen}
+              aria-label="Kreslení"
+              title="Kreslení"
+            >
+              <IconDraw size={18} />
+            </button>
+            <button
+              type="button"
+              className={`chart-chip chart-chip--soft chart-chip--icon ${drawer === "chart" ? "is-active" : ""}`}
+              onClick={() => toggleDrawer("chart")}
+              aria-pressed={drawer === "chart"}
+              aria-label="Nastavení grafu"
+              title="Nastavení grafu"
+            >
+              <IconSettings size={18} />
+            </button>
+            <HeaderPick
+              label={tfLabel}
+              ariaLabel="Timeframe"
+              value={timeframe}
+              options={TIMEFRAMES.map((t) => ({ id: t.id, label: t.label }))}
+              onSelect={selectTimeframe}
+            />
+            <HeaderPick
+              label={lbLabel}
+              ariaLabel="Období"
+              value={lookback}
+              options={ranges}
+              onSelect={setLookback}
+            />
+            <ToolsMenu
+              footprint={footprint}
+              tapeOn={tapeOpen}
+              liqOn={liqOpen}
+              drawer={drawer}
+              onToggleFp={() =>
+                setFootprint((v) => {
+                  if (!v && chartViz.barSpacing < 20) setChartViz({ barSpacing: 24 });
+                  return !v;
+                })
+              }
+              onToggleTape={() => toggleTape()}
+              onToggleLiq={() => toggleLiq()}
+              onOpenSettings={(kind) => {
+                if (kind === "fp") {
+                  setFootprint(true);
+                  if (chartViz.barSpacing < 20) setChartViz({ barSpacing: 24 });
+                }
+                setDrawer((d) => (d === kind ? null : kind));
+              }}
+            />
+          </div>
           <div className="header-desk__id">
             <p className="header-desk__title">{config.title}</p>
             <p className="header-desk__quote">
@@ -724,114 +914,6 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
                 </span>
               )}
             </p>
-          </div>
-          <div className="header-desk__tools">
-            <button
-              type="button"
-              className={`chart-chip chart-chip--soft ${drawer === "chart" ? "is-active" : ""}`}
-              onClick={() => toggleDrawer("chart")}
-              aria-pressed={drawer === "chart"}
-              title="Nastavení grafu — panel vpravo"
-            >
-              Nastavení
-            </button>
-            <HeaderPick
-              label={tfLabel}
-              ariaLabel="Timeframe"
-              value={timeframe}
-              options={TIMEFRAMES.map((t) => ({ id: t.id, label: t.label }))}
-              onSelect={selectTimeframe}
-            />
-            <HeaderPick
-              label={lbLabel}
-              ariaLabel="Období"
-              value={lookback}
-              options={ranges}
-              onSelect={setLookback}
-            />
-            <button
-              type="button"
-              className={`chart-chip chart-chip--soft ${drawBarOpen ? "is-active" : ""}`}
-              onClick={() => {
-                setDrawBarOpen((open) => {
-                  const next = !open;
-                  if (!next) setDrawTool("none");
-                  return next;
-                });
-              }}
-              aria-pressed={drawBarOpen}
-              title="Kreslení — trend, ray, box, horizontála"
-            >
-              Kreslení
-            </button>
-            <button
-              type="button"
-              className={`chart-chip chart-chip--soft ${footprint ? "is-active" : ""}`}
-              onClick={() =>
-                setFootprint((v) => {
-                  if (!v && chartViz.barSpacing < 20) setChartViz({ barSpacing: 24 });
-                  return !v;
-                })
-              }
-              aria-pressed={footprint}
-              title="Footprint — volume na ceně z Bybit tradů"
-            >
-              FP
-            </button>
-            <button
-              type="button"
-              className={`chart-chip chart-chip--soft ${drawer === "fp" ? "is-active" : ""}`}
-              onClick={() => {
-                setDrawer((d) => {
-                  const next = d === "fp" ? null : "fp";
-                  if (next === "fp") {
-                    setFootprint(true);
-                    if (chartViz.barSpacing < 20) setChartViz({ barSpacing: 24 });
-                  }
-                  return next;
-                });
-              }}
-              aria-pressed={drawer === "fp"}
-              title="Nastavení footprintu"
-            >
-              FP nastavení
-            </button>
-            <button
-              type="button"
-              className={`chart-chip chart-chip--soft ${tapeOpen ? "is-active" : ""}`}
-              onClick={() => toggleTape()}
-              aria-pressed={tapeOpen}
-              title="Zapnout / vypnout tape"
-            >
-              Tape
-            </button>
-            <button
-              type="button"
-              className={`chart-chip chart-chip--soft ${drawer === "tape" ? "is-active" : ""}`}
-              onClick={() => toggleDrawer("tape")}
-              aria-pressed={drawer === "tape"}
-              title="Nastavení tape"
-            >
-              Tape nastavení
-            </button>
-            <button
-              type="button"
-              className={`chart-chip chart-chip--soft ${liqOpen ? "is-active" : ""}`}
-              onClick={() => toggleLiq()}
-              aria-pressed={liqOpen}
-              title="Zapnout / vypnout likviditu"
-            >
-              Liq
-            </button>
-            <button
-              type="button"
-              className={`chart-chip chart-chip--soft ${drawer === "liq" ? "is-active" : ""}`}
-              onClick={() => toggleDrawer("liq")}
-              aria-pressed={drawer === "liq"}
-              title="Nastavení likvidity"
-            >
-              Liq nastavení
-            </button>
           </div>
         </div>
       </HeaderExtra>

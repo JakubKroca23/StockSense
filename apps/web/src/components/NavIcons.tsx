@@ -168,6 +168,63 @@ export function IconMoon(p: IconProps) {
   );
 }
 
+/** Kreslení — tužka */
+export function IconDraw(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M4 20h4L19.2 8.8a2.1 2.1 0 0 0-3-3L5 16.1V20Z" />
+      <path d="M14.4 6.6 17.4 9.6" />
+    </Svg>
+  );
+}
+
+/** Nástroje desk — posuvníky */
+export function IconTools(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M4 7h9" />
+      <circle cx="16.5" cy="7" r="2.4" />
+      <path d="M20 17H11" />
+      <circle cx="7.5" cy="17" r="2.4" />
+    </Svg>
+  );
+}
+
+/** Footprint — cluster buněk */
+export function IconFootprint(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect x="3.8" y="3.8" width="7.2" height="7.2" rx="1.1" />
+      <rect x="13" y="3.8" width="7.2" height="7.2" rx="1.1" />
+      <rect x="3.8" y="13" width="7.2" height="7.2" rx="1.1" />
+      <rect x="13" y="13" width="7.2" height="7.2" rx="1.1" />
+    </Svg>
+  );
+}
+
+/** Tape — řádky printů */
+export function IconTape(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M5 7h14" />
+      <path d="M5 12h14" />
+      <path d="M5 17h9" />
+    </Svg>
+  );
+}
+
+/** Likvidita — hloubka zprava */
+export function IconLiq(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M20 5.5H11" />
+      <path d="M20 9.5H8" />
+      <path d="M20 13.5H13" />
+      <path d="M20 17.5H6" />
+    </Svg>
+  );
+}
+
 export const navIcons: Record<string, (p: IconProps) => ReactNode> = {
   "/": IconHome,
   "/desk/btc": IconBtc,

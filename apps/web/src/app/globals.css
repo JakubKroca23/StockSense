@@ -306,14 +306,12 @@ body {
   align-items: stretch;
   flex-wrap: nowrap;
   gap: 0.22rem;
-  flex: 1 1 auto;
-  justify-content: flex-end;
+  flex: 0 0 auto;
+  justify-content: flex-start;
   height: calc(100% - 0.4rem);
   min-width: 0;
   align-self: center;
   padding: 0 0.15rem;
-  overflow-x: auto;
-  overflow-y: hidden;
 }
 
 .header-desk .chart-controls {
@@ -445,6 +443,86 @@ body {
   min-width: 2.05rem;
   padding-inline: 0.35rem;
   font-size: 0.92rem;
+}
+
+.header-desk .chart-chip--icon {
+  min-width: 2.15rem;
+  padding: 0 0.42rem;
+  gap: 0.12rem;
+}
+
+.header-desk .chart-chip--icon svg {
+  display: block;
+  flex-shrink: 0;
+}
+
+.desk-tools-menu {
+  min-width: 0;
+  padding: 0.35rem;
+  border-top: 1px solid color-mix(in srgb, #9eb6ff 14%, #243049);
+}
+
+.desk-tools-menu__row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.2rem;
+  margin: 0 0 0.2rem;
+}
+
+.desk-tools-menu__row:last-child {
+  margin-bottom: 0;
+}
+
+.desk-tools-menu__main {
+  flex: 0 0 2.15rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.15rem;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, #9eb6ff 16%, #243049);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text, #e8eefc);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.desk-tools-menu__main svg {
+  flex-shrink: 0;
+}
+
+.desk-tools-menu__main:hover {
+  color: var(--sense, #5dde8a);
+  background: color-mix(in srgb, var(--sense, #5dde8a) 12%, transparent);
+}
+
+.desk-tools-menu__main.is-on {
+  color: var(--sense, #5dde8a);
+  background: color-mix(in srgb, var(--sense, #5dde8a) 18%, transparent);
+  border-color: color-mix(in srgb, var(--sense, #5dde8a) 50%, #243049);
+}
+
+.desk-tools-menu__gear {
+  flex: 0 0 2.15rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, #9eb6ff 16%, #243049);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted, #93a0b8);
+  cursor: pointer;
+}
+
+.desk-tools-menu__gear:hover,
+.desk-tools-menu__gear.is-active {
+  color: var(--sense, #5dde8a);
+  border-color: color-mix(in srgb, var(--sense, #5dde8a) 50%, #243049);
+  background: color-mix(in srgb, var(--sense, #5dde8a) 14%, transparent);
 }
 
 .viz-menu {
