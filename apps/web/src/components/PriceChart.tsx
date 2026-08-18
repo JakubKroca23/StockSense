@@ -16,6 +16,7 @@ import {
 import { useThemeRevision } from "@/lib/theme";
 import {
   analyzeLiquidity,
+  applyCumulativeDepth,
   inferTick,
   snapAutoGroup,
   rememberBook,
@@ -32,7 +33,8 @@ import {
   drawFootprintOnChart,
   drawVolumeBarStats,
   fpBandTop,
-  FP_STATS_FRAC,
+  fpOverlayBottom,
+  fpVolumeMargins,
   fmtV,
   DEFAULT_FP_VIZ,
   type FootprintData,
@@ -589,8 +591,9 @@ export function PriceChart({
     const bidLeft = 0;
     const askLeft = halfBook;
     const volLeft = bookW;
+    let barPeak = Math.max(peakShow, 1e-9);
     const widthOf = (size: number, maxW: number) => {
-      const t = Math.pow(Math.min(1, size / peakShow), gamma);
+      const t = Math.pow(Math.min(1, size / barPeak), gamma);
       return Math.max(1.5, maxW * t);
     };
 
@@ -715,6 +718,16 @@ export function PriceChart({
       }
       drawRows = [...merged.values()];
       drawStep = qStep;
+    }
+    if (viz.cumulative) {
+      applyCumulativeDepth(drawRows, mid, drawStep);
+      let viewPeak = 0;
+      for (const r of drawRows) {
+        const y = priceToY(r.price);
+        if (y == null || y < -10 || y > h + 10) continue;
+        viewPeak = Math.max(viewPeak, r.showBid, r.showAsk);
+      }
+      if (viewPeak > 0) barPeak = viewPeak;
     }
 
     const byRest = [...drawRows].sort((a, b) => a.rest - b.rest);
@@ -925,7 +938,8 @@ export function PriceChart({
           const bw = widthOf(Math.max(size, 0), halfBook - 4);
           const colRight = x0 + halfBook;
           const barX = (w: number) => (alignRight ? colRight - 1 - w : x0 + 1);
-          if (flag === "spoof") {
+          const cum = viz.cumulative;
+          if (flag === "spoof" && !cum) {
             const ghost = widthOf(Math.max(r.prevRest, size, 0.0001), halfBook - 4);
             const gx = barX(ghost);
             hatch(dctx, gx, y0, ghost, bh, hexAlpha(spoofCol, 0.45 * opacityMul));
@@ -940,7 +954,7 @@ export function PriceChart({
             }
             return;
           }
-          if (flag === "iceberg") {
+          if (flag === "iceberg" && !cum) {
             const extra = widthOf(size + Math.max(r.implied, size * 0.8), halfBook - 4);
             const ex = barX(extra);
             hatch(dctx, ex, y0, extra, bh, hexAlpha(iceCol, 0.5 * opacityMul));
@@ -958,6 +972,27 @@ export function PriceChart({
             dctx.lineTo(back, y + 3.2);
             dctx.closePath();
             dctx.fill();
+            return;
+          }
+          if (flag === "spoof") {
+            hatch(dctx, barX(bw), y0, bw, bh, hexAlpha(spoofCol, 0.4 * opacityMul));
+            dctx.strokeStyle = hexAlpha(spoofCol, 0.9 * opacityMul);
+            dctx.lineWidth = 1;
+            dctx.setLineDash([2.5, 2]);
+            dctx.strokeRect(barX(bw) + 0.5, y0 + 0.5, Math.max(2, bw - 1), Math.max(1, bh - 1));
+            dctx.setLineDash([]);
+            dctx.fillStyle = hexAlpha(col, 0.4 * opacityMul);
+            dctx.fillRect(barX(bw), y0, bw, bh);
+            return;
+          }
+          if (flag === "iceberg") {
+            const x = barX(bw);
+            hatch(dctx, x, y0, bw, bh, hexAlpha(iceCol, 0.45 * opacityMul));
+            dctx.fillStyle = hexAlpha(col, (0.5 + t * 0.4) * opacityMul);
+            dctx.fillRect(x, y0, bw, bh);
+            dctx.strokeStyle = hexAlpha(iceCol, 0.95 * opacityMul);
+            dctx.lineWidth = 1.2;
+            dctx.strokeRect(x + 0.5, y0 + 0.5, Math.max(2, bw - 1), Math.max(1, bh - 1));
             return;
           }
           if (flag === "wall" || r.rest >= srCut) {
@@ -985,15 +1020,17 @@ export function PriceChart({
           }
         }
         if (bandH >= 9 && halfBook >= 26) {
-          if (r.bid > 0) {
+          const bidLab = viz.cumulative ? r.showBid : r.bid;
+          const askLab = viz.cumulative ? r.showAsk : r.ask;
+          if (bidLab > 0) {
             dctx.textAlign = "right";
             dctx.fillStyle = hexAlpha(theme.up, 0.95);
-            dctx.fillText(fmtV(r.bid), askLeft - 3, y);
+            dctx.fillText(fmtV(bidLab), askLeft - 3, y);
           }
-          if (r.ask > 0) {
+          if (askLab > 0) {
             dctx.textAlign = "left";
             dctx.fillStyle = hexAlpha(theme.down, 0.95);
-            dctx.fillText(fmtV(r.ask), askLeft + 3, y);
+            dctx.fillText(fmtV(askLab), askLeft + 3, y);
           }
         }
         if (bandH >= 9 && hasVol && volColW >= 24) {
@@ -1024,9 +1061,9 @@ export function PriceChart({
       dctx.textBaseline = "middle";
       dctx.textAlign = "left";
       dctx.textAlign = "right";
-      dctx.fillText("Bid", askLeft - 4, 7);
+      dctx.fillText(viz.cumulative ? "Bid Σ" : "Bid", askLeft - 4, 7);
       dctx.textAlign = "left";
-      dctx.fillText("Ask", askLeft + 4, 7);
+      dctx.fillText(viz.cumulative ? "Ask Σ" : "Ask", askLeft + 4, 7);
       if (hasVol) dctx.fillText("Vol", volLeft + 3, 7);
       dctx.font = `700 7px ${theme.font}`;
       let lx = 4;
@@ -1131,7 +1168,7 @@ export function PriceChart({
       rightPriceScale: {
         visible: true,
         borderVisible: false,
-        scaleMargins: { top: 0.06, bottom: showFootprint ? FP_STATS_FRAC : viz.volume ? 0.2 : 0.06 },
+        scaleMargins: { top: 0.06, bottom: fpOverlayBottom(showFootprint, viz.volume) },
         entireTextOnly: true,
         mode: viz.logScale ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
       },
@@ -1182,7 +1219,7 @@ export function PriceChart({
       visible: viz.volume,
     });
     chart.priceScale("volume").applyOptions({
-      scaleMargins: { top: showFootprint ? 1 - FP_STATS_FRAC : viz.volume ? 0.84 : 1, bottom: 0 },
+      scaleMargins: fpVolumeMargins(showFootprint, viz.volume),
       borderVisible: false,
     });
 
@@ -1350,14 +1387,14 @@ export function PriceChart({
         mode: viz.logScale ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
         scaleMargins: {
           top: 0.06,
-          bottom: (showFootprint ? FP_STATS_FRAC : viz.volume ? 0.18 : 0.06) + (viz.rsi ? 0.16 : 0),
+          bottom: fpOverlayBottom(showFootprint, viz.volume) + (viz.rsi ? 0.16 : 0),
         },
       },
     });
     series.applyOptions(candleLook(theme, viz, showFootprint, fpViz?.wicks ?? true));
     volumeRef.current?.applyOptions({ visible: viz.volume });
     chart.priceScale("volume").applyOptions({
-      scaleMargins: { top: showFootprint ? 1 - FP_STATS_FRAC : viz.volume ? 0.84 : 1, bottom: 0 },
+      scaleMargins: fpVolumeMargins(showFootprint, viz.volume),
     });
     closeLineRef.current?.applyOptions({
       visible: viz.style === "line",

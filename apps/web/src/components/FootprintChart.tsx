@@ -275,13 +275,33 @@ export function fmtDelta(n: number) {
   return `${n > 0 ? "+" : "−"}${fmtV(n)}`;
 }
 
-/** Bottom band for candle stats when footprint is on (fraction of chart height). */
-export const FP_STATS_FRAC = 0.26;
+/** Volume histogram band (above stats) when footprint is on. */
+export const FP_VOL_FRAC = 0.13;
+/** Stats table at the bottom edge. */
+export const FP_STATS_FRAC = 0.22;
 
+export function fpOverlayBottom(footprint: boolean, volume: boolean): number {
+  if (footprint) return FP_STATS_FRAC + (volume ? FP_VOL_FRAC : 0);
+  if (volume) return 0.18;
+  return 0.06;
+}
+
+export function fpVolumeMargins(footprint: boolean, volume: boolean): { top: number; bottom: number } {
+  if (footprint && volume) return { top: 1 - FP_VOL_FRAC - FP_STATS_FRAC, bottom: FP_STATS_FRAC };
+  if (volume) return { top: 0.84, bottom: 0 };
+  return { top: 1, bottom: 0 };
+}
+
+/** Top of overlay (volume + stats, or stats only) — footprint/candles clip here. */
 export function fpBandTop(h: number, footprint: boolean, volume = false): number {
-  if (footprint) return Math.round(h * (1 - FP_STATS_FRAC));
+  if (footprint) return Math.round(h * (1 - fpOverlayBottom(true, volume)));
   if (volume) return Math.round(h * 0.84);
   return h;
+}
+
+export function fpStatsTop(h: number, footprint: boolean): number {
+  if (!footprint) return h;
+  return Math.round(h * (1 - FP_STATS_FRAC));
 }
 
 function contrastInk(hex: string, alpha: number): string {
@@ -340,7 +360,24 @@ function candleStatsOf(bars: FootprintBar[]): CandleStats[] {
 
 const STATS_LABELS = ["Vol", "Δ", "MaxΔ", "MinΔ", "CVD"] as const;
 
-/** Aligned candle stats grid in the bottom band. */
+function heatT(value: number, peak: number): number {
+  if (!(peak > 0) || !Number.isFinite(value)) return 0;
+  return Math.min(1, Math.abs(value) / peak);
+}
+
+function volHeat(t: number): { bg: string; ink: string } {
+  const a = 0.2 + t * 0.72;
+  const r = Math.round(36 + t * 196);
+  const g = Math.round(78 + t * 86);
+  const b = Math.round(132 - t * 86);
+  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return {
+    bg: `rgba(${r},${g},${b},${a.toFixed(3)})`,
+    ink: lum * a + 0.05 * (1 - a) > 0.42 ? "#10141c" : "#f3f6ff",
+  };
+}
+
+/** Aligned candle stats grid flush to the bottom edge. Volume histogram sits above. */
 export function drawVolumeBarStats(
   ctx: CanvasRenderingContext2D,
   chart: IChartApi,
@@ -352,45 +389,88 @@ export function drawVolumeBarStats(
   alignTimes?: number[],
   footprintOn = false
 ) {
-  const volTop = fpBandTop(h, footprintOn && !!data?.bars?.length, true);
-  const bandH = h - volTop;
-  if (bandH < 28 || clipRight < 24) return;
+  if (!footprintOn) return;
+  const statsTop = fpStatsTop(h, true);
+  const bandH = h - statsTop;
+  if (bandH < 44 || clipRight < 24) return;
 
   const fpBars = data?.bars?.length ? data.bars : [];
   const stats = fpBars.length ? candleStatsOf(fpBars) : null;
   const spacing = chart.timeScale().options().barSpacing || 9;
-  const colW = Math.max(4, spacing * 0.88);
-  const showAll = colW >= 26;
-  const showCvd = colW >= 16;
-  const showVol = colW >= 10;
-  if (!showVol) return;
+  const colW = Math.max(4, spacing * 0.92);
+  const showText = colW >= 12;
+  if (colW < 5) return;
 
-  const rowH = Math.max(11, Math.min(14, Math.floor((bandH - 4) / 5)));
-  const labW = 30;
+  const labels = stats ? STATS_LABELS : (["Vol"] as const);
+  const nRows = labels.length;
+  const rowH = Math.floor(bandH / nRows);
+  if (rowH < 14) return;
+  const tableH = rowH * nRows;
+  const tableTop = h - tableH;
+  const labW = 46;
+  const fs = Math.max(12, Math.min(16, Math.floor(rowH * 0.58)));
+  const labFs = Math.max(12, Math.min(14, fs));
+
   ctx.save();
   ctx.beginPath();
-  ctx.rect(0, volTop, clipRight, bandH);
+  ctx.rect(0, statsTop, clipRight, bandH);
   ctx.clip();
-  ctx.fillStyle = hexAlpha(theme.bgElevated, 0.72);
-  ctx.fillRect(0, volTop, clipRight, bandH);
-  ctx.strokeStyle = hexAlpha(theme.muted, 0.22);
+  ctx.fillStyle = hexAlpha(theme.bgElevated, 0.92);
+  ctx.fillRect(0, statsTop, clipRight, bandH);
+  ctx.strokeStyle = hexAlpha(theme.muted, 0.28);
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(0, volTop + 0.5);
-  ctx.lineTo(clipRight, volTop + 0.5);
+  ctx.moveTo(0, statsTop + 0.5);
+  ctx.lineTo(clipRight, statsTop + 0.5);
   ctx.stroke();
 
-  ctx.font = `700 9px ${theme.font}`;
-  ctx.textBaseline = "middle";
-  ctx.textAlign = "left";
-  const labels = showAll
-    ? STATS_LABELS
-    : showCvd
-      ? (["Vol", "Δ", "CVD"] as const)
-      : (["Vol", "Δ"] as const);
-  for (let i = 0; i < labels.length; i++) {
-    ctx.fillStyle = hexAlpha(theme.muted, 0.95);
-    ctx.fillText(labels[i], 4, volTop + 3 + rowH * (i + 0.5));
+  const paintLabels = () => {
+    ctx.fillStyle = hexAlpha(theme.bgElevated, 1);
+    ctx.fillRect(0, tableTop, labW, tableH);
+    ctx.font = `700 ${labFs}px ${theme.font}`;
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    for (let i = 0; i < nRows; i++) {
+      ctx.fillStyle = hexAlpha(theme.muted, 0.98);
+      ctx.fillText(labels[i], 6, tableTop + rowH * (i + 0.5));
+      ctx.strokeStyle = hexAlpha(theme.muted, 0.18);
+      ctx.beginPath();
+      ctx.moveTo(0, tableTop + rowH * (i + 1) + 0.5);
+      ctx.lineTo(clipRight, tableTop + rowH * (i + 1) + 0.5);
+      ctx.stroke();
+    }
+  };
+  paintLabels();
+
+  let peakVol = 0;
+  let peakAbsDelta = 0;
+  let peakAbsMax = 0;
+  let peakAbsMin = 0;
+  let peakAbsCvd = 0;
+  const vis = chart.timeScale().getVisibleRange();
+  const from = vis ? Number(vis.from) - 120 : -Infinity;
+  const to = vis ? Number(vis.to) + 120 : Infinity;
+  const n = stats && fpBars.length ? Math.min(fpBars.length, stats.length) : 0;
+  if (stats && n) {
+    for (let i = 0; i < n; i++) {
+      const t = Number(toUnix(fpBars[i].ts));
+      if (t < from || t > to) continue;
+      const st = stats[i];
+      if (st.totalVolume > peakVol) peakVol = st.totalVolume;
+      const ad = Math.abs(st.netDelta);
+      if (ad > peakAbsDelta) peakAbsDelta = ad;
+      const aMax = Math.abs(st.maxDelta);
+      if (aMax > peakAbsMax) peakAbsMax = aMax;
+      const aMin = Math.abs(st.minDelta);
+      if (aMin > peakAbsMin) peakAbsMin = aMin;
+      const aCvd = Math.abs(st.cumulativeDelta);
+      if (aCvd > peakAbsCvd) peakAbsCvd = aCvd;
+    }
+  } else {
+    for (const b of ohlcv) {
+      const v = b.volume ?? 0;
+      if (v > peakVol) peakVol = v;
+    }
   }
 
   const paintAt = (ts: string, st: CandleStats | null, fallbackVol: number) => {
@@ -398,32 +478,52 @@ export function drawVolumeBarStats(
     if (x == null) return;
     const left = x - colW / 2;
     if (left > clipRight || left + colW < labW) return;
-    const mid = left + Math.min(colW, clipRight - left) / 2;
-    if (mid < labW + 4) return;
-    const fs = colW >= 40 ? 9 : colW >= 22 ? 8 : 7;
-    ctx.font = `650 ${fs}px ${theme.font}`;
+    const x0 = Math.max(left, labW);
+    const cellW = Math.min(left + colW, clipRight) - x0;
+    if (cellW < 3) return;
+    const mid = left + colW / 2;
+    const cells: { t: string; bg: string; fg: string }[] = [];
+    if (st) {
+      const vh = volHeat(heatT(st.totalVolume, peakVol));
+      const dA = heatT(st.netDelta, peakAbsDelta);
+      const mxA = heatT(st.maxDelta, peakAbsMax);
+      const mnA = heatT(st.minDelta, peakAbsMin);
+      const cA = heatT(st.cumulativeDelta, peakAbsCvd);
+      const signed = (a: number, pos: boolean) => {
+        const hex = pos ? theme.up : theme.down;
+        const alpha = 0.18 + a * 0.78;
+        return { bg: hexAlpha(hex, alpha), fg: contrastInk(hex, alpha) };
+      };
+      const d = signed(dA, st.netDelta >= 0);
+      const mx = signed(mxA, true);
+      const mn = signed(mnA, false);
+      const cv = signed(cA, st.cumulativeDelta >= 0);
+      cells.push(
+        { t: fmtV(st.totalVolume), bg: vh.bg, fg: vh.ink },
+        { t: fmtDelta(st.netDelta), bg: d.bg, fg: d.fg },
+        { t: fmtDelta(st.maxDelta), bg: mx.bg, fg: mx.fg },
+        { t: fmtDelta(st.minDelta), bg: mn.bg, fg: mn.fg },
+        { t: fmtDelta(st.cumulativeDelta), bg: cv.bg, fg: cv.fg }
+      );
+    } else {
+      const vh = volHeat(heatT(fallbackVol, peakVol));
+      cells.push({ t: fmtV(fallbackVol), bg: vh.bg, fg: vh.ink });
+    }
     ctx.textAlign = "center";
-    const vals: { t: string; c: string }[] = st
-      ? [
-          { t: fmtV(st.totalVolume), c: theme.text },
-          { t: fmtDelta(st.netDelta), c: st.netDelta >= 0 ? theme.up : theme.down },
-          { t: fmtDelta(st.maxDelta), c: theme.up },
-          { t: fmtDelta(st.minDelta), c: theme.down },
-          { t: fmtDelta(st.cumulativeDelta), c: st.cumulativeDelta >= 0 ? theme.up : theme.down },
-        ]
-      : [{ t: fmtV(fallbackVol), c: theme.text }];
-    const pick = showAll ? vals : showCvd ? [vals[0], vals[1], vals[4] || vals[1]] : [vals[0], vals[1]];
-    for (let i = 0; i < pick.length; i++) {
-      ctx.fillStyle = pick[i].c;
-      ctx.fillText(pick[i].t, mid, volTop + 3 + rowH * (i + 0.5), colW - 2);
+    ctx.font = `700 ${fs}px ${theme.font}`;
+    const nPaint = Math.min(cells.length, nRows);
+    for (let i = 0; i < nPaint; i++) {
+      const y = tableTop + rowH * i;
+      ctx.fillStyle = cells[i].bg;
+      ctx.fillRect(x0, y, cellW, rowH);
+      if (showText && mid >= labW + 4) {
+        ctx.fillStyle = cells[i].fg;
+        ctx.fillText(cells[i].t, mid, y + rowH * 0.5, cellW - 4);
+      }
     }
   };
 
   if (fpBars.length && stats) {
-    const vis = chart.timeScale().getVisibleRange();
-    const from = vis ? Number(vis.from) - 120 : -Infinity;
-    const to = vis ? Number(vis.to) + 120 : Infinity;
-    const n = Math.min(fpBars.length, stats.length);
     for (let i = 0; i < n; i++) {
       const t = Number(toUnix(fpBars[i].ts));
       if (t < from || t > to) continue;
@@ -433,6 +533,7 @@ export function drawVolumeBarStats(
     for (const b of ohlcv) paintAt(b.ts, null, b.volume ?? 0);
   }
 
+  paintLabels();
   ctx.restore();
 }
 
@@ -527,6 +628,7 @@ type PrepBar = {
 };
 
 const prepCache = new Map<string, PrepBar>();
+let sessionPeakMemo: { sig: string; peak: number } | null = null;
 
 function prepBar(
   b: FootprintBar,
@@ -631,9 +733,9 @@ export function drawFootprintOnChart(
   const spacing = chart.timeScale().options().barSpacing || 9;
   const body = Math.min(1, Math.max(0.4, viz.bodyWidth ?? 0.9));
   const colW = Math.max(4, spacing * body);
-  const zoomedOut = colW < 14;
-  const showText = viz.numbers && colW >= 16 && !zoomedOut;
-  const fancy = colW >= 14 && !zoomedOut;
+  const zoomedOut = colW < 10;
+  const showText = viz.numbers && colW >= 12 && !zoomedOut;
+  const fancy = colW >= 10;
   const stroke = Math.max(1.1, Math.min(3.4, colW * 0.05 + 0.75));
   const gamma = Math.min(1.45, Math.max(0.28, viz.gamma ?? 0.55));
   const fill = Math.min(1, Math.max(0.2, viz.fill ?? 0.88));
@@ -668,6 +770,17 @@ export function drawFootprintOnChart(
   const to = vis ? Number(vis.to) + padT : null;
 
   let sessionPeak = 0;
+  if (!perCandle) {
+    const last = bars[bars.length - 1];
+    const sig = `${bars.length}:${last?.ts}:${last?.volume}:${last?.delta}:${view}:${groupN}`;
+    if (sessionPeakMemo?.sig === sig) sessionPeak = sessionPeakMemo.peak;
+    else {
+      for (const b of bars) {
+        for (const lvl of b.levels || []) sessionPeak = Math.max(sessionPeak, levelPeak(lvl, view));
+      }
+      sessionPeakMemo = { sig, peak: sessionPeak };
+    }
+  }
   const grouped: PrepBar[] = [];
   for (const b of bars) {
     if (from != null && to != null) {
@@ -678,15 +791,10 @@ export function drawFootprintOnChart(
     sessionPeak = Math.max(sessionPeak, prep.localPeak);
     grouped.push({ ...prep, bar: b });
   }
-  if (!perCandle && sessionPeak <= 0) {
-    for (const b of bars) {
-      for (const lvl of b.levels || []) sessionPeak = Math.max(sessionPeak, levelPeak(lvl, view));
-    }
-  }
   if (sessionPeak <= 0 && grouped.length === 0) return;
 
-  const allowText = showText && grouped.length <= 90;
-  const allowFancy = fancy && grouped.length <= 90;
+  const allowText = showText && grouped.length <= 140;
+  const allowFancy = fancy && grouped.length <= 140;
   let textCells = 0;
   const MAX_TEXT_CELLS = 900;
 
@@ -771,10 +879,16 @@ export function drawFootprintOnChart(
         else if (lvl.delta >= 0) ctx.fillRect(midX, top, bw, drawH);
         else ctx.fillRect(midX - bw, top, bw, drawH);
       } else if (hist) {
+        const sellW = Math.max(0, half * sellT);
+        const buyW = Math.max(0, half * buyT);
         ctx.fillStyle = hexAlpha(sellCol, sellA);
-        ctx.fillRect(midX - Math.max(0, half * sellT), top, Math.max(0, half * sellT), drawH);
+        if (histAlign === "left") ctx.fillRect(left, top, sellW, drawH);
+        else if (histAlign === "center") ctx.fillRect(left + (half - sellW) / 2, top, sellW, drawH);
+        else ctx.fillRect(midX - sellW, top, sellW, drawH);
         ctx.fillStyle = hexAlpha(buyCol, buyA);
-        ctx.fillRect(midX, top, Math.max(0, half * buyT), drawH);
+        if (histAlign === "left") ctx.fillRect(midX, top, buyW, drawH);
+        else if (histAlign === "center") ctx.fillRect(midX + (half - buyW) / 2, top, buyW, drawH);
+        else ctx.fillRect(midX, top, buyW, drawH);
       } else {
         ctx.fillStyle = hexAlpha(sellCol, sellA);
         ctx.fillRect(left, top, half, drawH);
@@ -849,7 +963,7 @@ export function drawFootprintOnChart(
       if (allowText && drawH >= fontPx + 1 && textCells < MAX_TEXT_CELLS) {
         textCells += 1;
         ctx.font = `${isImbBid || isImbAsk ? 750 : 650} ${fontPx}px ${theme.font}`;
-        const useShadow = viz.textShadow === true && colW >= 28 && drawH >= 14;
+        const useShadow = viz.textShadow === true;
         if (useShadow) {
           ctx.shadowColor = "rgba(0,0,0,0.85)";
           ctx.shadowBlur = 2;
@@ -980,7 +1094,7 @@ export function FootprintChart({
     ctx.clearRect(0, 0, w, h);
     const snap = dataRef.current;
     if (!snap.bars.length) return;
-    const bandTop = fpBandTop(h, true, true);
+    const bandTop = fpBandTop(h, true, false);
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, 0, w - 68, bandTop);
@@ -1023,7 +1137,7 @@ export function FootprintChart({
       },
       rightPriceScale: {
         borderVisible: false,
-        scaleMargins: { top: 0.04, bottom: 0.06 },
+        scaleMargins: { top: 0.04, bottom: FP_STATS_FRAC },
         entireTextOnly: true,
       },
       leftPriceScale: { visible: false },

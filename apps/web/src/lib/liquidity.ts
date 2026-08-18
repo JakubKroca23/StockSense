@@ -440,6 +440,30 @@ export function snapAutoGroup(pxPerTick: number): number {
   return opts.find((n) => n >= need) || 50;
 }
 
+type CumRow = { price: number; bid: number; ask: number; showBid: number; showAsk: number };
+
+/** Running depth from the spread: bids down from mid, asks up. Mutates showBid/showAsk. */
+export function applyCumulativeDepth(rows: CumRow[], mid: number, step: number): void {
+  for (const r of rows) {
+    r.showBid = 0;
+    r.showAsk = 0;
+  }
+  if (!(step > 0) || !rows.length) return;
+  const pad = step * 0.51;
+  const bids = rows.filter((r) => r.bid > 0 && r.price <= mid + pad).sort((a, b) => b.price - a.price);
+  const asks = rows.filter((r) => r.ask > 0 && r.price >= mid - pad).sort((a, b) => a.price - b.price);
+  let acc = 0;
+  for (const r of bids) {
+    acc += r.bid;
+    r.showBid = acc;
+  }
+  acc = 0;
+  for (const r of asks) {
+    acc += r.ask;
+    r.showAsk = acc;
+  }
+}
+
 export function analyzeLiquidity(opts: {
   levels: HeatmapLevel[];
   viz: HeatVizSettings;
@@ -499,23 +523,6 @@ export function analyzeLiquidity(opts: {
   }
   if (!rows.length) return null;
 
-  if (viz.cumulative) {
-    const bids = rows.filter((r) => r.bid > 0).sort((a, b) => b.price - a.price);
-    const asks = rows.filter((r) => r.ask > 0).sort((a, b) => a.price - b.price);
-    let acc = 0;
-    for (const r of bids) {
-      if (r.price > mid) continue;
-      acc += r.bid;
-      r.showBid = acc;
-    }
-    acc = 0;
-    for (const r of asks) {
-      if (r.price < mid) continue;
-      acc += r.ask;
-      r.showAsk = acc;
-    }
-  }
-
   const rests = rows.map((r) => r.rest).sort((a, b) => a - b);
   const med = medianOf(rests);
   const noisePct = Math.min(0.6, Math.max(0, viz.noisePct));
@@ -527,6 +534,8 @@ export function analyzeLiquidity(opts: {
   const visRests = visible.map((r) => r.rest).sort((a, b) => a - b);
   const wallCut = mixedSizeCut(visRests, wallPct, volW);
   const srCut = mixedSizeCut(visRests, Math.min(0.995, wallPct + 0.08), volW);
+
+  if (viz.cumulative) applyCumulativeDepth(visible, mid, step);
 
   let peakShow = 0;
   let peakRest = 0;

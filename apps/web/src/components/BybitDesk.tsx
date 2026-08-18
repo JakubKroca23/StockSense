@@ -5,7 +5,8 @@ import { createPortal } from "react-dom";
 import { apiFetch, apiWsUrl } from "@/lib/api";
 import { PriceChart, type ChartBar, type HeatmapLevel, type HeatVizSettings, type ChartVizSettings, DEFAULT_HEAT_VIZ, DEFAULT_DESK_CHART_VIZ } from "@/components/PriceChart";
 import { HeaderExtra } from "@/components/HeaderExtra";
-import { type FootprintData, type FpVizSettings, DEFAULT_FP_VIZ, fmtV } from "@/components/FootprintChart";
+import { type FootprintData, type FpVizSettings, DEFAULT_FP_VIZ } from "@/components/FootprintChart";
+import { FootprintSettingsPanel } from "@/components/FootprintSettingsPanel";
 import { type OrderBookData } from "@/components/OrderBookPanel";
 import { TradesTapePanel, type TradesTapeData } from "@/components/TradesTapePanel";
 import { LiquidityPanel } from "@/components/LiquidityPanel";
@@ -426,6 +427,7 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
   const bookSrcRef = useRef<HeatmapLevel[] | null>(null);
   const [heatOpacity, setHeatOpacity] = useState(0.55);
   const [footprint, , setFootprint] = usePersistedOpen(`${DESK_STORE}-fp`, false);
+  const [fpSettingsOpen, , setFpSettingsOpen] = usePersistedOpen(`${DESK_STORE}-fp-settings`, false);
   const [fpData, setFpData] = useState<FootprintData | null>(null);
   const [heatViz, setHeatViz, resetHeatViz] = usePersistedJson<HeatVizSettings>(
     `${DESK_STORE}-l2-viz`,
@@ -979,438 +981,24 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
             >
               FP
             </button>
-            <VizMenu title="Footprint" ariaLabel="Nastavení vizualizace footprintu" wide>
-              <p className="viz-menu__sec">Buňky</p>
-              <VizRow label="Velikost" value={`${chartViz.barSpacing} px`}>
-                <input
-                  type="range"
-                  min={8}
-                  max={72}
-                  value={chartViz.barSpacing}
-                  onChange={(e) => setChartViz({ barSpacing: Number(e.target.value) })}
-                />
-              </VizRow>
-              <div className="viz-menu__row">
-                <span className="viz-menu__lab">Barva</span>
-                <div className="viz-menu__seg">
-                  {(
-                    [
-                      ["bidAsk", "B×A"],
-                      ["volume", "Vol"],
-                      ["delta", "Δ"],
-                    ] as const
-                  ).map(([id, lab]) => (
-                    <button
-                      key={id}
-                      type="button"
-                      className={`chart-chip chart-chip--soft ${fpViz.view === id ? "is-active" : ""}`}
-                      onClick={() => setFpViz({ view: id })}
-                    >
-                      {lab}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="viz-menu__row">
-                <span className="viz-menu__lab">
-                  Škála
-                  <span className="muted">{fpViz.scale === "session" ? "relace" : "svíčka"}</span>
-                </span>
-                <div className="viz-menu__seg">
-                  {(
-                    [
-                      ["candle", "Svíčka"],
-                      ["session", "Relace"],
-                    ] as const
-                  ).map(([id, lab]) => (
-                    <button
-                      key={id}
-                      type="button"
-                      className={`chart-chip chart-chip--soft ${(fpViz.scale || "candle") === id ? "is-active" : ""}`}
-                      onClick={() => setFpViz({ scale: id })}
-                    >
-                      {lab}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="viz-menu__row">
-                <span className="viz-menu__lab">Histogram</span>
-                <div className="viz-menu__seg">
-                  {(
-                    [
-                      ["split", "Split"],
-                      ["left", "Vlevo"],
-                      ["center", "Střed"],
-                    ] as const
-                  ).map(([id, lab]) => (
-                    <button
-                      key={id}
-                      type="button"
-                      className={`chart-chip chart-chip--soft ${(fpViz.histAlign || "split") === id ? "is-active" : ""}`}
-                      onClick={() => setFpViz({ histAlign: id, histogram: true })}
-                    >
-                      {lab}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <VizRow label="Tick group" value={`×${fpViz.tickGroup || 1}`}>
-                <input
-                  type="range"
-                  min={1}
-                  max={20}
-                  value={fpViz.tickGroup || 1}
-                  onChange={(e) => setFpViz({ tickGroup: Number(e.target.value) })}
-                />
-              </VizRow>
-              <div className="viz-menu__seg" style={{ margin: "-0.25rem 0 0.55rem" }}>
-                {([1, 2, 5, 10, 20] as const).map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    className={`chart-chip chart-chip--soft ${fpViz.tickGroup === n ? "is-active" : ""}`}
-                    onClick={() => setFpViz({ tickGroup: n })}
-                  >
-                    {n}
-                  </button>
-                ))}
-              </div>
-              <label className="viz-menu__check">
-                <input
-                  type="checkbox"
-                  checked={!!fpViz.histogram}
-                  onChange={(e) => setFpViz({ histogram: e.target.checked })}
-                />
-                Volume profil šířkou
-              </label>
-              <label className="viz-menu__check">
-                <input
-                  type="checkbox"
-                  checked={!!fpViz.showZeros}
-                  onChange={(e) => setFpViz({ showZeros: e.target.checked })}
-                />
-                Prázdné ticky (nuly)
-              </label>
-              <label className="viz-menu__check">
-                <input
-                  type="checkbox"
-                  checked={!!fpViz.cellGrid}
-                  onChange={(e) => setFpViz({ cellGrid: e.target.checked })}
-                />
-                Mřížka buněk
-              </label>
-              <VizRow label="Šířka clusteru" value={`${Math.round((fpViz.bodyWidth ?? 0.9) * 100)}%`}>
-                <input
-                  type="range"
-                  min={40}
-                  max={100}
-                  value={Math.round((fpViz.bodyWidth ?? 0.9) * 100)}
-                  onChange={(e) => setFpViz({ bodyWidth: Number(e.target.value) / 100 })}
-                />
-              </VizRow>
-              <VizRow label="Mezera buněk" value={`${(fpViz.cellGap ?? 0.4).toFixed(1)} px`}>
-                <input
-                  type="range"
-                  min={0}
-                  max={40}
-                  value={Math.round((fpViz.cellGap ?? 0.4) * 10)}
-                  onChange={(e) => setFpViz({ cellGap: Number(e.target.value) / 10 })}
-                />
-              </VizRow>
-              <VizRow label="Min. volume" value={fpViz.minVolume <= 0 ? "vyp" : fmtV(fpViz.minVolume)}>
-                <input
-                  type="range"
-                  min={0}
-                  max={80}
-                  value={Math.min(80, Math.round(fpViz.minVolume || 0))}
-                  onChange={(e) => setFpViz({ minVolume: Number(e.target.value) })}
-                />
-              </VizRow>
-
-              <p className="viz-menu__sec">Čísla</p>
-              <label className="viz-menu__check">
-                <input
-                  type="checkbox"
-                  checked={fpViz.numbers}
-                  onChange={(e) => setFpViz({ numbers: e.target.checked })}
-                />
-                Zobrazit čísla
-              </label>
-              <div className="viz-menu__row">
-                <span className="viz-menu__lab">Obsah</span>
-                <div className="viz-menu__seg">
-                  {(
-                    [
-                      ["auto", "Auto"],
-                      ["bidAsk", "B×A"],
-                      ["volume", "Vol"],
-                      ["delta", "Δ"],
-                    ] as const
-                  ).map(([id, lab]) => (
-                    <button
-                      key={id}
-                      type="button"
-                      className={`chart-chip chart-chip--soft ${(fpViz.numberMode || "auto") === id ? "is-active" : ""}`}
-                      onClick={() => setFpViz({ numberMode: id, numbers: true })}
-                    >
-                      {lab}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <label className="viz-menu__check">
-                <input
-                  type="checkbox"
-                  checked={!!fpViz.numberBySide}
-                  onChange={(e) => setFpViz({ numberBySide: e.target.checked })}
-                />
-                Barva podle strany
-              </label>
-              <label className="viz-menu__check">
-                <input
-                  type="checkbox"
-                  checked={fpViz.textShadow !== false}
-                  onChange={(e) => setFpViz({ textShadow: e.target.checked })}
-                />
-                Stín textu
-              </label>
-              <VizRow label="Velikost písma" value={`${Math.round((fpViz.fontScale ?? 1) * 100)}%`}>
-                <input
-                  type="range"
-                  min={55}
-                  max={190}
-                  value={Math.round((fpViz.fontScale ?? 1) * 100)}
-                  onChange={(e) => setFpViz({ fontScale: Number(e.target.value) / 100 })}
-                />
-              </VizRow>
-              <VizRow
-                label="Skrýt malá čísla"
-                value={fpViz.numberMin <= 0 ? "vyp" : fmtV(fpViz.numberMin)}
-              >
-                <input
-                  type="range"
-                  min={0}
-                  max={50}
-                  value={Math.min(50, Math.round(fpViz.numberMin || 0))}
-                  onChange={(e) => setFpViz({ numberMin: Number(e.target.value) })}
-                />
-              </VizRow>
-
-              <p className="viz-menu__sec">Markery</p>
-              <div className="viz-menu__checks">
-                <label className="viz-menu__check">
-                  <input
-                    type="checkbox"
-                    checked={fpViz.poc}
-                    onChange={(e) => setFpViz({ poc: e.target.checked })}
-                  />
-                  POC
-                </label>
-                <label className="viz-menu__check">
-                  <input
-                    type="checkbox"
-                    checked={!!fpViz.valueArea}
-                    onChange={(e) => setFpViz({ valueArea: e.target.checked })}
-                  />
-                  Value area
-                </label>
-                <label className="viz-menu__check">
-                  <input
-                    type="checkbox"
-                    checked={fpViz.lvn !== false}
-                    onChange={(e) => setFpViz({ lvn: e.target.checked })}
-                  />
-                  LVN
-                </label>
-                <label className="viz-menu__check">
-                  <input
-                    type="checkbox"
-                    checked={!!fpViz.hvn}
-                    onChange={(e) => setFpViz({ hvn: e.target.checked })}
-                  />
-                  HVN
-                </label>
-                <label className="viz-menu__check">
-                  <input
-                    type="checkbox"
-                    checked={fpViz.unfinished}
-                    onChange={(e) => setFpViz({ unfinished: e.target.checked })}
-                  />
-                  Unfinished
-                </label>
-                <label className="viz-menu__check">
-                  <input
-                    type="checkbox"
-                    checked={fpViz.wicks}
-                    onChange={(e) => setFpViz({ wicks: e.target.checked })}
-                  />
-                  Knoty
-                </label>
-                <label className="viz-menu__check">
-                  <input
-                    type="checkbox"
-                    checked={!!fpViz.candleDelta}
-                    onChange={(e) => setFpViz({ candleDelta: e.target.checked })}
-                  />
-                  Δ svíčky
-                </label>
-                <label className="viz-menu__check">
-                  <input
-                    type="checkbox"
-                    checked={!!fpViz.candleVolume}
-                    onChange={(e) => setFpViz({ candleVolume: e.target.checked })}
-                  />
-                  Vol svíčky
-                </label>
-              </div>
-              <div className="viz-menu__row">
-                <span className="viz-menu__lab">POC styl</span>
-                <div className="viz-menu__seg">
-                  {(
-                    [
-                      ["box", "Rám"],
-                      ["fill", "Výplň"],
-                      ["both", "Obojí"],
-                    ] as const
-                  ).map(([id, lab]) => (
-                    <button
-                      key={id}
-                      type="button"
-                      className={`chart-chip chart-chip--soft ${(fpViz.pocStyle || "box") === id ? "is-active" : ""}`}
-                      onClick={() => setFpViz({ pocStyle: id, poc: true })}
-                    >
-                      {lab}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <VizRow label="LVN práh" value={`${Math.round((fpViz.lvnPct ?? 0.2) * 100)}%`}>
-                <input
-                  type="range"
-                  min={5}
-                  max={50}
-                  value={Math.round((fpViz.lvnPct ?? 0.2) * 100)}
-                  onChange={(e) => setFpViz({ lvnPct: Number(e.target.value) / 100, lvn: true })}
-                />
-              </VizRow>
-              <VizRow label="HVN práh" value={`${Math.round((fpViz.hvnPct ?? 0.75) * 100)}%`}>
-                <input
-                  type="range"
-                  min={50}
-                  max={95}
-                  value={Math.round((fpViz.hvnPct ?? 0.75) * 100)}
-                  onChange={(e) => setFpViz({ hvnPct: Number(e.target.value) / 100, hvn: true })}
-                />
-              </VizRow>
-              <VizRow label="UA velikost" value={`${Math.round((fpViz.uaScale ?? 1) * 100)}%`}>
-                <input
-                  type="range"
-                  min={50}
-                  max={160}
-                  value={Math.round((fpViz.uaScale ?? 1) * 100)}
-                  onChange={(e) => setFpViz({ uaScale: Number(e.target.value) / 100, unfinished: true })}
-                />
-              </VizRow>
-
-              <p className="viz-menu__sec">Imbalance</p>
-              <p className="viz-menu__hint">Diagonálně: bid na P vs ask na P+tick (≥ poměr).</p>
-              <VizRow
-                label="Poměr"
-                value={fpViz.imbalance <= 0 ? "vyp" : `${fpViz.imbalance.toFixed(1)}×`}
-              >
-                <input
-                  type="range"
-                  min={0}
-                  max={80}
-                  value={Math.round(fpViz.imbalance * 10)}
-                  onChange={(e) => setFpViz({ imbalance: Number(e.target.value) / 10 })}
-                />
-              </VizRow>
-              <VizRow
-                label="Stack"
-                value={fpViz.imbalanceStack <= 1 ? "1 tick" : `${fpViz.imbalanceStack} tick`}
-              >
-                <input
-                  type="range"
-                  min={1}
-                  max={8}
-                  value={fpViz.imbalanceStack || 3}
-                  onChange={(e) => setFpViz({ imbalanceStack: Number(e.target.value) })}
-                />
-              </VizRow>
-              <VizRow label="Výplň stacku" value={`${Math.round((fpViz.imbFill ?? 0.18) * 100)}%`}>
-                <input
-                  type="range"
-                  min={0}
-                  max={50}
-                  value={Math.round((fpViz.imbFill ?? 0.18) * 100)}
-                  onChange={(e) => setFpViz({ imbFill: Number(e.target.value) / 100 })}
-                />
-              </VizRow>
-
-              <p className="viz-menu__sec">Vzhled</p>
-              <div className="viz-menu__colors">
-                {(
-                  [
-                    ["buyColor", "Buy / ask"],
-                    ["sellColor", "Sell / bid"],
-                    ["numberColor", "Čísla"],
-                    ["pocColor", "POC"],
-                    ["lvnColor", "LVN"],
-                    ["hvnColor", "HVN"],
-                    ["uaColor", "UA"],
-                    ["vaColor", "Value area"],
-                    ["imbAskColor", "Imb ask"],
-                    ["imbBidColor", "Imb bid"],
-                  ] as const
-                ).map(([key, lab]) => (
-                  <label key={key} className="viz-menu__color">
-                    <span>{lab}</span>
-                    <input
-                      type="color"
-                      value={fpViz[key] || DEFAULT_FP_VIZ[key]}
-                      onChange={(e) => setFpViz({ [key]: e.target.value } as Partial<FpVizSettings>)}
-                    />
-                  </label>
-                ))}
-              </div>
-              <VizRow
-                label="Kontrast"
-                value={`${Math.round(((1.45 - (fpViz.gamma ?? 0.55)) / (1.45 - 0.28)) * 100)}`}
-              >
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={Math.round(((1.45 - (fpViz.gamma ?? 0.55)) / (1.45 - 0.28)) * 100)}
-                  onChange={(e) =>
-                    setFpViz({ gamma: 1.45 - (Number(e.target.value) / 100) * (1.45 - 0.28) })
+            <button
+              type="button"
+              className={`chart-chip chart-chip--soft ${fpSettingsOpen ? "is-active" : ""}`}
+              onClick={() => {
+                setFpSettingsOpen((open) => {
+                  const next = !open;
+                  if (next) {
+                    setFootprint(true);
+                    if (chartViz.barSpacing < 20) setChartViz({ barSpacing: 24 });
                   }
-                />
-              </VizRow>
-              <VizRow label="Výplň" value={`${Math.round((fpViz.fill ?? 0.88) * 100)}%`}>
-                <input
-                  type="range"
-                  min={20}
-                  max={100}
-                  value={Math.round((fpViz.fill ?? 0.88) * 100)}
-                  onChange={(e) => setFpViz({ fill: Number(e.target.value) / 100 })}
-                />
-              </VizRow>
-              <VizRow label="Pozadí buněk" value={`${Math.round((fpViz.cellBg ?? 0.28) * 100)}%`}>
-                <input
-                  type="range"
-                  min={0}
-                  max={70}
-                  value={Math.round((fpViz.cellBg ?? 0.28) * 100)}
-                  onChange={(e) => setFpViz({ cellBg: Number(e.target.value) / 100 })}
-                />
-              </VizRow>
-              <button type="button" className="viz-menu__reset" onClick={resetFpViz}>
-                Výchozí
-              </button>
-            </VizMenu>
+                  return next;
+                });
+              }}
+              aria-pressed={fpSettingsOpen}
+              title="Nastavení footprintu — panel vpravo, zůstane otevřený"
+            >
+              FP nastavení
+            </button>
           </div>
         </div>
       </HeaderExtra>
@@ -1421,7 +1009,7 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
         </p>
       )}
 
-      <div className="oil-page__desk">
+      <div className={`oil-page__desk${fpSettingsOpen ? " is-fp-settings" : ""}`}>
       <section className="card instrument-chart gold-page__chart">
         <div className="instrument-chart__stage crypto-chart-stage gold-page__chart-pane">
           {data?.bars?.length ? (
@@ -1465,6 +1053,19 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
         </div>
       </section>
       <div className="oil-page__ob-side">
+        {fpSettingsOpen ? (
+          <div className="oil-page__panel oil-page__panel--fp">
+            <FootprintSettingsPanel
+              viz={fpViz}
+              onChange={setFpViz}
+              onReset={resetFpViz}
+              barSpacing={chartViz.barSpacing}
+              onBarSpacing={(n) => setChartViz({ barSpacing: n })}
+              onClose={() => setFpSettingsOpen(false)}
+            />
+          </div>
+        ) : (
+          <>
         <div className={`oil-page__panel ${liqOpen ? "" : "is-collapsed"}`}>
           <LiquidityPanel
             snapshot={liqSnap}
@@ -1491,6 +1092,8 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
             onBlockSize={(n) => setTapeViz({ blockSize: n })}
           />
         </div>
+          </>
+        )}
       </div>
       </div>
     </div>

@@ -315,6 +315,7 @@ export function LiquidityPanel({
           />
           Kumulativní hloubka
         </label>
+        <p className="liq-panel__hint">Pruh = součet od trhu až sem. Čísla i šířka podle viditelného rozsahu.</p>
         <button type="button" className="viz-menu__reset" onClick={onReset}>
           Výchozí
         </button>
