@@ -1,33 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch, apiWsUrl } from "@/lib/api";
-import { PriceChart, type ChartBar, type HeatmapLevel, type HeatVizSettings, type ChartVizSettings, DEFAULT_HEAT_VIZ, DEFAULT_DESK_CHART_VIZ } from "@/components/PriceChart";
-import { HeaderExtra } from "@/components/HeaderExtra";
-import {
-  IconDraw,
-  IconFootprint,
-  IconLiq,
-  IconSettings,
-  IconTape,
-  IconTools,
-} from "@/components/NavIcons";
-import { type FootprintData, type FpVizSettings, DEFAULT_FP_VIZ } from "@/components/FootprintChart";
-import { FootprintSettingsPanel } from "@/components/FootprintSettingsPanel";
-import { ChartSettingsPanel } from "@/components/ChartSettingsPanel";
-import { LiquiditySettingsPanel } from "@/components/LiquiditySettingsPanel";
-import { TapeSettingsPanel } from "@/components/TapeSettingsPanel";
-import { type OrderBookData } from "@/components/OrderBookPanel";
+import { PriceChart, type ChartBar } from "@/components/PriceChart";
+import { HeaderExtra, HeaderQuote } from "@/components/HeaderExtra";
+import { IconDraw } from "@/components/NavIcons";
+import { OrderBookPanel, type OrderBookData } from "@/components/OrderBookPanel";
 import { TradesTapePanel, type TradesTapeData } from "@/components/TradesTapePanel";
-import { LiquidityPanel } from "@/components/LiquidityPanel";
-import { analyzeLiquidity, rememberBook, clampBookLimit, type BookMem } from "@/lib/liquidity";
-import {
-  levelsFromWireBars,
-  type SessionProfile,
-} from "@/lib/orderflow";
 import type { ChartDrawing, DrawTool } from "@/lib/chart";
 import type { LinearDeskInfo } from "@/lib/desks";
+import { useChartViz } from "@/lib/chartViz";
 
 type DeskChartResponse = {
   symbol: string;
@@ -47,18 +30,14 @@ type DeskChartResponse = {
 export type BybitDeskConfig = LinearDeskInfo;
 
 const DESK_STORE = "stocksense-desk";
-const DEFAULT_TAPE_VIZ = { smart: true, blockSize: 0 };
 const DEFAULT_DRAWINGS = { items: [] as ChartDrawing[] };
-const DRAWER_W_MIN = 280;
-const DRAWER_W_MAX = 640;
-type DeskDrawer = "chart" | "fp" | "liq" | "tape" | null;
 
 const TIMEFRAMES = [
   { id: "1s", label: "1 S", defaultLookback: "1h" },
-  { id: "1m", label: "1 M", defaultLookback: "1d" },
-  { id: "5m", label: "5 M", defaultLookback: "5d" },
-  { id: "15m", label: "15 M", defaultLookback: "5d" },
-  { id: "30m", label: "30 M", defaultLookback: "1mo" },
+  { id: "1m", label: "1 m", defaultLookback: "1d" },
+  { id: "5m", label: "5 m", defaultLookback: "5d" },
+  { id: "15m", label: "15 m", defaultLookback: "5d" },
+  { id: "30m", label: "30 m", defaultLookback: "1mo" },
   { id: "1h", label: "1 H", defaultLookback: "1mo" },
   { id: "4h", label: "4 H", defaultLookback: "3mo" },
   { id: "1d", label: "D", defaultLookback: "6mo" },
@@ -67,7 +46,7 @@ const TIMEFRAMES = [
 
 const LOOKBACKS_BY_TF: Record<string, { id: string; label: string }[]> = {
   "1s": [
-    { id: "15m", label: "15 M" },
+    { id: "15m", label: "15 m" },
     { id: "1h", label: "1 H" },
     { id: "4h", label: "4 H" },
   ],
@@ -210,7 +189,9 @@ function HeaderPick({
   useLayoutEffect(() => {
     if (!open || !btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
-    setPos({ top: r.bottom, left: r.left });
+    const header = document.querySelector(".app-header");
+    const headerBottom = header?.getBoundingClientRect().bottom ?? r.bottom;
+    setPos({ top: headerBottom + 8, left: r.left });
   }, [open]);
 
   return (
@@ -225,9 +206,6 @@ function HeaderPick({
         onClick={() => setOpen((v) => !v)}
       >
         {label}
-        <span className="header-desk__tf-caret" aria-hidden>
-          ▾
-        </span>
       </button>
       {open &&
         createPortal(
@@ -251,125 +229,6 @@ function HeaderPick({
                 {opt.label}
               </button>
             ))}
-          </div>,
-          document.body
-        )}
-    </>
-  );
-}
-
-function ToolsMenu({
-  footprint,
-  tapeOn,
-  liqOn,
-  drawer,
-  onToggleFp,
-  onToggleTape,
-  onToggleLiq,
-  onOpenSettings,
-}: {
-  footprint: boolean;
-  tapeOn: boolean;
-  liqOn: boolean;
-  drawer: DeskDrawer;
-  onToggleFp: () => void;
-  onToggleTape: () => void;
-  onToggleLiq: () => void;
-  onOpenSettings: (kind: "fp" | "tape" | "liq") => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-  const anyOn = footprint || tapeOn || liqOn;
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    const onPtr = (e: PointerEvent) => {
-      const t = e.target;
-      if (!(t instanceof Node)) return;
-      if (btnRef.current?.contains(t) || menuRef.current?.contains(t)) return;
-      setOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("pointerdown", onPtr);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("pointerdown", onPtr);
-    };
-  }, [open]);
-
-  useLayoutEffect(() => {
-    if (!open || !btnRef.current) return;
-    const r = btnRef.current.getBoundingClientRect();
-    setPos({ top: r.bottom + 4, left: r.left });
-  }, [open]);
-
-  const row = (
-    id: "fp" | "tape" | "liq",
-    on: boolean,
-    label: string,
-    icon: ReactNode,
-    toggle: () => void
-  ) => (
-    <div className="desk-tools-menu__row">
-      <button
-        type="button"
-        className={`desk-tools-menu__main ${on ? "is-on" : ""}`}
-        onClick={toggle}
-        aria-pressed={on}
-        aria-label={on ? `Vypnout ${label}` : `Zapnout ${label}`}
-        title={on ? `Vypnout ${label}` : `Zapnout ${label}`}
-      >
-        {icon}
-      </button>
-      <button
-        type="button"
-        className={`desk-tools-menu__gear ${drawer === id ? "is-active" : ""}`}
-        onClick={() => {
-          onOpenSettings(id);
-          setOpen(false);
-        }}
-        aria-label={`Nastavení: ${label}`}
-        title={`Nastavení: ${label}`}
-      >
-        <IconSettings size={15} />
-      </button>
-    </div>
-  );
-
-  return (
-    <>
-      <button
-        ref={btnRef}
-        type="button"
-        className={`chart-chip chart-chip--soft chart-chip--icon ${open || anyOn ? "is-active" : ""}`}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="Nástroje"
-        title="Nástroje"
-        onClick={() => setOpen((v) => !v)}
-      >
-        <IconTools size={18} />
-        <span className="header-desk__tf-caret" aria-hidden>
-          ▾
-        </span>
-      </button>
-      {open &&
-        createPortal(
-          <div
-            ref={menuRef}
-            className="tf-menu desk-tools-menu"
-            role="menu"
-            aria-label="Nástroje"
-            style={{ top: pos.top, left: pos.left }}
-          >
-            {row("fp", footprint, "Footprint", <IconFootprint size={18} />, onToggleFp)}
-            {row("tape", tapeOn, "Tape", <IconTape size={18} />, onToggleTape)}
-            {row("liq", liqOn, "Likvidita", <IconLiq size={18} />, onToggleLiq)}
           </div>,
           document.body
         )}
@@ -414,35 +273,6 @@ function usePersistedJson<T extends object>(key: string, fallback: T) {
   return [value, update, reset] as const;
 }
 
-function usePersistedOpen(key: string, fallback = true) {
-  const [open, setOpen] = useState(fallback);
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(key);
-      if (raw === "0") setOpen(false);
-      if (raw === "1") setOpen(true);
-    } catch {
-      /* ignore */
-    }
-  }, [key]);
-  const set = useCallback(
-    (next: boolean | ((v: boolean) => boolean)) => {
-      setOpen((v) => {
-        const val = typeof next === "function" ? next(v) : next;
-        try {
-          window.localStorage.setItem(key, val ? "1" : "0");
-        } catch {
-          /* ignore */
-        }
-        return val;
-      });
-    },
-    [key]
-  );
-  const toggle = useCallback(() => set((v) => !v), [set]);
-  return [open, toggle, set] as const;
-}
-
 export function BybitDesk({ config }: { config: BybitDeskConfig }) {
   const apiBase = `/desk/${config.id}`;
   const loadError = `Načtení ${config.fallbackSymbol} selhalo`;
@@ -454,36 +284,14 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
   const [lookback, setLookback] = useState("1d");
   const [live, setLive] = useState(false);
   const [tradesTape, setTradesTape] = useState<TradesTapeData | null>(null);
-  const [tapeOpen, toggleTape] = usePersistedOpen(`${DESK_STORE}-tape`, true);
-  const [liqOpen, toggleLiq] = usePersistedOpen(`${DESK_STORE}-liq`, true);
-  const [showHeatmap, , setShowHeatmap] = usePersistedOpen(`${DESK_STORE}-heat`, true);
-  const [heatmapLevels, setHeatmapLevels] = useState<HeatmapLevel[]>([]);
-  const bookMemRef = useRef<BookMem>(new Map());
-  const bookSrcRef = useRef<HeatmapLevel[] | null>(null);
-  const [heatOpacity, setHeatOpacity] = useState(0.55);
-  const [footprint, , setFootprint] = usePersistedOpen(`${DESK_STORE}-fp`, false);
-  const [drawer, setDrawer] = useState<DeskDrawer>(null);
-  const [drawerW, setDrawerW] = useState(360);
+  const [orderBook, setOrderBook] = useState<OrderBookData | null>(null);
   const [drawBarOpen, setDrawBarOpen] = useState(false);
-  const [fpData, setFpData] = useState<FootprintData | null>(null);
-  const [heatViz, setHeatViz, resetHeatViz] = usePersistedJson<HeatVizSettings>(
-    `${DESK_STORE}-l2-viz`,
-    DEFAULT_HEAT_VIZ
-  );
-  const [fpViz, setFpViz, resetFpViz] = usePersistedJson<FpVizSettings>(
-    `${DESK_STORE}-fp-viz`,
-    DEFAULT_FP_VIZ
-  );
-  const [chartViz, setChartViz, resetChartViz] = usePersistedJson<ChartVizSettings>(
-    `${DESK_STORE}-chart-viz`,
-    DEFAULT_DESK_CHART_VIZ
-  );
+  const { viz: chartViz } = useChartViz();
   const [drawingsStore, setDrawingsStore] = usePersistedJson<{ items: ChartDrawing[] }>(
     `${DESK_STORE}-draw-${config.id}`,
     DEFAULT_DRAWINGS
   );
   const [drawTool, setDrawTool] = useState<DrawTool>("none");
-  const [tapeViz, setTapeViz] = usePersistedJson(`${DESK_STORE}-tape-viz`, DEFAULT_TAPE_VIZ);
 
   const [deskPrefsReady, setDeskPrefsReady] = useState(false);
 
@@ -491,7 +299,6 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
     try {
       const tfRaw = window.localStorage.getItem(`${DESK_STORE}-tf`);
       const lbRaw = window.localStorage.getItem(`${DESK_STORE}-lb`);
-      const alpha = window.localStorage.getItem(`${DESK_STORE}-alpha`);
       const tfOk = TIMEFRAMES.some((t) => t.id === tfRaw) ? tfRaw! : "1m";
       const allowed = LOOKBACKS_BY_TF[tfOk] || LOOKBACKS_BY_TF["1d"];
       const tfMeta = TIMEFRAMES.find((t) => t.id === tfOk);
@@ -500,48 +307,20 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
         : tfMeta?.defaultLookback || "1d";
       setTimeframe(tfOk);
       setLookback(lbOk);
-      if (alpha) {
-        const n = Number(alpha);
-        if (Number.isFinite(n)) setHeatOpacity(Math.min(1, Math.max(0.15, n)));
-      }
-      const dw = window.localStorage.getItem(`${DESK_STORE}-drawer-w`);
-      if (dw) {
-        const w = Number(dw);
-        if (Number.isFinite(w)) setDrawerW(Math.min(DRAWER_W_MAX, Math.max(DRAWER_W_MIN, w)));
-      }
     } catch {
       /* ignore */
     }
     setDeskPrefsReady(true);
   }, []);
 
-  const applyHeatLevels = useCallback((res: OrderBookData) => {
-    const priceMap = new Map<number, { bid: number; ask: number }>();
-    for (const lvl of res.bids || []) {
-      if (!lvl || !(lvl.price > 0)) continue;
-      priceMap.set(lvl.price, { bid: lvl.amount || 0, ask: 0 });
-    }
-    for (const lvl of res.asks || []) {
-      if (!lvl || !(lvl.price > 0)) continue;
-      const cur = priceMap.get(lvl.price) || { bid: 0, ask: 0 };
-      cur.ask = lvl.amount || 0;
-      priceMap.set(lvl.price, cur);
-    }
-    if (!priceMap.size) return;
-    setHeatmapLevels(
-      [...priceMap.entries()].map(([price, v]) => ({ price, bid: v.bid, ask: v.ask }))
-    );
-  }, []);
-
   const loadOrderBook = useCallback(async () => {
       try {
-        const limit = clampBookLimit(heatViz.bookLimit);
-        const res = await apiFetch<OrderBookData>(`${apiBase}/orderbook?limit=${limit}`);
-        applyHeatLevels(res);
+        const res = await apiFetch<OrderBookData>(`${apiBase}/orderbook?limit=200`);
+        setOrderBook(res);
       } catch {
         /* keep last book */
       }
-    }, [applyHeatLevels, apiBase, heatViz.bookLimit]);
+    }, [apiBase]);
 
   const loadTrades = useCallback(async () => {
     try {
@@ -587,48 +366,6 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
     const id = window.setInterval(() => void loadTrades(), 1500);
     return () => window.clearInterval(id);
   }, [loadTrades]);
-
-  useEffect(() => {
-    if (!deskPrefsReady) return;
-    let cancelled = false;
-    const iv = timeframe;
-    const lb = lookback;
-    const tick = async () => {
-      try {
-        const res = await apiFetch<FootprintData>(
-          `${apiBase}/footprint?interval=${encodeURIComponent(iv)}&lookback=${encodeURIComponent(lb)}`
-        );
-        if (cancelled) return;
-        setFpData((prev) => {
-          const a = prev?.bars[prev.bars.length - 1];
-          const b = res.bars[res.bars.length - 1];
-          if (
-            prev &&
-            prev.interval === res.interval &&
-            prev.tick === res.tick &&
-            prev.bars.length === res.bars.length &&
-            a &&
-            b &&
-            a.ts === b.ts &&
-            a.volume === b.volume &&
-            a.delta === b.delta &&
-            a.close === b.close
-          ) {
-            return prev;
-          }
-          return res;
-        });
-      } catch {
-        /* keep last */
-      }
-    };
-    void tick();
-    const id = window.setInterval(() => void tick(), footprint ? 1000 : 4000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, [deskPrefsReady, footprint, timeframe, lookback, apiBase]);
 
   useEffect(() => {
     if (loading || !data?.source?.startsWith("bybit")) return;
@@ -740,180 +477,68 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
     }
   }, [deskPrefsReady, timeframe, lookback]);
 
-  useEffect(() => {
-    try {
-      if (window.localStorage.getItem(`${DESK_STORE}-vol-stats`) === "1") return;
-      window.localStorage.setItem(`${DESK_STORE}-vol-stats`, "1");
-      setChartViz({ volume: true });
-    } catch {
-      /* ignore */
-    }
-  }, [setChartViz]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(`${DESK_STORE}-alpha`, String(heatOpacity));
-    } catch {
-      /* ignore */
-    }
-  }, [heatOpacity]);
-
   const up = (data?.change_pct ?? data?.change_pct_window ?? 0) >= 0;
   const ranges = LOOKBACKS_BY_TF[timeframe] || LOOKBACKS_BY_TF["1d"];
   const tfLabel = TIMEFRAMES.find((t) => t.id === timeframe)?.label ?? timeframe;
   const lbLabel = ranges.find((r) => r.id === lookback)?.label ?? lookback;
-  const lastClose = data?.bars?.length
-    ? data.bars[data.bars.length - 1].close
-    : data?.price ?? 0;
-  const session: SessionProfile | null = useMemo(() => {
-    if (!fpData?.bars.length) return null;
-    const tick = (fpData.tick || config.tick) * (fpViz.tickGroup || 1);
-    return levelsFromWireBars(fpData.bars, tick);
-  }, [fpData, fpViz.tickGroup, config.tick]);
-
-  const liqSnap = useMemo(() => {
-    const sessionVol = new Map((session?.rows || []).map((r) => [r.price, r.totalVolume]));
-    const snap = analyzeLiquidity({
-      levels: heatmapLevels,
-      viz: heatViz,
-      tick: config.tick,
-      lastClose: lastClose || 0,
-      sessionVol,
-      bookMem: bookMemRef.current,
-      tape: tradesTape?.trades,
-      fpBars: fpData?.bars,
-    });
-    if (snap && bookSrcRef.current !== heatmapLevels) {
-      bookMemRef.current = rememberBook(bookMemRef.current, snap.rows);
-      bookSrcRef.current = heatmapLevels;
-    }
-    return snap;
-  }, [heatmapLevels, heatViz, config.tick, lastClose, session, fpData, tradesTape]);
-
-  const drawerOpen = drawer != null;
-  const sideOpen = drawerOpen || tapeOpen || liqOpen;
-  const drawerWRef = useRef(drawerW);
-  drawerWRef.current = drawerW;
-
-  const toggleDrawer = (kind: Exclude<DeskDrawer, null>) => {
-    setDrawer((d) => (d === kind ? null : kind));
-  };
-
-  const onDrawerResizeDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const startX = e.clientX;
-    const startW = drawerWRef.current;
-    const el = e.currentTarget;
-    el.setPointerCapture(e.pointerId);
-    const onMove = (ev: PointerEvent) => {
-      const next = Math.min(DRAWER_W_MAX, Math.max(DRAWER_W_MIN, startW + (startX - ev.clientX)));
-      drawerWRef.current = next;
-      setDrawerW(next);
-    };
-    const onUp = () => {
-      el.removeEventListener("pointermove", onMove);
-      el.removeEventListener("pointerup", onUp);
-      try {
-        window.localStorage.setItem(`${DESK_STORE}-drawer-w`, String(drawerWRef.current));
-      } catch {
-        /* ignore */
-      }
-    };
-    el.addEventListener("pointermove", onMove);
-    el.addEventListener("pointerup", onUp);
-  };
-
-  const closeDrawer = () => setDrawer(null);
 
   return (
     <div className="gold-page oil-page">
+      <HeaderQuote>
+        <p className="header-desk__quote">
+          <span className="header-desk__px-row">
+            <span className="cryptosense__px">{fmtPrice(data?.price, config.priceDigits)}</span>
+            <span className={`cryptosense__chg ${up ? "is-up" : "is-down"}`}>
+              {fmtPct(data?.change_pct ?? data?.change_pct_window)}
+            </span>
+          </span>
+          <span className={`header-desk__live${live ? " is-on" : ""}`} title={config.liveTitle}>
+            <span className="header-desk__live-dot" aria-hidden />
+            live
+            <span className="header-desk__venue">
+              {orderBook?.execution_exchange || tradesTape?.execution_exchange || "bybit"}
+            </span>
+          </span>
+        </p>
+      </HeaderQuote>
       <HeaderExtra>
         <div className="header-desk">
           <div className="header-desk__tools">
-            <button
-              type="button"
-              className={`chart-chip chart-chip--soft chart-chip--icon ${drawBarOpen ? "is-active" : ""}`}
-              onClick={() => {
-                setDrawBarOpen((open) => {
-                  const next = !open;
-                  if (!next) setDrawTool("none");
-                  return next;
-                });
-              }}
-              aria-pressed={drawBarOpen}
-              aria-label="Kreslení"
-              title="Kreslení"
-            >
-              <IconDraw size={18} />
-            </button>
-            <button
-              type="button"
-              className={`chart-chip chart-chip--soft chart-chip--icon ${drawer === "chart" ? "is-active" : ""}`}
-              onClick={() => toggleDrawer("chart")}
-              aria-pressed={drawer === "chart"}
-              aria-label="Nastavení grafu"
-              title="Nastavení grafu"
-            >
-              <IconSettings size={18} />
-            </button>
-            <HeaderPick
-              label={tfLabel}
-              ariaLabel="Timeframe"
-              value={timeframe}
-              options={TIMEFRAMES.map((t) => ({ id: t.id, label: t.label }))}
-              onSelect={selectTimeframe}
-            />
-            <HeaderPick
-              label={lbLabel}
-              ariaLabel="Období"
-              value={lookback}
-              options={ranges}
-              onSelect={setLookback}
-            />
-            <ToolsMenu
-              footprint={footprint}
-              tapeOn={tapeOpen}
-              liqOn={liqOpen}
-              drawer={drawer}
-              onToggleFp={() =>
-                setFootprint((v) => {
-                  if (!v && chartViz.barSpacing < 20) setChartViz({ barSpacing: 24 });
-                  return !v;
-                })
-              }
-              onToggleTape={() => toggleTape()}
-              onToggleLiq={() => toggleLiq()}
-              onOpenSettings={(kind) => {
-                if (kind === "fp") {
-                  setFootprint(true);
-                  if (chartViz.barSpacing < 20) setChartViz({ barSpacing: 24 });
-                }
-                setDrawer((d) => (d === kind ? null : kind));
-              }}
-            />
-          </div>
-          <div className="header-desk__id">
-            <p className="header-desk__title">{config.title}</p>
-            <p className="header-desk__quote">
-              <span className="badge">{data?.symbol || config.fallbackSymbol}</span>
-              {live && (
-                <span className="header-desk__live" title={config.liveTitle}>
-                  <span className="header-desk__live-dot" aria-hidden />
-                  live
-                </span>
-              )}
-              <span className="cryptosense__px">{fmtPrice(data?.price, config.priceDigits)}</span>
-              <span className={`cryptosense__chg ${up ? "is-up" : "is-down"}`}>
-                {fmtPct(data?.change_pct ?? data?.change_pct_window)}
-              </span>
-              {data && (
-                <span className="header-desk__bars">
-                  {data.interval} · {data.lookback} · {data.bars_count}
-                  {data.source?.includes("ticks") ? " · tick" : ""}
-                </span>
-              )}
-            </p>
+            <div className="header-desk__sec" role="group" aria-label="Timeframe">
+              <HeaderPick
+                label={tfLabel}
+                ariaLabel="Timeframe"
+                value={timeframe}
+                options={TIMEFRAMES.map((t) => ({ id: t.id, label: t.label }))}
+                onSelect={selectTimeframe}
+              />
+              <HeaderPick
+                label={lbLabel}
+                ariaLabel="Období"
+                value={lookback}
+                options={ranges}
+                onSelect={setLookback}
+              />
+            </div>
+            <span className="header-desk__div" aria-hidden />
+            <div className="header-desk__sec" role="group" aria-label="Kreslení">
+              <button
+                type="button"
+                className={`chart-chip chart-chip--soft chart-chip--icon ${drawBarOpen ? "is-active" : ""}`}
+                onClick={() => {
+                  setDrawBarOpen((open) => {
+                    const next = !open;
+                    if (!next) setDrawTool("none");
+                    return next;
+                  });
+                }}
+                aria-pressed={drawBarOpen}
+                aria-label="Kreslení"
+                title="Kreslení"
+              >
+                <IconDraw size={18} />
+              </button>
+            </div>
           </div>
         </div>
       </HeaderExtra>
@@ -924,10 +549,7 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
         </p>
       )}
 
-      <div
-        className={`oil-page__desk${drawerOpen ? " is-drawer" : ""}${sideOpen ? "" : " is-side-off"}`}
-        style={drawerOpen ? ({ "--desk-drawer-w": `${drawerW}px` } as CSSProperties) : undefined}
-      >
+      <div className="oil-page__desk">
       <section className="card instrument-chart gold-page__chart">
         <div className="instrument-chart__stage crypto-chart-stage gold-page__chart-pane">
           {data?.bars?.length ? (
@@ -939,19 +561,6 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
                   showMa={false}
                   showVolume={chartViz.volume}
                   secondsVisible={timeframe === "1m" || timeframe === "1s"}
-                  heatmapLevels={heatmapLevels}
-                  showHeatmap={showHeatmap}
-                  heatOpacity={heatOpacity}
-                  heatViz={heatViz}
-                  tick={config.tick}
-                  priceDigits={config.priceDigits}
-                  session={session}
-                  onProfileWidthChange={(frac) => setHeatViz({ profileWidth: frac })}
-                  showFootprint={footprint}
-                  footprintData={fpData}
-                  tapePrints={tradesTape?.trades ?? null}
-                  fpViz={fpViz}
-                  onFpVizChange={setFpViz}
                   chartViz={chartViz}
                   drawTool={drawTool}
                   drawings={drawingsStore.items}
@@ -1014,81 +623,14 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
           ) : null}
         </div>
       </section>
-      {sideOpen ? (
       <div className="oil-page__ob-side">
-        {drawerOpen ? (
-          <div
-            className="desk-drawer-handle"
-            onPointerDown={onDrawerResizeDown}
-            title="Šířka panelu"
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="Šířka nastavení"
-          />
-        ) : null}
-        {drawer === "chart" ? (
-          <div className="oil-page__panel oil-page__panel--fp">
-            <ChartSettingsPanel
-              viz={chartViz}
-              onChange={setChartViz}
-              onReset={resetChartViz}
-              onClose={closeDrawer}
-            />
-          </div>
-        ) : drawer === "fp" ? (
-          <div className="oil-page__panel oil-page__panel--fp">
-            <FootprintSettingsPanel
-              viz={fpViz}
-              onChange={setFpViz}
-              onReset={resetFpViz}
-              barSpacing={chartViz.barSpacing}
-              onBarSpacing={(n) => setChartViz({ barSpacing: n })}
-              onClose={closeDrawer}
-            />
-          </div>
-        ) : drawer === "liq" ? (
-          <div className="oil-page__panel oil-page__panel--fp">
-            <LiquiditySettingsPanel
-              showHeatmap={showHeatmap}
-              onToggleHeatmap={(on) => setShowHeatmap(on)}
-              heatViz={heatViz}
-              onHeatViz={setHeatViz}
-              onReset={resetHeatViz}
-              heatOpacity={heatOpacity}
-              onOpacity={setHeatOpacity}
-              onClose={closeDrawer}
-            />
-          </div>
-        ) : drawer === "tape" ? (
-          <div className="oil-page__panel oil-page__panel--fp">
-            <TapeSettingsPanel
-              smart={tapeViz.smart}
-              blockSize={tapeViz.blockSize}
-              onSmart={(on) => setTapeViz({ smart: on })}
-              onBlockSize={(n) => setTapeViz({ blockSize: n })}
-              onClose={closeDrawer}
-            />
-          </div>
-        ) : (
-          <>
-            {liqOpen ? (
-              <div className="oil-page__panel">
-                <LiquidityPanel snapshot={liqSnap} priceDigits={config.priceDigits} />
-              </div>
-            ) : null}
-            {tapeOpen ? (
-              <div className="oil-page__panel">
-                <TradesTapePanel
-                  tape={tradesTape}
-                  smart={tapeViz.smart}
-                  blockSize={tapeViz.blockSize}
-                />
-              </div>
-            ) : null}
-          </>
-        )}
+            <div className="oil-page__panel">
+              <OrderBookPanel book={orderBook} priceDigits={config.priceDigits} />
+            </div>
+            <div className="oil-page__panel">
+              <TradesTapePanel tape={tradesTape} />
+            </div>
       </div>
-      ) : null}
       </div>
     </div>
   );

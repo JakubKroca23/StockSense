@@ -6,22 +6,18 @@ type Props = {
   viz: ChartVizSettings;
   onChange: (patch: Partial<ChartVizSettings>) => void;
   onReset: () => void;
-  onClose: () => void;
 };
 
-export function ChartSettingsPanel({ viz, onChange, onReset, onClose }: Props) {
+export function ChartSettingsPanel({ viz, onChange, onReset }: Props) {
   return (
-    <aside className="fp-drawer" aria-label="Nastavení grafu">
-      <header className="fp-drawer__head">
+    <section className="settings-block">
+      <div className="settings-block__head">
         <div>
-          <p className="fp-drawer__title">Graf</p>
-          <p className="fp-drawer__sub">Vzhled svíček, mřížka, indikátory a měřítko.</p>
+          <h2>Graf</h2>
+          <p className="settings-block__sub">Vzhled svíček, mřížka, indikátory a měřítko.</p>
         </div>
-        <button type="button" className="fp-drawer__close" onClick={onClose}>
-          Zavřít
-        </button>
-      </header>
-      <div className="fp-drawer__body">
+      </div>
+      <div className="settings-chart">
         <section className="fp-drawer__sec">
           <h3>Vzhled</h3>
           <p className="fp-drawer__lead">Jak se kreslí cena a kříž.</p>
@@ -122,7 +118,7 @@ export function ChartSettingsPanel({ viz, onChange, onReset, onClose }: Props) {
 
         <section className="fp-drawer__sec">
           <h3>Indikátory</h3>
-          <p className="fp-drawer__lead">Čáry přes graf. Volume histogram je dole nad tabulkou footprintu.</p>
+          <p className="fp-drawer__lead">Čáry přes graf. Volume histogram je pod svíčkami.</p>
           <label className="fp-drawer__toggle">
             <input type="checkbox" checked={viz.sma20} onChange={(e) => onChange({ sma20: e.target.checked })} />
             <span>
@@ -162,7 +158,7 @@ export function ChartSettingsPanel({ viz, onChange, onReset, onClose }: Props) {
               <span>Šířka svíček</span>
               <span className="fp-drawer__item-val">{viz.barSpacing} px</span>
             </div>
-            <p className="fp-drawer__hint">Širší sloupec = víc místa na footprint čísla.</p>
+            <p className="fp-drawer__hint">Širší svíčky, méně jich vejde na obrazovku.</p>
             <input
               type="range"
               min={4}
@@ -191,6 +187,6 @@ export function ChartSettingsPanel({ viz, onChange, onReset, onClose }: Props) {
           Výchozí
         </button>
       </div>
-    </aside>
+    </section>
   );
 }

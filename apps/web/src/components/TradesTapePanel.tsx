@@ -1,8 +1,5 @@
 "use client";
 
-import { useMemo } from "react";
-import { buildSmartTape, type SmartPrint, type TradeTick } from "@/lib/orderflow";
-
 export type TradePrint = {
   id: string;
   ts: string;
@@ -53,43 +50,21 @@ function fmtTime(ts: number) {
   }
 }
 
-function toTick(t: TradePrint): TradeTick {
-  return {
-    id: `${t.exchange}-${t.id}-${t.ts_ms}`,
-    ts: t.ts_ms,
-    price: t.price,
-    size: t.amount,
-    aggressorSide: t.side,
-  };
-}
-
 export function TradesTapePanel({
   tape,
   collapsed = false,
   onToggle,
-  smart = true,
-  blockSize = 0,
 }: {
   tape: TradesTapeData | null;
   collapsed?: boolean;
   onToggle?: () => void;
-  smart?: boolean;
-  blockSize?: number;
 }) {
-  const prints = useMemo<SmartPrint[]>(() => {
-    if (!tape?.trades.length) return [];
-    return buildSmartTape(tape.trades.map(toTick), { smart, blockSize });
-  }, [tape, smart, blockSize]);
-
-  const visible = useMemo(
-    () => (blockSize > 0 ? prints.filter((p) => p.size >= blockSize) : prints),
-    [prints, blockSize]
-  );
+  const prints = tape?.trades ?? [];
 
   const title = (
     <p className="trades-tape__title">
       {onToggle ? <span className="desk-panel__caret">{collapsed ? "▸" : "▾"}</span> : null}
-      Tape
+      Historie
     </p>
   );
 
@@ -103,8 +78,7 @@ export function TradesTapePanel({
       {title}
       {!collapsed && tape && (
         <p className="muted text-xs">
-          {tape.exchanges.join(" + ")} · {visible.length}
-          {smart ? " smart" : " prints"}
+          {tape.exchanges.join(" + ")} · {prints.length}
         </p>
       )}
     </button>
@@ -113,7 +87,7 @@ export function TradesTapePanel({
       {title}
       {tape && (
         <p className="muted text-xs">
-          {tape.exchanges.join(" + ")} · {visible.length}
+          {tape.exchanges.join(" + ")} · {prints.length}
         </p>
       )}
     </div>
@@ -128,7 +102,7 @@ export function TradesTapePanel({
     );
   }
 
-  const maxAmt = Math.max(...visible.map((t) => t.size), 0.0001);
+  const maxAmt = Math.max(...prints.map((t) => t.amount), 0.0001);
   const buyShare =
     tape.buy_volume + tape.sell_volume > 0
       ? tape.buy_volume / (tape.buy_volume + tape.sell_volume)
@@ -161,27 +135,22 @@ export function TradesTapePanel({
           </div>
 
           <div className="trades-tape__list">
-            {visible.map((t) => {
-              const w = Math.max(8, Math.min(100, (t.size / maxAmt) * 100));
+            {prints.map((t) => {
+              const w = Math.max(8, Math.min(100, (t.amount / maxAmt) * 100));
               return (
                 <div
-                  key={t.id}
-                  className={`trades-tape__row is-${t.aggressorSide}${t.block ? " is-block" : ""}`}
+                  key={`${t.exchange}-${t.id}-${t.ts_ms}`}
+                  className={`trades-tape__row is-${t.side}`}
                 >
                   <span className="trades-tape__bar" style={{ width: `${w}%` }} aria-hidden />
-                  <span className="trades-tape__time">{fmtTime(t.ts)}</span>
+                  <span className="trades-tape__time">{fmtTime(t.ts_ms)}</span>
                   <span className="trades-tape__px">{fmtPrice(t.price)}</span>
-                  <span className="trades-tape__amt">
-                    {fmtAmt(t.size)}
-                    {t.count > 1 ? <span className="trades-tape__n">×{t.count}</span> : null}
-                  </span>
+                  <span className="trades-tape__amt">{fmtAmt(t.amount)}</span>
                 </div>
               );
             })}
-            {!visible.length && (
-              <p className="muted text-sm px-1 py-2">
-                {blockSize > 0 ? "Žádné block trady nad prahem." : "Žádné recent trady."}
-              </p>
+            {!prints.length && (
+              <p className="muted text-sm px-1 py-2">Žádné recent trady.</p>
             )}
           </div>
         </>

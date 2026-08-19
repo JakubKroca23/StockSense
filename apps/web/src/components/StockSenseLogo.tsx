@@ -1,14 +1,6 @@
 import Image from "next/image";
 
-const STOCK_LETTERS = [
-  { ch: "S", rotate: -8 },
-  { ch: "T", rotate: 6 },
-  { ch: "O", rotate: -4 },
-  { ch: "C", rotate: 9 },
-  { ch: "K", rotate: -6 },
-] as const;
-
-/** StockSense wordmark — oko + pootočený STOCK + sense v rámečku */
+/** StockSense mark — jen oko */
 export function StockSenseLogo({
   className = "",
   height = 36,
@@ -18,15 +10,12 @@ export function StockSenseLogo({
   height?: number;
   title?: string;
 }) {
-  const eyeH = Math.round(height * 0.7);
-  const eyeW = Math.round(eyeH * (229 / 108));
-  const stockSize = Math.round(height * 0.46);
-  const gap = Math.round(height * 0.1);
+  const eyeW = Math.round(height * (229 / 108));
 
   return (
     <span
       className={`brand-logo__mark inline-flex items-center ${className}`}
-      style={{ height, gap }}
+      style={{ height }}
       role="img"
       aria-label={title}
     >
@@ -34,24 +23,10 @@ export function StockSenseLogo({
         src="/logo-eye-transparent.png"
         alt=""
         width={eyeW}
-        height={eyeH}
+        height={height}
         className="brand-logo__eye"
         priority
       />
-      <span className="brand-logo__word" style={{ fontSize: stockSize }}>
-        <span className="brand-logo__stock">
-          {STOCK_LETTERS.map(({ ch, rotate }) => (
-            <span
-              key={`${ch}-${rotate}`}
-              className="brand-logo__stock-letter"
-              style={{ transform: `rotate(${rotate}deg)` }}
-            >
-              {ch}
-            </span>
-          ))}
-        </span>
-        <span className="brand-logo__sense">sense</span>
-      </span>
     </span>
   );
 }

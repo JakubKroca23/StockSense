@@ -5,19 +5,17 @@ import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { StockSenseLogo } from "@/components/StockSenseLogo";
 import { SettingsPanel } from "@/components/SettingsPanel";
-import { HeaderExtraSlot } from "@/components/HeaderExtra";
+import { HeaderExtraSlot, HeaderQuoteSlot } from "@/components/HeaderExtra";
 import {
   IconClose,
   IconDesk,
-  IconMenu,
-  IconMoon,
   IconSettings,
-  IconSun,
   RAIL_ICON_SIZE,
   NAV_ICON_SIZE,
   navIcons,
 } from "@/components/NavIcons";
 import { applyTheme, ColorMode, getStoredTheme } from "@/lib/theme";
+import { ChartVizProvider } from "@/lib/chartViz";
 import { LINEAR_DESKS, deskHref } from "@/lib/desks";
 
 const links: { href: string; label: string }[] = [
@@ -93,12 +91,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [desktop, setDesktop] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [theme, setTheme] = useState<ColorMode>(() => getStoredTheme());
+  const [theme, setTheme] = useState<ColorMode>("dark");
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
   useLockPageZoom();
 
   useEffect(() => {
-    applyTheme(getStoredTheme());
+    const stored = getStoredTheme();
+    setTheme(stored);
+    applyTheme(stored);
     try {
       setRailCollapsed(window.localStorage.getItem(RAIL_KEY) === "1");
     } catch {
@@ -151,11 +151,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setMenuOpen((v) => !v);
   }
 
+  function setThemeMode(mode: ColorMode) {
+    setTheme(mode);
+    applyTheme(mode);
+  }
+
+  const current = links.find((l) => isActive(pathname, l.href));
+  const CurrentIcon = current ? navIcons[current.href] ?? IconDesk : null;
+
   return (
+    <ChartVizProvider>
     <div
       className={`app-shell min-h-screen pb-8 ${menuOpen ? "is-menu-open" : ""} ${
         railCollapsed ? "is-rail-collapsed" : ""
-      }`}
+      }${settingsOpen ? " is-settings-open" : ""}`}
     >
       <header className="app-header sticky top-0 z-40">
         <div className="app-header__inner">
@@ -176,29 +185,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               title="Menu"
               onClick={toggleNav}
             >
-              {menuOpen ? <IconClose size={22} /> : <IconMenu size={22} />}
+              <StockSenseLogo height={28} />
             </button>
-            <Link href="/" className="brand-logo shrink-0" aria-label="StockSense">
-              <StockSenseLogo height={36} />
-            </Link>
+            {current && CurrentIcon ? (
+              <span className="header-symbol-stack">
+                <span className="header-symbol">
+                  <CurrentIcon size={20} />
+                  <span className="header-symbol__name">{current.label}</span>
+                </span>
+                <HeaderQuoteSlot />
+              </span>
+            ) : null}
           </div>
 
           <HeaderExtraSlot />
-
           <div className="app-header__actions app-no-drag">
-            <button
-              type="button"
-              className="theme-toggle"
-              aria-label={theme === "light" ? "Přepnout na tmavý režim" : "Přepnout na světlý režim"}
-              title={theme === "light" ? "Tmavý režim" : "Světlý režim"}
-              onClick={() => {
-                const next = theme === "light" ? "dark" : "light";
-                setTheme(next);
-                applyTheme(next);
-              }}
-            >
-              {theme === "light" ? <IconMoon size={22} /> : <IconSun size={22} />}
-            </button>
             <button
               type="button"
               className={`settings-gear ${settingsOpen ? "settings-gear--active" : ""}`}
@@ -210,7 +211,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 setSettingsOpen((v) => !v);
               }}
             >
-              <IconSettings size={22} />
+              <IconSettings size={18} />
             </button>
           </div>
         </div>
@@ -251,27 +252,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </Link>
               );
             })}
-            <button
-              type="button"
-              className={`app-rail__link app-rail__link--settings ${settingsOpen ? "is-active" : ""}`}
-              title="Nastavení"
-              onClick={() => {
-                setMenuOpen(false);
-                setSettingsOpen(true);
-              }}
-            >
-              <span className="nav-item">
-                <IconSettings size={RAIL_ICON_SIZE} />
-                <span className="nav-item__label">Nastavení</span>
-              </span>
-            </button>
           </nav>
         </div>
       </aside>
 
       <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
 
-      <SettingsPanel open={settingsOpen} onClose={closeSettings} />
+      <SettingsPanel
+        open={settingsOpen}
+        onClose={closeSettings}
+        theme={theme}
+        onThemeChange={setThemeMode}
+      />
     </div>
+    </ChartVizProvider>
   );
 }
