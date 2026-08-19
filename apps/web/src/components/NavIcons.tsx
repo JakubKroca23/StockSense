@@ -1,5 +1,6 @@
 import Image from "next/image";
 import type { ReactNode } from "react";
+import type { LayoutIconId } from "@/lib/workspace";
 
 type IconProps = { size?: number; className?: string };
 
@@ -168,6 +169,26 @@ export function IconMoon(p: IconProps) {
   );
 }
 
+/** Přidat layout */
+export function IconPlus(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M12 5v14M5 12h14" />
+    </Svg>
+  );
+}
+
+/** Uložit layout */
+export function IconSave(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M5 3h11.2L21 7.8V21H5V3Z" />
+      <path d="M8 3v5.2h8V3" />
+      <path d="M8 21v-7.2h8V21" />
+    </Svg>
+  );
+}
+
 /** Kreslení — tužka */
 export function IconDraw(p: IconProps) {
   return (
@@ -233,4 +254,17 @@ export const navIcons: Record<string, (p: IconProps) => ReactNode> = {
   "/oil": IconOil,
   "/desk/gold": IconGold,
   "/gold": IconGold,
+};
+
+export const LAYOUT_ICONS: Record<LayoutIconId, (p: IconProps) => ReactNode> = {
+  desk: IconDesk,
+  btc: IconBtc,
+  oil: IconOil,
+  gold: IconGold,
+  book: IconBook,
+  tape: IconTape,
+  dom: IconDom,
+  footprint: IconFootprint,
+  draw: IconDraw,
+  home: IconHome,
 };

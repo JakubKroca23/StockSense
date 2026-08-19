@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
-import { DEFAULT_DESK_CHART_VIZ, type ChartVizSettings } from "@/components/PriceChart";
+import { DEFAULT_DESK_CHART_VIZ, normalizeChartViz, type ChartVizSettings } from "@/components/PriceChart";
 
 const KEY = "stocksense-desk-chart-viz";
 
@@ -22,7 +22,7 @@ export function ChartVizProvider({ children }: { children: ReactNode }) {
       if (!raw) return;
       const parsed = JSON.parse(raw) as Partial<ChartVizSettings>;
       if (parsed && typeof parsed === "object") {
-        setVizState({ ...DEFAULT_DESK_CHART_VIZ, ...parsed });
+        setVizState(normalizeChartViz(parsed));
       }
     } catch {
       /* ignore */

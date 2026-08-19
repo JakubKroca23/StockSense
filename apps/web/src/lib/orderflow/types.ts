@@ -31,10 +31,41 @@ export type FootprintData = {
 };
 
 /** What each footprint cell prints. */
-export type FootprintCellMode = "bidask" | "delta" | "volume" | "profile";
+export type FootprintCellMode =
+  | "bidask"
+  | "delta"
+  | "volume"
+  | "profile"
+  | "bidask-ladder"
+  | "bidask-profile"
+  | "delta-ladder"
+  | "delta-profile";
+
+export type FootprintImbalanceHighlight = "all" | "stacked";
 
 /** What drives the cell background intensity. */
 export type FootprintHeatMode = "volume" | "delta" | "off";
+
+export type FootprintCandlePosition = "off" | "left" | "center" | "right";
+export type FootprintProfileSide = "off" | "left" | "right" | "both";
+export type ProfileRange = "visible" | "all" | "day" | "hour" | "custom";
+
+/** Histogram overlay — independent from footprint / TPO. */
+export type VolumeProfileSettings = {
+  tickGroup: number;
+  profileWidth: number;
+  rowHeight: number;
+  showHistogram: boolean;
+  showPoc: boolean;
+  showValueArea: boolean;
+  valueAreaPct: number;
+  profileRange: ProfileRange;
+  profileSessionMinutes: number;
+  upColor?: string;
+  downColor?: string;
+  pocColor?: string;
+  vaColor?: string;
+};
 
 export type OrderflowSettings = {
   cellMode: FootprintCellMode;
@@ -45,6 +76,10 @@ export type OrderflowSettings = {
   rowHeight: number;
   showText: boolean;
   showCandle: boolean;
+  /** OHLC wick: edge of the column, or between bid and ask. */
+  candlePosition: FootprintCandlePosition;
+  /** Volume-profile histogram relative to the candle. */
+  profileSide: FootprintProfileSide;
   showPoc: boolean;
   extendPoc: boolean;
   pocLineStyle: "solid" | "dashed" | "dotted";
@@ -53,6 +88,8 @@ export type OrderflowSettings = {
   showValueArea: boolean;
   valueAreaPct: number;
   showImbalance: boolean;
+  /** Highlight every imbalance cell, or only those that belong to a stacked run. */
+  imbalanceHighlight: FootprintImbalanceHighlight;
   /** Diagonal Bid(P) vs Ask(P+1) dominance in percent. 300 = 3:1. */
   imbalanceRatio: number;
   /** Absolute volume floor that kills statistically irrelevant imbalances. */
@@ -65,7 +102,7 @@ export type OrderflowSettings = {
   heatScale: "bar" | "global";
   /** How profile cells are rendered in `cellMode=profile`. */
   profileStyle: "bars" | "cells";
-  /** Metric used when `profileStyle=cells`. */
+  /** Volume or delta for the candle-side histogram and `profileStyle=cells`. */
   profileCellMetric: "volume" | "delta";
   showStacked: boolean;
   stackedMin: number;
@@ -83,14 +120,31 @@ export type OrderflowSettings = {
   showVolumeRow: boolean;
   showCvd: boolean;
   cvdHeight: number;
+  /** Total height of the chart footer (stat rows + CVD). Drag the divider to change. */
+  footerHeight?: number;
   showProfile: boolean;
   profileWidth: number;
   heatOpacity: number;
+  /** TPO letters in the dedicated profile chart. */
+  showTpo: boolean;
+  /** Minutes packed into one TPO letter (A, B, C…). */
+  tpoBlockMinutes: number;
+  /**
+   * Volume profile window: visible bars, whole lookback, or one histogram
+   * per UTC day / hour / custom block.
+   */
+  profileRange: ProfileRange;
+  /** Minutes per custom session when `profileRange` is `"custom"`. */
+  profileSessionMinutes: number;
   /** Vlastní barvy — prázdné = téma aplikace. */
   upColor?: string;
   downColor?: string;
   senseColor?: string;
   textColor?: string;
+  fontBuyColor?: string;
+  fontSellColor?: string;
+  candleUpColor?: string;
+  candleDownColor?: string;
 };
 
 export const DEFAULT_ORDERFLOW_SETTINGS: OrderflowSettings = {
@@ -101,6 +155,8 @@ export const DEFAULT_ORDERFLOW_SETTINGS: OrderflowSettings = {
   rowHeight: 15,
   showText: true,
   showCandle: true,
+  candlePosition: "left",
+  profileSide: "off",
   showPoc: true,
   extendPoc: false,
   pocLineStyle: "solid",
@@ -109,6 +165,7 @@ export const DEFAULT_ORDERFLOW_SETTINGS: OrderflowSettings = {
   showValueArea: true,
   valueAreaPct: 70,
   showImbalance: true,
+  imbalanceHighlight: "all",
   imbalanceRatio: 300,
   imbalanceMinVolume: 0,
   imbalanceFillOpacity: 22,
@@ -133,10 +190,56 @@ export const DEFAULT_ORDERFLOW_SETTINGS: OrderflowSettings = {
   showVolumeRow: true,
   showCvd: true,
   cvdHeight: 56,
+  footerHeight: undefined,
   showProfile: true,
   profileWidth: 90,
   heatOpacity: 60,
+  showTpo: true,
+  tpoBlockMinutes: 30,
+  profileRange: "visible",
+  profileSessionMinutes: 60,
+  fontBuyColor: undefined,
+  fontSellColor: undefined,
+  candleUpColor: undefined,
+  candleDownColor: undefined,
 };
+
+export const DEFAULT_VOLUME_PROFILE_SETTINGS: VolumeProfileSettings = {
+  tickGroup: 10,
+  profileWidth: 90,
+  rowHeight: 15,
+  showHistogram: true,
+  showPoc: true,
+  showValueArea: true,
+  valueAreaPct: 70,
+  profileRange: "visible",
+  profileSessionMinutes: 60,
+};
+
+export function normalizeVolumeProfileSettings(
+  raw?: Partial<VolumeProfileSettings> | null,
+  seedFrom?: Partial<OrderflowSettings> | null
+): VolumeProfileSettings {
+  const seed: Partial<VolumeProfileSettings> = raw
+    ? {}
+    : seedFrom
+      ? {
+          tickGroup: seedFrom.tickGroup,
+          profileWidth: seedFrom.profileWidth,
+          rowHeight: seedFrom.rowHeight,
+          showHistogram: seedFrom.showProfile,
+          showPoc: seedFrom.showPoc,
+          showValueArea: seedFrom.showValueArea,
+          valueAreaPct: seedFrom.valueAreaPct,
+          profileRange: seedFrom.profileRange,
+          profileSessionMinutes: seedFrom.profileSessionMinutes,
+          upColor: seedFrom.upColor,
+          downColor: seedFrom.downColor,
+          pocColor: seedFrom.senseColor,
+        }
+      : {};
+  return { ...DEFAULT_VOLUME_PROFILE_SETTINGS, ...seed, ...(raw ?? {}) };
+}
 
 export const TICK_GROUPS = [1, 2, 5, 10, 20, 25, 50, 100, 250] as const;
 
@@ -172,7 +275,7 @@ export const DEFAULT_DOM_SETTINGS: DomSettings = {
   rowHeight: 18,
   rows: 44,
   centerLock: true,
-  showHeatmap: true,
+  showHeatmap: false,
   heatWidth: 96,
   heatSeconds: 90,
   showVolume: true,

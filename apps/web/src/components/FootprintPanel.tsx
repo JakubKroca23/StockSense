@@ -10,16 +10,35 @@ import {
   type ReactNode,
 } from "react";
 import { DeskPick } from "@/components/DeskPick";
-import { DeskWindowHead } from "@/components/DeskWindowHead";
+import { DeskWindow } from "@/components/DeskWindowHead";
 import { useThemeRevision } from "@/lib/theme";
 import {
   aggregateProfile,
   alpha,
   buildOrderflow,
+  clusterProfileMetric,
+  clusterShowsText,
+  clusterSlots,
+  contrastOnCanvas,
+  drawAbsorptionMark,
+  drawCurrentPriceRow,
+  drawFadeMark,
+  drawImbalanceDot,
   findLevelTouchEndIndex,
   findStackedZoneEndIndex,
   fmtCompact,
   fmtSignedCompact,
+  footprintFooterHeight,
+  footprintFooterLayout,
+  FP_FOOTER_MAX,
+  footprintFooterMinHeight,
+  imbalanceCellFill,
+  isBidAskCluster,
+  isDeltaCluster,
+  profileBarRects,
+  profileSlots,
+  resolveCandlePosition,
+  resolveProfileSide,
   resolveStackedDash,
   resolveOrderflowTheme,
   type FootprintData,
@@ -88,8 +107,9 @@ function metrics(w: number, h: number, s: OrderflowSettings) {
     (s.showMaxDeltaRow ? 1 : 0) +
     (s.showMinDeltaRow ? 1 : 0) +
     (s.showVolumeRow ? 1 : 0);
-  const cvdH = s.showCvd ? clamp(s.cvdHeight, 28, 180) : 0;
-  const footerH = statRows * STAT_ROW_H + cvdH + TIME_H;
+  const footerBody = footprintFooterHeight(s);
+  const footerH = footerBody + TIME_H;
+  const cvdH = s.showCvd ? Math.max(28, footerBody - statRows * STAT_ROW_H) : 0;
   const plotW = Math.max(80, w - AXIS_W - profileW);
   const plotH = Math.max(80, h - footerH);
   return { profileW, statRows, cvdH, footerH, plotW, plotH };
@@ -131,7 +151,14 @@ export function FootprintPanel({
   const viewRef = useRef<View>({ scrollX: 0, centerKey: null, follow: true });
   const themeRef = useRef<OrderflowTheme | null>(null);
   const themeRevRef = useRef(-1);
-  const dragRef = useRef<{ x: number; y: number; scrollX: number; centerKey: number } | null>(null);
+  const dragRef = useRef<{
+    kind: "pan" | "footer";
+    x: number;
+    y: number;
+    scrollX: number;
+    centerKey: number;
+    footerH: number;
+  } | null>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [hover, setHover] = useState<Hover | null>(null);
   const [frame, setFrame] = useState(0);
@@ -151,7 +178,7 @@ export function FootprintPanel({
       imbalance: settings.showImbalance,
       imbalanceRatio: settings.imbalanceRatio,
       imbalanceMinVolume: settings.imbalanceMinVolume,
-      stacked: settings.showStacked,
+      stacked: settings.showStacked || settings.imbalanceHighlight === "stacked",
       stackedMin: settings.stackedMin,
       fade: settings.showFade,
       absorption: settings.showAbsorption,
@@ -162,6 +189,7 @@ export function FootprintPanel({
     [
       settings.tickGroup,
       settings.showImbalance,
+      settings.imbalanceHighlight,
       settings.imbalanceRatio,
       settings.imbalanceMinVolume,
       settings.showStacked,
@@ -252,13 +280,21 @@ export function FootprintPanel({
   const onPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     if (e.button !== 0) return;
     const view = viewRef.current;
+    const canvas = e.currentTarget;
+    const rect = canvas.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const { plotH, footerH } = metrics(rect.width, rect.height, settings);
+    const nearDivider = Math.abs(y - plotH) <= 6;
     dragRef.current = {
+      kind: nearDivider ? "footer" : "pan",
       x: e.clientX,
       y: e.clientY,
       scrollX: view.scrollX,
       centerKey: view.centerKey ?? 0,
+      footerH: Math.max(TIME_H, footerH - TIME_H),
     };
-    e.currentTarget.setPointerCapture(e.pointerId);
+    canvas.style.cursor = nearDivider ? "ns-resize" : "";
+    canvas.setPointerCapture(e.pointerId);
   };
 
   const onPointerMove = (e: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -269,6 +305,15 @@ export function FootprintPanel({
     const y = e.clientY - rect.top;
     const drag = dragRef.current;
     const view = viewRef.current;
+    const { plotW, plotH } = metrics(rect.width, rect.height, settings);
+
+    if (drag?.kind === "footer") {
+      const minH = footprintFooterMinHeight(settings);
+      const maxH = Math.min(FP_FOOTER_MAX, Math.max(minH, rect.height - 80));
+      const next = Math.round(Math.min(maxH, Math.max(minH, drag.footerH + (drag.y - e.clientY))));
+      onSettingsChange({ footerHeight: next });
+      return;
+    }
 
     if (drag) {
       const dx = e.clientX - drag.x;
@@ -280,7 +325,8 @@ export function FootprintPanel({
       return;
     }
 
-    const { plotW, plotH } = metrics(rect.width, rect.height, settings);
+    canvas.style.cursor = Math.abs(y - plotH) <= 6 ? "ns-resize" : "";
+
     if (x > plotW || y > plotH || !series.bars.length || !series.step) {
       if (hover) setHover(null);
       return;
@@ -299,6 +345,7 @@ export function FootprintPanel({
   const endDrag = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     if (dragRef.current) {
       dragRef.current = null;
+      e.currentTarget.style.cursor = "";
       try {
         e.currentTarget.releasePointerCapture(e.pointerId);
       } catch {
@@ -349,54 +396,55 @@ export function FootprintPanel({
       : null;
 
   return (
-    <section className="fp-panel">
-      <DeskWindowHead
-        title="Footprint"
-        onDragStart={onDragStart}
-        onClose={onClose}
-        settings={settingsPanel}
-        extra={
-          <div className="fp-panel__head">
-            <div className="desk-win__picks">
-              <DeskPick
-                label={intervals.find((i) => i.id === interval)?.label ?? interval}
-                ariaLabel="Timeframe footprintu"
-                value={interval}
-                options={intervals}
-                onSelect={onSelectInterval}
-                className="desk-win__pick"
-              />
-              <DeskPick
-                label={lookbacks.find((l) => l.id === lookback)?.label ?? lookback}
-                ariaLabel="Období footprintu"
-                value={lookback}
-                options={lookbacks}
-                onSelect={onSelectLookback}
-                className="desk-win__pick"
-              />
-            </div>
-            {last ? (
-              <p className="fp-panel__stats muted text-xs">
-                <span className={last.delta >= 0 ? "is-up" : "is-down"}>
-                  Δ {fmtSignedCompact(last.delta)}
-                </span>
-                <span>CVD {fmtSignedCompact(last.cvd)}</span>
-                <span>
-                  {series.bars.length} × {interval}
-                </span>
-              </p>
-            ) : null}
-            <button
-              type="button"
-              className={`desk-win__pick fp-panel__live${live ? " is-active" : ""}`}
-              onClick={goLive}
-              title="Skočit na živou svíčku"
-            >
-              Live
-            </button>
+    <DeskWindow
+      as="section"
+      className="fp-panel"
+      title="Footprint"
+      onDragStart={onDragStart}
+      onClose={onClose}
+      settings={settingsPanel}
+      extra={
+        <div className="fp-panel__head">
+          <div className="desk-win__picks">
+            <DeskPick
+              label={intervals.find((i) => i.id === interval)?.label ?? interval}
+              ariaLabel="Timeframe footprintu"
+              value={interval}
+              options={intervals}
+              onSelect={onSelectInterval}
+              className="desk-win__pick"
+            />
+            <DeskPick
+              label={lookbacks.find((l) => l.id === lookback)?.label ?? lookback}
+              ariaLabel="Období footprintu"
+              value={lookback}
+              options={lookbacks}
+              onSelect={onSelectLookback}
+              className="desk-win__pick"
+            />
           </div>
-        }
-      />
+          {last ? (
+            <p className="fp-panel__stats muted text-xs">
+              <span className={last.delta >= 0 ? "is-up" : "is-down"}>
+                Δ {fmtSignedCompact(last.delta)}
+              </span>
+              <span>CVD {fmtSignedCompact(last.cvd)}</span>
+              <span>
+                {series.bars.length} × {interval}
+              </span>
+            </p>
+          ) : null}
+          <button
+            type="button"
+            className={`desk-win__pick fp-panel__live${live ? " is-active" : ""}`}
+            onClick={goLive}
+            title="Skočit na živou svíčku"
+          >
+            Live
+          </button>
+        </div>
+      }
+    >
       <div className="fp-panel__body" ref={bodyRef}>
         <canvas
           ref={canvasRef}
@@ -429,7 +477,7 @@ export function FootprintPanel({
           </p>
         ) : null}
       </div>
-    </section>
+    </DeskWindow>
   );
 }
 
@@ -606,6 +654,9 @@ function drawFootprint(ctx: CanvasRenderingContext2D, args: DrawArgs) {
     const innerX = x + 1;
     const innerW = bw - 2;
     if (innerW <= 2) continue;
+    const candlePos = resolveCandlePosition(s);
+    const slots = clusterSlots(innerX, innerW, candlePos);
+    const profSide = resolveProfileSide(s);
 
     // value area band behind the cluster
     if (s.showValueArea && bar.val != null && bar.vah != null) {
@@ -615,28 +666,29 @@ function drawFootprint(ctx: CanvasRenderingContext2D, args: DrawArgs) {
       ctx.fillRect(innerX, yTop, innerW, Math.max(1, yBot - yTop));
     }
 
-    // candle skeleton on the left gutter of the column
-    if (s.showCandle) {
-      const cx = innerX + 2.5;
+    if (slots.candleW > 0) {
+      const cx = slots.candleX + slots.candleW / 2;
       const yHigh = yOf(bar.high / series.step);
       const yLow = yOf(bar.low / series.step);
       const yOpen = yOf(bar.open / series.step);
       const yClose = yOf(bar.close / series.step);
       const up = bar.close >= bar.open;
-      ctx.strokeStyle = alpha(up ? theme.up : theme.down, 0.55);
+      ctx.strokeStyle = alpha(up ? theme.candleUp : theme.candleDown, 0.7);
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(cx, yHigh);
       ctx.lineTo(cx, yLow);
       ctx.stroke();
-      ctx.fillStyle = alpha(up ? theme.up : theme.down, 0.55);
-      ctx.fillRect(cx - 1.5, Math.min(yOpen, yClose), 3, Math.max(1.5, Math.abs(yClose - yOpen)));
+      ctx.fillStyle = alpha(up ? theme.candleUp : theme.candleDown, 0.7);
+      const bodyW = Math.max(2, Math.min(6, slots.candleW - 1));
+      ctx.fillRect(cx - bodyW / 2, Math.min(yOpen, yClose), bodyW, Math.max(1.5, Math.abs(yClose - yOpen)));
     }
 
-    const cellX = innerX + (s.showCandle ? 6 : 0);
-    const cellW = innerW - (s.showCandle ? 6 : 0);
-    if (cellW <= 2) continue;
-    const half = cellW / 2;
+    const halfSell = slots.sellW;
+    if (slots.buyW <= 1 && slots.sellW <= 1) continue;
+    const maxSide = bar.maxCell > 0 ? bar.maxCell : 1;
+    const maxDelta = Math.max(...bar.cells.map((c) => Math.abs(c.delta)), 1e-9);
+    const metric = clusterProfileMetric(s);
 
     for (const cell of bar.cells) {
       if (cell.key < keyLo || cell.key > keyHi) continue;
@@ -644,7 +696,6 @@ function drawFootprint(ctx: CanvasRenderingContext2D, args: DrawArgs) {
       const yc = yOf(cell.key);
       const yTop = yc - rh / 2;
 
-      // heat background
       const profileCellFill = s.cellMode === "profile" && s.profileStyle === "cells";
       const fillMode = profileCellFill ? s.profileCellMetric : s.heatMode;
       if (fillMode !== "off") {
@@ -655,81 +706,110 @@ function drawFootprint(ctx: CanvasRenderingContext2D, args: DrawArgs) {
           const base =
             fillMode === "delta" ? (cell.delta >= 0 ? theme.up : theme.down) : theme.sense;
           ctx.fillStyle = alpha(base, 0.06 + intensity * 0.55 * heatAlpha);
-          ctx.fillRect(cellX, yTop, cellW, rh);
+          ctx.fillRect(slots.sellX, yTop, slots.sellW, rh);
+          ctx.fillRect(slots.buyX, yTop, slots.buyW, rh);
         }
       }
 
-      if (s.cellMode === "profile" && s.profileStyle === "bars") {
-        const mid = cellX + cellW / 2;
-        const maxSide = bar.maxCell > 0 ? bar.maxCell : 1;
-        const halfW = cellW / 2;
-        const sellW = Math.max(0, (cell.sell / maxSide) * halfW);
-        const buyW = Math.max(0, (cell.buy / maxSide) * halfW);
-        const h = Math.max(1, rh - 2);
-        ctx.fillStyle = alpha(theme.down, 0.75);
-        ctx.fillRect(mid - sellW, yTop + 1, sellW, h);
-        ctx.fillStyle = alpha(theme.up, 0.75);
-        ctx.fillRect(mid, yTop + 1, buyW, h);
+      const h = Math.max(1, rh - 2);
+      for (const strip of profileSlots(slots, profSide)) {
+        if (cell.volume <= 0 && !(metric === "delta" && cell.delta !== 0)) continue;
+        for (const rect of profileBarRects(strip, cell, metric, maxSide, maxDelta)) {
+          ctx.fillStyle = alpha(rect.side === "buy" ? theme.up : theme.down, 0.75);
+          ctx.fillRect(rect.x, yTop + 1, rect.w, h);
+        }
       }
 
-      // diagonal imbalance markers
-      if (s.showImbalance && (cell.buyImbalance || cell.sellImbalance)) {
-        const imbNorm = clamp(s.imbalanceFillOpacity, 0, 100) / 100;
-        const imbStack = clamp(s.imbalanceStackedFillOpacity, 0, 100) / 100;
+      if (s.showImbalance && imbalanceCellFill(s, cell) && (cell.buyImbalance || cell.sellImbalance)) {
+        const imbNorm = Math.max(0.55, Math.min(1, clamp(s.imbalanceFillOpacity, 0, 100) / 100 + 0.45));
+        const imbStack = Math.max(0.7, Math.min(1, clamp(s.imbalanceStackedFillOpacity, 0, 100) / 100 + 0.35));
         if (cell.buyImbalance) {
-          ctx.fillStyle = alpha(theme.imbalanceBuy, cell.stacked ? imbStack : imbNorm);
-          ctx.fillRect(cellX + half, yTop + 0.5, half, rh - 1);
+          drawImbalanceDot(
+            ctx,
+            slots,
+            yTop,
+            rh,
+            "buy",
+            alpha(theme.imbalanceBuy, cell.stacked ? imbStack : imbNorm),
+            Boolean(cell.stacked)
+          );
         }
         if (cell.sellImbalance) {
-          ctx.fillStyle = alpha(theme.imbalanceSell, cell.stacked ? imbStack : imbNorm);
-          ctx.fillRect(cellX, yTop + 0.5, half, rh - 1);
+          drawImbalanceDot(
+            ctx,
+            slots,
+            yTop,
+            rh,
+            "sell",
+            alpha(theme.imbalanceSell, cell.stacked ? imbStack : imbNorm),
+            Boolean(cell.stacked)
+          );
         }
       }
 
       if (s.showPoc && cell.poc) {
         ctx.strokeStyle = alpha(theme.sense, 0.85);
         ctx.lineWidth = 1;
-        ctx.strokeRect(cellX + 0.5, yTop + 0.5, cellW - 1, rh - 1);
+        ctx.strokeRect(slots.sellX + 0.5, yTop + 0.5, slots.sellW + slots.candleW + slots.buyW - 1, rh - 1);
       }
 
       if (s.showFade && cell.fade) {
-        ctx.fillStyle = alpha(theme.text, 0.6);
-        ctx.beginPath();
-        ctx.moveTo(cellX + cellW - 4, yTop + 2);
-        ctx.lineTo(cellX + cellW - 1, yTop + 2);
-        ctx.lineTo(cellX + cellW - 2.5, yTop + 5.5);
-        ctx.closePath();
-        ctx.fill();
+        drawFadeMark(
+          ctx,
+          slots,
+          yTop,
+          rh,
+          cell.key === bar.minKey ? "sell" : "buy",
+          cell.key === bar.minKey ? theme.down : theme.up
+        );
       }
 
-      if (!canLabel || (s.cellMode === "profile" && s.profileStyle !== "cells")) continue;
+      if (!clusterShowsText(s) || !canLabel) continue;
       ctx.font = `${cellFont}px ${font}`;
-      if (s.cellMode === "bidask") {
+      if (isBidAskCluster(s.cellMode)) {
         ctx.textAlign = "right";
-        ctx.fillStyle = cell.sell > 0 ? alpha(theme.down, 0.95) : alpha(theme.muted, 0.4);
-        ctx.fillText(cell.sell > 0 ? fmtCompact(cell.sell) : "·", cellX + half - 3, yc);
+        ctx.fillStyle = contrastOnCanvas(
+          ctx,
+          slots.sellX + halfSell - 6,
+          yc,
+          cell.sell > 0 ? alpha(theme.fontSell, 0.95) : alpha(theme.muted, 0.4)
+        );
+        ctx.fillText(cell.sell > 0 ? fmtCompact(cell.sell) : "·", slots.sellX + halfSell - 2, yc);
         ctx.textAlign = "left";
-        ctx.fillStyle = cell.buy > 0 ? alpha(theme.up, 0.95) : alpha(theme.muted, 0.4);
-        ctx.fillText(cell.buy > 0 ? fmtCompact(cell.buy) : "·", cellX + half + 3, yc);
-      } else if (s.cellMode === "delta") {
+        ctx.fillStyle = contrastOnCanvas(
+          ctx,
+          slots.buyX + 6,
+          yc,
+          cell.buy > 0 ? alpha(theme.fontBuy, 0.95) : alpha(theme.muted, 0.4)
+        );
+        ctx.fillText(cell.buy > 0 ? fmtCompact(cell.buy) : "·", slots.buyX + 2, yc);
+      } else if (isDeltaCluster(s.cellMode)) {
         ctx.textAlign = "center";
-        ctx.fillStyle = cell.delta === 0 ? alpha(theme.muted, 0.6) : cell.delta > 0 ? theme.up : theme.down;
-        ctx.fillText(fmtSignedCompact(cell.delta), cellX + half, yc);
+        ctx.fillStyle = contrastOnCanvas(
+          ctx,
+          innerX + innerW / 2,
+          yc,
+          cell.delta === 0 ? alpha(theme.muted, 0.6) : cell.delta > 0 ? theme.fontBuy : theme.fontSell
+        );
+        ctx.fillText(fmtSignedCompact(cell.delta), innerX + innerW / 2, yc);
       } else {
         ctx.textAlign = "center";
-        ctx.fillStyle = alpha(theme.text, 0.85);
-        ctx.fillText(fmtCompact(cell.volume), cellX + half, yc);
+        ctx.fillStyle = contrastOnCanvas(ctx, innerX + innerW / 2, yc, alpha(theme.text, 0.85));
+        ctx.fillText(fmtCompact(cell.volume), innerX + innerW / 2, yc);
       }
     }
 
     if (s.showAbsorption && bar.absorption) {
-      ctx.strokeStyle = alpha(bar.absorption === "buy" ? theme.up : theme.down, 0.75);
-      ctx.setLineDash([3, 3]);
-      ctx.lineWidth = 1;
       const yHigh = yOf(bar.maxKey) - rh / 2;
       const yLow = yOf(bar.minKey) + rh / 2;
-      ctx.strokeRect(innerX + 0.5, yHigh + 0.5, innerW - 1, Math.max(2, yLow - yHigh - 1));
-      ctx.setLineDash([]);
+      drawAbsorptionMark(
+        ctx,
+        innerX + 0.5,
+        yHigh + 0.5,
+        innerW - 1,
+        Math.max(4, yLow - yHigh - 1),
+        bar.absorption === "buy" ? theme.up : theme.down
+      );
     }
   }
 
@@ -866,13 +946,17 @@ function drawFootprint(ctx: CanvasRenderingContext2D, args: DrawArgs) {
   const minCellDelta = (bar: OrderflowBar) =>
     bar.cells.reduce((min, cell) => Math.min(min, cell.delta), 0);
   const maxAbsCvd = bars.reduce((max, bar) => Math.max(max, Math.abs(bar.cvd)), 0);
+  const { rowH: footRowH, cvdH: footCvdH } = footprintFooterLayout(s, Math.max(0, h - plotH - TIME_H));
   const lastY = yOf(lastBar.close / series.step);
   if (lastY >= 0 && lastY <= plotH) {
     const up = lastBar.close >= lastBar.open;
+    drawCurrentPriceRow(ctx, lastY, rh, plotW, up ? theme.up : theme.down);
     ctx.fillStyle = up ? theme.up : theme.down;
     ctx.fillRect(axisX + 1, lastY - 7, AXIS_W - 2, 14);
     ctx.fillStyle = theme.bg;
     ctx.font = `600 10px ${font}`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
     ctx.fillText(lastBar.close.toFixed(priceDigits), axisX + 5, lastY);
   }
 
@@ -888,7 +972,7 @@ function drawFootprint(ctx: CanvasRenderingContext2D, args: DrawArgs) {
     tint: (bar: OrderflowBar) => string | null
   ) => {
     ctx.fillStyle = alpha(theme.bgSoft, 0.5);
-    ctx.fillRect(0, footY, plotW + profileW, STAT_ROW_H);
+    ctx.fillRect(0, footY, plotW + profileW, footRowH);
     ctx.strokeStyle = alpha(theme.line, 0.6);
     ctx.beginPath();
     ctx.moveTo(0, footY + 0.5);
@@ -896,7 +980,7 @@ function drawFootprint(ctx: CanvasRenderingContext2D, args: DrawArgs) {
     ctx.stroke();
     ctx.save();
     ctx.beginPath();
-    ctx.rect(0, footY, plotW, STAT_ROW_H);
+    ctx.rect(0, footY, plotW, footRowH);
     ctx.clip();
     ctx.textAlign = "center";
     for (let i = first; i <= lastVisible; i += 1) {
@@ -905,17 +989,17 @@ function drawFootprint(ctx: CanvasRenderingContext2D, args: DrawArgs) {
       const shade = tint(bar);
       if (shade) {
         ctx.fillStyle = shade;
-        ctx.fillRect(x + 1, footY + 1, bw - 2, STAT_ROW_H - 2);
+        ctx.fillRect(x + 1, footY + 1, bw - 2, footRowH - 2);
       }
       if (bw < 28) continue;
       ctx.fillStyle = color(bar);
-      ctx.fillText(value(bar), x + bw / 2, footY + STAT_ROW_H / 2);
+      ctx.fillText(value(bar), x + bw / 2, footY + footRowH / 2);
     }
     ctx.restore();
     ctx.textAlign = "left";
     ctx.fillStyle = alpha(theme.muted, 0.9);
-    ctx.fillText(label, axisX + 5, footY + STAT_ROW_H / 2);
-    footY += STAT_ROW_H;
+    ctx.fillText(label, axisX + 5, footY + footRowH / 2);
+    footY += footRowH;
   };
 
   if (s.showDeltaRow) {
@@ -966,10 +1050,10 @@ function drawFootprint(ctx: CanvasRenderingContext2D, args: DrawArgs) {
     );
   }
 
-  if (cvdH > 0) {
+  if (footCvdH > 0) {
     const top = footY;
     ctx.fillStyle = alpha(theme.bgSoft, 0.35);
-    ctx.fillRect(0, top, plotW + profileW, cvdH);
+    ctx.fillRect(0, top, plotW + profileW, footCvdH);
     ctx.strokeStyle = alpha(theme.line, 0.6);
     ctx.beginPath();
     ctx.moveTo(0, top + 0.5);
@@ -978,7 +1062,7 @@ function drawFootprint(ctx: CanvasRenderingContext2D, args: DrawArgs) {
 
     ctx.save();
     ctx.beginPath();
-    ctx.rect(0, top, plotW, cvdH);
+    ctx.rect(0, top, plotW, footCvdH);
     ctx.clip();
     for (let i = first; i <= lastVisible; i += 1) {
       const bar = bars[i];
@@ -986,11 +1070,11 @@ function drawFootprint(ctx: CanvasRenderingContext2D, args: DrawArgs) {
       const intensity = maxAbsCvd > 0 ? Math.min(1, Math.abs(bar.cvd) / maxAbsCvd) : 0;
       const base = bar.cvd >= 0 ? theme.up : theme.down;
       ctx.fillStyle = alpha(base, 0.08 + intensity * 0.42);
-      ctx.fillRect(x + 1, top + 1, Math.max(1, bw - 2), Math.max(1, cvdH - 2));
+      ctx.fillRect(x + 1, top + 1, Math.max(1, bw - 2), Math.max(1, footCvdH - 2));
       if (bw >= 28) {
         ctx.textAlign = "center";
         ctx.fillStyle = Math.abs(bar.cvd) > 0 ? alpha(theme.text, 0.92) : alpha(theme.muted, 0.8);
-        ctx.fillText(fmtSignedCompact(bar.cvd), x + bw / 2, top + cvdH / 2);
+        ctx.fillText(fmtSignedCompact(bar.cvd), x + bw / 2, top + footCvdH / 2);
       }
     }
     ctx.restore();
@@ -1000,7 +1084,7 @@ function drawFootprint(ctx: CanvasRenderingContext2D, args: DrawArgs) {
     ctx.font = `10px ${font}`;
     ctx.fillText("CVD", axisX + 5, top + 9);
     ctx.fillText(fmtSignedCompact(bars[lastIdx].cvd), axisX + 5, top + 22);
-    footY += cvdH;
+    footY += footCvdH;
   }
 
   // ---- time axis --------------------------------------------------------

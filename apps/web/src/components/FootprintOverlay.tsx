@@ -5,10 +5,25 @@ import type { IChartApi, ISeriesApi, Time } from "lightweight-charts";
 import {
   buildOrderflow,
   alpha,
+  clusterProfileMetric,
+  clusterShowsText,
+  clusterSlots,
+  contrastOnCanvas,
+  drawAbsorptionMark,
+  drawCurrentPriceRow,
+  drawFadeMark,
+  drawImbalanceDot,
   findLevelTouchEndIndex,
   findStackedZoneEndIndex,
   fmtCompact,
   fmtSignedCompact,
+  imbalanceCellFill,
+  isBidAskCluster,
+  isDeltaCluster,
+  profileBarRects,
+  profileSlots,
+  resolveCandlePosition,
+  resolveProfileSide,
   resolveStackedDash,
   resolveOrderflowTheme,
   type FootprintData,
@@ -45,6 +60,12 @@ function sizeCanvas(canvas: HTMLCanvasElement, w: number, h: number) {
   return ctx;
 }
 
+function barUnix(ts: string) {
+  const s = ts.trim();
+  const hasTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(s);
+  return Math.floor(new Date(hasTz ? s : `${s}Z`).getTime() / 1000);
+}
+
 export function FootprintOverlay({ chart, series, wrap, data, settings, priceDigits = 2, footerH = 0 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const themeRef = useRef<OrderflowTheme | null>(null);
@@ -58,7 +79,7 @@ export function FootprintOverlay({ chart, series, wrap, data, settings, priceDig
       imbalance: settings.showImbalance,
       imbalanceRatio: settings.imbalanceRatio,
       imbalanceMinVolume: settings.imbalanceMinVolume,
-      stacked: settings.showStacked,
+      stacked: settings.showStacked || settings.imbalanceHighlight === "stacked",
       stackedMin: settings.stackedMin,
       fade: settings.showFade,
       absorption: settings.showAbsorption,
@@ -69,6 +90,7 @@ export function FootprintOverlay({ chart, series, wrap, data, settings, priceDig
     [
       settings.tickGroup,
       settings.showImbalance,
+      settings.imbalanceHighlight,
       settings.imbalanceRatio,
       settings.imbalanceMinVolume,
       settings.showStacked,
@@ -173,7 +195,7 @@ function drawClusters(
 
   for (let index = 0; index < bars.length; index += 1) {
     const bar = bars[index];
-    const unixTime = Math.floor(bar.timeMs / 1000) as unknown as Time;
+    const unixTime = barUnix(bar.ts) as unknown as Time;
     const barX = ts.timeToCoordinate(unixTime);
     if (barX == null) continue;
 
@@ -196,7 +218,7 @@ function drawClusters(
         const stopBar = stopIndex < bars.length ? bars[stopIndex] : null;
         const stopCoord =
           stopBar != null
-            ? ts.timeToCoordinate(Math.floor(stopBar.timeMs / 1000) as unknown as Time)
+            ? ts.timeToCoordinate(barUnix(stopBar.ts) as unknown as Time)
             : null;
         const xEnd = stopCoord != null ? stopCoord - spacing / 2 : w;
         if (xEnd <= x0 + barW) continue;
@@ -229,7 +251,7 @@ function drawClusters(
       const stopBar = stopIndex < bars.length ? bars[stopIndex] : null;
       const stopCoord =
         stopBar != null
-          ? ts.timeToCoordinate(Math.floor(stopBar.timeMs / 1000) as unknown as Time)
+          ? ts.timeToCoordinate(barUnix(stopBar.ts) as unknown as Time)
           : null;
       const xEnd = stopCoord != null ? stopCoord - spacing / 2 : w;
       if (xEnd <= x0 + barW) continue;
@@ -248,9 +270,12 @@ function drawClusters(
   for (const { bar, x0, barW } of visible) {
     const innerX = x0 + 1;
     const innerW = Math.max(1, barW - 2);
-    const candleGutter = settings.showCandle ? Math.min(5, Math.max(2, innerW * 0.18)) : 0;
-    const cellX = innerX + candleGutter;
-    const cellW = Math.max(1, innerW - candleGutter);
+    const candlePos = resolveCandlePosition(settings);
+    const slots = clusterSlots(innerX, innerW, candlePos);
+    const profSide = resolveProfileSide(settings);
+    const maxSide = bar.maxCell > 0 ? bar.maxCell : 1;
+    const maxDelta = Math.max(...bar.cells.map((c) => Math.abs(c.delta)), 1e-9);
+    const metric = clusterProfileMetric(settings);
 
     if (settings.showValueArea && bar.val != null && bar.vah != null) {
       const yVah = series.priceToCoordinate(bar.vah);
@@ -263,24 +288,25 @@ function drawClusters(
       }
     }
 
-    if (settings.showCandle && candleGutter > 0) {
-      const cx = innerX + candleGutter / 2;
+    if (slots.candleW > 0) {
+      const cx = slots.candleX + slots.candleW / 2;
       const yHigh = series.priceToCoordinate(bar.high);
       const yLow = series.priceToCoordinate(bar.low);
       const yOpen = series.priceToCoordinate(bar.open);
       const yClose = series.priceToCoordinate(bar.close);
       if (yHigh != null && yLow != null && yOpen != null && yClose != null) {
         const up = bar.close >= bar.open;
-        ctx.strokeStyle = alpha(up ? theme.up : theme.down, 0.7);
+        ctx.strokeStyle = alpha(up ? theme.candleUp : theme.candleDown, 0.85);
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(cx, yHigh);
         ctx.lineTo(cx, yLow);
         ctx.stroke();
-        ctx.fillStyle = alpha(up ? theme.up : theme.down, 0.65);
+        ctx.fillStyle = alpha(up ? theme.candleUp : theme.candleDown, 0.8);
         const bodyTop = Math.min(yOpen, yClose);
         const bodyH = Math.max(1, Math.abs(yClose - yOpen));
-        ctx.fillRect(cx - 1, bodyTop, 2, bodyH);
+        const bodyW = Math.max(2, Math.min(6, slots.candleW - 1));
+        ctx.fillRect(cx - bodyW / 2, bodyTop, bodyW, bodyH);
       }
     }
 
@@ -301,72 +327,80 @@ function drawClusters(
       const fillMode = profileCellFill ? settings.profileCellMetric : settings.heatMode;
       if (fillMode !== "off" && cell.volume > 0) {
         const heatMax = usePerBar ? (bar.maxCell || 1) : globalHeatMax;
-        const raw =
-          fillMode === "delta"
-            ? Math.abs(cell.delta)
-            : cell.volume;
+        const raw = fillMode === "delta" ? Math.abs(cell.delta) : cell.volume;
         const intensity = Math.min(1, raw / heatMax);
         if (intensity > 0.01) {
           const base =
-            fillMode === "delta"
-              ? cell.delta >= 0
-                ? theme.up
-                : theme.down
-              : theme.sense;
+            fillMode === "delta" ? (cell.delta >= 0 ? theme.up : theme.down) : theme.sense;
           ctx.fillStyle = alpha(base, 0.06 + intensity * 0.55 * heatAlpha);
-          ctx.fillRect(cellX, cellY, cellW, cellH);
+          ctx.fillRect(slots.sellX, cellY, slots.sellW, cellH);
+          ctx.fillRect(slots.buyX, cellY, slots.buyW, cellH);
         }
       }
 
-      if (settings.cellMode === "profile" && settings.profileStyle === "bars" && cell.volume > 0) {
-        const mid = cellX + cellW / 2;
-        const maxSide = bar.maxCell > 0 ? bar.maxCell : 1;
-        const halfW = cellW / 2;
-        const sellW = Math.max(0, (cell.sell / maxSide) * halfW);
-        const buyW = Math.max(0, (cell.buy / maxSide) * halfW);
-        const h = Math.max(1, cellH - 1);
-        ctx.fillStyle = alpha(theme.down, 0.65);
-        ctx.fillRect(mid - sellW, cellY + 0.5, sellW, h);
-        ctx.fillStyle = alpha(theme.up, 0.65);
-        ctx.fillRect(mid, cellY + 0.5, buyW, h);
+      const h = Math.max(1, cellH - 1);
+      for (const strip of profileSlots(slots, profSide)) {
+        if (cell.volume <= 0 && !(metric === "delta" && cell.delta !== 0)) continue;
+        for (const rect of profileBarRects(strip, cell, metric, maxSide, maxDelta)) {
+          ctx.fillStyle = alpha(rect.side === "buy" ? theme.up : theme.down, 0.72);
+          ctx.fillRect(rect.x, cellY + 0.5, rect.w, h);
+        }
       }
 
-      if (settings.showImbalance && (cell.buyImbalance || cell.sellImbalance)) {
-        const imbNorm = Math.max(0, Math.min(1, settings.imbalanceFillOpacity / 100));
-        const imbStack = Math.max(0, Math.min(1, settings.imbalanceStackedFillOpacity / 100));
-        const half = cellW / 2;
+      if (
+        settings.showImbalance &&
+        imbalanceCellFill(settings, cell) &&
+        (cell.buyImbalance || cell.sellImbalance)
+      ) {
+        const imbNorm = Math.max(0.55, Math.min(1, settings.imbalanceFillOpacity / 100 + 0.45));
+        const imbStack = Math.max(0.7, Math.min(1, settings.imbalanceStackedFillOpacity / 100 + 0.35));
         if (cell.buyImbalance) {
-          ctx.fillStyle = alpha(theme.imbalanceBuy, cell.stacked ? imbStack : imbNorm);
-          ctx.fillRect(cellX + half, cellY + 0.5, half, Math.max(1, cellH - 1));
+          drawImbalanceDot(
+            ctx,
+            slots,
+            cellY,
+            cellH,
+            "buy",
+            alpha(theme.imbalanceBuy, cell.stacked ? imbStack : imbNorm),
+            Boolean(cell.stacked)
+          );
         }
         if (cell.sellImbalance) {
-          ctx.fillStyle = alpha(theme.imbalanceSell, cell.stacked ? imbStack : imbNorm);
-          ctx.fillRect(cellX, cellY + 0.5, half, Math.max(1, cellH - 1));
+          drawImbalanceDot(
+            ctx,
+            slots,
+            cellY,
+            cellH,
+            "sell",
+            alpha(theme.imbalanceSell, cell.stacked ? imbStack : imbNorm),
+            Boolean(cell.stacked)
+          );
         }
       }
 
       if (settings.showPoc && cell.poc) {
         ctx.strokeStyle = alpha(theme.sense, 0.85);
         ctx.lineWidth = 1;
-        ctx.strokeRect(cellX + 0.5, cellY + 0.5, Math.max(1, cellW - 1), Math.max(1, cellH - 1));
+        ctx.strokeRect(slots.sellX + 0.5, cellY + 0.5, Math.max(1, slots.sellW + slots.buyW + slots.candleW - 1), Math.max(1, cellH - 1));
       }
 
       if (settings.showFade && cell.fade) {
-        ctx.fillStyle = alpha(theme.text, 0.75);
-        ctx.beginPath();
-        ctx.moveTo(cellX + cellW - 2, cellY + 1);
-        ctx.lineTo(cellX + cellW, cellY + 1);
-        ctx.lineTo(cellX + cellW - 1, cellY + 4);
-        ctx.closePath();
-        ctx.fill();
+        drawFadeMark(
+          ctx,
+          slots,
+          cellY,
+          cellH,
+          cell.key === bar.minKey ? "sell" : "buy",
+          cell.key === bar.minKey ? theme.down : theme.up
+        );
       }
 
-      if (
-        settings.showText &&
-        (settings.cellMode !== "profile" || settings.profileStyle === "cells") &&
-        cellH >= 4
-      ) {
-        drawCellLabel(ctx, settings, theme, cell, cellX, cellY2, cellW, cellH, font);
+      if (clusterShowsText(settings) && cellH >= 4) {
+        if (isBidAskCluster(settings.cellMode)) {
+          drawBidAskLabel(ctx, theme, cell, slots.sellX, slots.sellW, slots.buyX, slots.buyW, cellY2, cellH, font);
+        } else {
+          drawCellLabel(ctx, settings, theme, cell, slots.sellX, cellY2, slots.sellW + slots.candleW + slots.buyW, cellH, font);
+        }
       }
     }
 
@@ -376,13 +410,61 @@ function drawClusters(
       if (yH != null && yL != null) {
         const top = Math.min(yH, yL);
         const bot = Math.max(yH, yL);
-        ctx.strokeStyle = alpha(bar.absorption === "buy" ? theme.up : theme.down, 0.75);
-        ctx.setLineDash([3, 3]);
-        ctx.lineWidth = 1;
-        ctx.strokeRect(innerX + 0.5, top + 0.5, innerW - 1, Math.max(2, bot - top - 1));
-        ctx.setLineDash([]);
+        drawAbsorptionMark(
+          ctx,
+          innerX + 0.5,
+          top + 0.5,
+          innerW - 1,
+          Math.max(4, bot - top - 1),
+          bar.absorption === "buy" ? theme.up : theme.down
+        );
       }
     }
+  }
+
+  const lastBar = bars[bars.length - 1];
+  if (lastBar) {
+    const yClose = series.priceToCoordinate(lastBar.close);
+    const yHi = series.priceToCoordinate(lastBar.close + step / 2);
+    const yLo = series.priceToCoordinate(lastBar.close - step / 2);
+    if (yClose != null && yHi != null && yLo != null && yClose >= 0 && yClose <= plotH) {
+      drawCurrentPriceRow(
+        ctx,
+        yClose,
+        Math.max(3, Math.abs(yHi - yLo)),
+        w,
+        lastBar.close >= lastBar.open ? theme.up : theme.down
+      );
+    }
+  }
+}
+
+function drawBidAskLabel(
+  ctx: CanvasRenderingContext2D,
+  theme: OrderflowTheme,
+  cell: { buy: number; sell: number },
+  sellX: number,
+  sellW: number,
+  buyX: number,
+  buyW: number,
+  y: number,
+  cellH: number,
+  font: string
+) {
+  const cellFont = Math.max(6, Math.min(11, Math.floor(cellH * 0.75)));
+  ctx.font = `${cellFont}px ${font}`;
+  ctx.textBaseline = "middle";
+  if (sellW >= 12) {
+    ctx.textAlign = "right";
+    const ink = cell.sell > 0 ? alpha(theme.fontSell, 0.95) : alpha(theme.muted, 0.35);
+    ctx.fillStyle = contrastOnCanvas(ctx, sellX + sellW - 6, y, ink);
+    ctx.fillText(cell.sell > 0 ? fmtCompact(cell.sell) : "·", sellX + sellW - 2, y);
+  }
+  if (buyW >= 12) {
+    ctx.textAlign = "left";
+    const ink = cell.buy > 0 ? alpha(theme.fontBuy, 0.95) : alpha(theme.muted, 0.35);
+    ctx.fillStyle = contrastOnCanvas(ctx, buyX + 6, y, ink);
+    ctx.fillText(cell.buy > 0 ? fmtCompact(cell.buy) : "·", buyX + 2, y);
   }
 }
 
@@ -402,41 +484,59 @@ function drawCellLabel(
   ctx.font = `${cellFont}px ${font}`;
   ctx.textBaseline = "middle";
 
-  if (narrow || settings.cellMode === "delta") {
-    if (settings.cellMode === "bidask" && narrow) {
+  if (narrow || isDeltaCluster(settings.cellMode)) {
+    if (isBidAskCluster(settings.cellMode) && narrow) {
       ctx.textAlign = "center";
-      ctx.fillStyle =
-        cell.delta === 0 ? alpha(theme.muted, 0.55) : cell.delta > 0 ? theme.up : theme.down;
+      ctx.fillStyle = contrastOnCanvas(
+        ctx,
+        cellX + cellW / 2,
+        y,
+        cell.delta === 0 ? alpha(theme.muted, 0.55) : cell.delta > 0 ? theme.fontBuy : theme.fontSell
+      );
       ctx.fillText(fmtSignedCompact(cell.delta), cellX + cellW / 2, y);
       return;
     }
-    if (settings.cellMode === "volume" || (settings.cellMode === "bidask" && narrow)) {
+    if (settings.cellMode === "volume" || (isBidAskCluster(settings.cellMode) && narrow)) {
       ctx.textAlign = "center";
-      ctx.fillStyle = alpha(theme.text, 0.85);
+      ctx.fillStyle = contrastOnCanvas(ctx, cellX + cellW / 2, y, alpha(theme.text, 0.85));
       ctx.fillText(fmtCompact(cell.volume), cellX + cellW / 2, y);
       return;
     }
-    if (settings.cellMode === "delta") {
+    if (isDeltaCluster(settings.cellMode)) {
       ctx.textAlign = "center";
-      ctx.fillStyle =
-        cell.delta === 0 ? alpha(theme.muted, 0.55) : cell.delta > 0 ? theme.up : theme.down;
+      ctx.fillStyle = contrastOnCanvas(
+        ctx,
+        cellX + cellW / 2,
+        y,
+        cell.delta === 0 ? alpha(theme.muted, 0.55) : cell.delta > 0 ? theme.fontBuy : theme.fontSell
+      );
       ctx.fillText(fmtSignedCompact(cell.delta), cellX + cellW / 2, y);
       return;
     }
   }
 
-  if (settings.cellMode === "bidask") {
+  if (isBidAskCluster(settings.cellMode)) {
     const half = cellW / 2;
     ctx.textAlign = "right";
-    ctx.fillStyle = cell.sell > 0 ? alpha(theme.down, 0.95) : alpha(theme.muted, 0.35);
+    ctx.fillStyle = contrastOnCanvas(
+      ctx,
+      cellX + half - 6,
+      y,
+      cell.sell > 0 ? alpha(theme.fontSell, 0.95) : alpha(theme.muted, 0.35)
+    );
     ctx.fillText(cell.sell > 0 ? fmtCompact(cell.sell) : "·", cellX + half - 2, y);
     ctx.textAlign = "left";
-    ctx.fillStyle = cell.buy > 0 ? alpha(theme.up, 0.95) : alpha(theme.muted, 0.35);
+    ctx.fillStyle = contrastOnCanvas(
+      ctx,
+      cellX + half + 6,
+      y,
+      cell.buy > 0 ? alpha(theme.fontBuy, 0.95) : alpha(theme.muted, 0.35)
+    );
     ctx.fillText(cell.buy > 0 ? fmtCompact(cell.buy) : "·", cellX + half + 2, y);
     return;
   }
 
   ctx.textAlign = "center";
-  ctx.fillStyle = alpha(theme.text, 0.85);
+  ctx.fillStyle = contrastOnCanvas(ctx, cellX + cellW / 2, y, alpha(theme.text, 0.85));
   ctx.fillText(fmtCompact(cell.volume), cellX + cellW / 2, y);
 }

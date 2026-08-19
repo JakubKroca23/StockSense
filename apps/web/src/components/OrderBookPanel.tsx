@@ -1,6 +1,8 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
+import { useLayoutEffect, useMemo, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { LinkGroupPick } from "@/components/LinkGroupPick";
+import type { LinkGroup } from "@/lib/linkGroup";
 
 export type OrderLevel = {
   price: number;
@@ -81,22 +83,41 @@ export function OrderBookPanel({
   collapsed = false,
   onToggle,
   onPriceClick,
+  onDragStart,
+  linkGroup = null,
+  onLinkGroupChange,
 }: {
   book: OrderBookData | null;
   priceDigits?: number;
   collapsed?: boolean;
   onToggle?: () => void;
   onPriceClick?: (price: number, side: "bid" | "ask") => void;
+  onDragStart?: (e: ReactPointerEvent<HTMLElement>) => void;
+  linkGroup?: LinkGroup | null;
+  onLinkGroupChange?: (next: LinkGroup | null) => void;
 }) {
   const ladderRef = useRef<HTMLDivElement>(null);
   const midRef = useRef<HTMLDivElement>(null);
   const userLockRef = useRef(0);
 
+  const onHeadDrag = (e: ReactPointerEvent<HTMLElement>) => {
+    if (!onDragStart) return;
+    if (!(e.target instanceof HTMLElement)) return;
+    if (!e.target.closest(".orderbook__head, .desk-panel__toggle")) return;
+    if (e.target.closest(".link-group, button")) return;
+    onDragStart(e);
+  };
+
   const title = (
-    <p className="orderbook__title">
-      {onToggle ? <span className="desk-panel__caret">{collapsed ? "▸" : "▾"}</span> : null}
-      Kniha
-    </p>
+    <div className="orderbook__title-row">
+      <p className="orderbook__title">
+        {onToggle ? <span className="desk-panel__caret">{collapsed ? "▸" : "▾"}</span> : null}
+        Kniha
+      </p>
+      {onLinkGroupChange ? (
+        <LinkGroupPick value={linkGroup} onChange={onLinkGroupChange} />
+      ) : null}
+    </div>
   );
 
   const ladder = useMemo(() => {
@@ -144,7 +165,7 @@ export function OrderBookPanel({
 
   if (!book) {
     return (
-      <aside className={`orderbook ${collapsed ? "is-collapsed" : ""}`}>
+      <aside className={`orderbook ${collapsed ? "is-collapsed" : ""}`} onPointerDown={onHeadDrag}>
         <PanelToggle collapsed={collapsed} onToggle={onToggle}>
           {title}
         </PanelToggle>
@@ -157,7 +178,7 @@ export function OrderBookPanel({
   const maxAsk = Math.max(...rows.map((r) => r.ask), 0.0001);
 
   return (
-    <aside className={`orderbook orderbook--dom ${collapsed ? "is-collapsed" : ""}`}>
+    <aside className={`orderbook orderbook--dom ${collapsed ? "is-collapsed" : ""}`} onPointerDown={onHeadDrag}>
       <PanelToggle collapsed={collapsed} onToggle={onToggle}>
         {title}
         {!collapsed && (

@@ -2,12 +2,14 @@
 
 import { useMemo } from "react";
 import { readChartThemeDefaults, type ChartVizSettings } from "@/components/PriceChart";
+import { SettingsActionRow } from "@/components/SettingsActionRow";
 import { useThemeRevision } from "@/lib/theme";
 
 type Props = {
   viz: ChartVizSettings;
   onChange: (patch: Partial<ChartVizSettings>) => void;
   onReset: () => void;
+  onSaveDefault?: () => void;
   compact?: boolean;
   inDeskMenu?: boolean;
 };
@@ -56,7 +58,7 @@ function ColorField({
   );
 }
 
-export function ChartSettingsPanel({ viz, onChange, onReset, compact = false, inDeskMenu = false }: Props) {
+export function ChartSettingsPanel({ viz, onChange, onReset, onSaveDefault, compact = false, inDeskMenu = false }: Props) {
   const hideHead = compact || inDeskMenu;
   const themeRev = useThemeRevision();
   const themeColors = useMemo(() => readChartThemeDefaults(), [themeRev]);
@@ -97,7 +99,7 @@ export function ChartSettingsPanel({ viz, onChange, onReset, compact = false, in
               <span>Styl</span>
             </div>
             <p className="fp-drawer__hint">
-              Vyp = jen indikátory / footprint / DOM bez svíček. Čára = close price.
+              Dutý = jen okraje svíček. Čára = close price.
             </p>
             <div className="fp-drawer__seg">
               {(
@@ -105,7 +107,6 @@ export function ChartSettingsPanel({ viz, onChange, onReset, compact = false, in
                   ["candle", "Svíčky"],
                   ["hollow", "Duté"],
                   ["line", "Čára"],
-                  ["off", "Vyp"],
                 ] as const
               ).map(([id, lab]) => (
                 <button
@@ -286,20 +287,6 @@ export function ChartSettingsPanel({ viz, onChange, onReset, compact = false, in
               <span className="fp-drawer__toggle-lab">Volume histogram</span>
             </span>
           </label>
-          <label className="fp-drawer__toggle">
-            <input type="checkbox" checked={viz.footprint} onChange={(e) => onChange({ footprint: e.target.checked })} />
-            <span>
-              <span className="fp-drawer__toggle-lab">Footprint</span>
-              <span className="fp-drawer__hint">Orderflow cluster chart přímo v grafu.</span>
-            </span>
-          </label>
-          <label className="fp-drawer__toggle">
-            <input type="checkbox" checked={viz.dom} onChange={(e) => onChange({ dom: e.target.checked })} />
-            <span>
-              <span className="fp-drawer__toggle-lab">DOM</span>
-              <span className="fp-drawer__hint">Hloubka trhu zarovnaná na stejné cenové úrovně.</span>
-            </span>
-          </label>
         </section>
 
         <section className="fp-drawer__sec">
@@ -334,9 +321,7 @@ export function ChartSettingsPanel({ viz, onChange, onReset, compact = false, in
           </div>
         </section>
 
-        <button type="button" className="fp-drawer__reset" onClick={onReset}>
-          Výchozí
-        </button>
+        <SettingsActionRow onReset={onReset} onSaveDefault={onSaveDefault} />
       </div>
     </section>
   );

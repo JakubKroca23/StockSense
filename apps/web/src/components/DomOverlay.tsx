@@ -8,8 +8,8 @@ import {
   alpha,
   fmtCompact,
   readOrderflowTheme,
-  type DomSettings,
   type DepthSnapshot,
+  type DomSettings,
   type FootprintData,
   type OrderflowTheme,
 } from "@/lib/orderflow";
@@ -23,6 +23,10 @@ type Props = {
   footprint: FootprintData | null;
   settings: DomSettings;
   priceDigits?: number;
+  /** Fill the plot with rolling book history (dedicated heatmap chart). */
+  fillHeat?: boolean;
+  /** Extra space on the right (volume profile column). */
+  rightInset?: number;
 };
 
 type OverlayRow = {
@@ -64,21 +68,33 @@ function buildOverlayRows(book: OrderBookData, footprint: FootprintData | null, 
   for (const level of book.asks) {
     put(level.price, { ask: (levels.get(Math.round(level.price / step))?.ask ?? 0) + level.amount });
   }
-  for (const bar of footprint?.bars ?? []) {
-    for (const level of bar.levels) {
-      const key = Math.round(level.price / step);
-      const prev = levels.get(key) ?? { key, price: key * step, bid: 0, ask: 0, buy: 0, sell: 0 };
-      levels.set(key, {
-        ...prev,
-        buy: prev.buy + level.buy,
-        sell: prev.sell + level.sell,
-      });
+  if (settings.showVolume) {
+    for (const bar of footprint?.bars ?? []) {
+      for (const level of bar.levels) {
+        const key = Math.round(level.price / step);
+        const prev = levels.get(key) ?? { key, price: key * step, bid: 0, ask: 0, buy: 0, sell: 0 };
+        levels.set(key, {
+          ...prev,
+          buy: prev.buy + level.buy,
+          sell: prev.sell + level.sell,
+        });
+      }
     }
   }
   return [...levels.values()].sort((a, b) => b.price - a.price);
 }
 
-export function DomOverlay({ chart, series, wrap, book, footprint, settings, priceDigits = 2 }: Props) {
+export function DomOverlay({
+  chart,
+  series,
+  wrap,
+  book,
+  footprint,
+  settings,
+  priceDigits = 2,
+  fillHeat = false,
+  rightInset = 0,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef(0);
   const trackerRef = useRef<DepthTracker | null>(null);
@@ -86,7 +102,7 @@ export function DomOverlay({ chart, series, wrap, book, footprint, settings, pri
   const themeRevRef = useRef(-1);
   const themeRev = useThemeRevision();
   const rows = useMemo(
-    () => (book ? buildOverlayRows(book, settings.showVolume ? footprint : null, settings) : []),
+    () => (book ? buildOverlayRows(book, footprint, settings) : []),
     [book, footprint, settings]
   );
 
@@ -115,7 +131,6 @@ export function DomOverlay({ chart, series, wrap, book, footprint, settings, pri
       }
       drawDomOverlay(
         ctx,
-        chart,
         series,
         rows,
         trackerRef.current?.history(Date.now(), Math.max(20_000, settings.heatSeconds * 1000)) ?? [],
@@ -123,7 +138,9 @@ export function DomOverlay({ chart, series, wrap, book, footprint, settings, pri
         themeRef.current,
         w,
         h,
-        priceDigits
+        priceDigits,
+        fillHeat,
+        rightInset
       );
     };
     const schedule = () => {
@@ -142,14 +159,13 @@ export function DomOverlay({ chart, series, wrap, book, footprint, settings, pri
       chart.unsubscribeCrosshairMove(onRange);
       ro.disconnect();
     };
-  }, [book, chart, priceDigits, rows, series, settings, themeRev, wrap]);
+  }, [book, chart, fillHeat, priceDigits, rightInset, rows, series, settings, themeRev, wrap]);
 
   return <canvas ref={canvasRef} className="dom-overlay" style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 14 }} />;
 }
 
 function drawDomOverlay(
   ctx: CanvasRenderingContext2D,
-  chart: IChartApi,
   series: ISeriesApi<"Candlestick">,
   rows: OverlayRow[],
   snaps: DepthSnapshot[],
@@ -157,11 +173,13 @@ function drawDomOverlay(
   theme: OrderflowTheme,
   w: number,
   h: number,
-  priceDigits: number
+  priceDigits: number,
+  fillHeat: boolean,
+  rightInset: number
 ) {
   ctx.clearRect(0, 0, w, h);
   if (!rows.length) return;
-  const axisPad = 62;
+  const axisPad = 62 + Math.max(0, rightInset);
   const laneW = Math.max(56, Math.min(110, w * 0.13));
   const askX = w - axisPad - laneW;
   const bidX = askX - laneW - 8;
@@ -179,14 +197,12 @@ function drawDomOverlay(
   ctx.textBaseline = "middle";
 
   if (settings.showHeatmap && snaps.length > 1) {
-    const left = 4;
-    const right = bidX - 8;
+        const left = fillHeat ? 4 : Math.max(4, bidX - 8 - Math.max(40, settings.heatWidth));
+    const right = Math.max(left + 12, bidX - 8);
     const plotW = Math.max(12, right - left);
     const colW = Math.max(1, plotW / Math.max(1, snaps.length));
     snaps.forEach((snap, idx) => {
-      const x =
-        chart.timeScale().timeToCoordinate(Math.floor(snap.t / 1000) as never) ??
-        left + idx * colW;
+      const x = fillHeat ? left + idx * colW : left + idx * colW;
       for (const row of rows) {
         const y = series.priceToCoordinate(row.price);
         if (y == null || y < -12 || y > h + 12) continue;
@@ -197,8 +213,8 @@ function drawDomOverlay(
         const size = Math.max(bid, ask);
         if (size <= 0) continue;
         const intensity = Math.min(1, Math.sqrt(size / maxSnapDepth));
-        ctx.fillStyle = alpha(bid >= ask ? theme.up : theme.down, 0.03 + intensity * 0.32);
-        ctx.fillRect(x - colW / 2, top, colW + 0.5, bandH);
+        ctx.fillStyle = alpha(bid >= ask ? theme.up : theme.down, 0.05 + intensity * (fillHeat ? 0.55 : 0.32));
+        ctx.fillRect(x, top, colW + 0.5, bandH);
       }
     });
   }
@@ -239,14 +255,12 @@ function drawDomOverlay(
       ctx.fillRect(askX, top + 1, buyW, Math.max(1, bandH - 2));
     }
 
-    if (settings.showDepthBars) {
-      if (laneW >= 72) {
-        ctx.textAlign = "right";
-        ctx.fillStyle = alpha(theme.text, 0.8);
-        if (row.bid > 0) ctx.fillText(fmtCompact(settings.showCumulative ? row.bid : row.bid), bidX + laneW - 4, y);
-        ctx.textAlign = "left";
-        if (row.ask > 0) ctx.fillText(fmtCompact(settings.showCumulative ? row.ask : row.ask), askX + 4, y);
-      }
+    if (settings.showDepthBars && laneW >= 72) {
+      ctx.textAlign = "right";
+      ctx.fillStyle = alpha(theme.text, 0.8);
+      if (row.bid > 0) ctx.fillText(fmtCompact(row.bid), bidX + laneW - 4, y);
+      ctx.textAlign = "left";
+      if (row.ask > 0) ctx.fillText(fmtCompact(row.ask), askX + 4, y);
     }
   }
 

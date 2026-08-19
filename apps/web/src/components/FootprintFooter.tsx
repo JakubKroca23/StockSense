@@ -7,7 +7,7 @@ import {
   alpha,
   fmtCompact,
   fmtSignedCompact,
-  FP_STAT_ROW_H,
+  footprintFooterLayout,
   resolveOrderflowTheme,
   type FootprintData,
   type OrderflowBar,
@@ -54,7 +54,7 @@ export function FootprintFooter({ chart, wrap, data, settings, height }: Props) 
       imbalance: settings.showImbalance,
       imbalanceRatio: settings.imbalanceRatio,
       imbalanceMinVolume: settings.imbalanceMinVolume,
-      stacked: settings.showStacked,
+      stacked: settings.showStacked || settings.imbalanceHighlight === "stacked",
       stackedMin: settings.stackedMin,
       fade: settings.showFade,
       absorption: settings.showAbsorption,
@@ -65,6 +65,7 @@ export function FootprintFooter({ chart, wrap, data, settings, height }: Props) 
     [
       settings.tickGroup,
       settings.showImbalance,
+      settings.imbalanceHighlight,
       settings.imbalanceRatio,
       settings.imbalanceMinVolume,
       settings.showStacked,
@@ -186,6 +187,8 @@ function drawFooter(
 
   let y = 0;
   const plotW = Math.max(0, w - labelW);
+  const { rowH, cvdH } = footprintFooterLayout(settings, h);
+  const fontPx = Math.max(9, Math.min(13, Math.round(rowH * 0.55)));
 
   const drawStatRow = (
     label: string,
@@ -194,7 +197,7 @@ function drawFooter(
     tint: (bar: OrderflowBar) => string | null
   ) => {
     ctx.fillStyle = alpha(theme.bgSoft, 0.55);
-    ctx.fillRect(0, y, w, FP_STAT_ROW_H);
+    ctx.fillRect(0, y, w, rowH);
     ctx.strokeStyle = alpha(theme.line, 0.55);
     ctx.beginPath();
     ctx.moveTo(0, y + 0.5);
@@ -203,29 +206,29 @@ function drawFooter(
 
     ctx.save();
     ctx.beginPath();
-    ctx.rect(0, y, plotW, FP_STAT_ROW_H);
+    ctx.rect(0, y, plotW, rowH);
     ctx.clip();
     ctx.textBaseline = "middle";
-    ctx.font = `600 10px ${font}`;
+    ctx.font = `600 ${fontPx}px ${font}`;
     ctx.textAlign = "center";
     for (const { bar, x0, barW } of visible) {
       const shade = tint(bar);
       if (shade) {
         ctx.fillStyle = shade;
-        ctx.fillRect(x0 + 1, y + 1, barW - 2, FP_STAT_ROW_H - 2);
+        ctx.fillRect(x0 + 1, y + 1, barW - 2, rowH - 2);
       }
       if (barW < 22) continue;
       ctx.fillStyle = color(bar);
-      ctx.fillText(value(bar), x0 + barW / 2, y + FP_STAT_ROW_H / 2);
+      ctx.fillText(value(bar), x0 + barW / 2, y + rowH / 2);
     }
     ctx.restore();
 
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    ctx.font = `700 10px ${font}`;
+    ctx.font = `700 ${fontPx}px ${font}`;
     ctx.fillStyle = alpha(theme.muted, 0.95);
-    ctx.fillText(label, w - labelW + 6, y + FP_STAT_ROW_H / 2);
-    y += FP_STAT_ROW_H;
+    ctx.fillText(label, w - labelW + 6, y + rowH / 2);
+    y += rowH;
   };
 
   if (settings.showDeltaRow) {
@@ -280,7 +283,6 @@ function drawFooter(
   }
 
   if (settings.showCvd) {
-    const cvdH = h - y;
     if (cvdH < 8) return;
 
     ctx.fillStyle = alpha(theme.bgSoft, 0.45);
@@ -304,7 +306,7 @@ function drawFooter(
       if (barW >= 22) {
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.font = `600 10px ${font}`;
+        ctx.font = `600 ${Math.max(9, Math.min(13, Math.round(cvdH * 0.28)))}px ${font}`;
         ctx.fillStyle = Math.abs(bar.cvd) > 0 ? alpha(theme.text, 0.92) : alpha(theme.muted, 0.8);
         ctx.fillText(fmtSignedCompact(bar.cvd), x0 + barW / 2, y + cvdH / 2);
       }

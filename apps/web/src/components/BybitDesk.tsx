@@ -2,41 +2,59 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, cloneElement, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from "react";
 import { apiFetch, apiWsUrl } from "@/lib/api";
-import { PriceChart, type ChartBar, type ChartStyle, type ChartVizSettings, DEFAULT_DESK_CHART_VIZ } from "@/components/PriceChart";
+import { PriceChart, type ChartBar, type ChartKind, type ChartVizSettings, DEFAULT_DESK_CHART_VIZ, CHART_KINDS, applyChartKind, normalizeChartViz, resolveChartKind } from "@/components/PriceChart";
 import { HeaderExtra, HeaderQuote } from "@/components/HeaderExtra";
-import { IconBook, IconDom, IconDraw, IconTape, IconAddChart } from "@/components/NavIcons";
-import { OrderBookPanel, type OrderBookData } from "@/components/OrderBookPanel";
-import { TradesTapePanel, type TradesTapeData } from "@/components/TradesTapePanel";
-import { DeskWindowHead } from "@/components/DeskWindowHead";
+import { IconDom, IconDraw, IconAddChart, IconSave } from "@/components/NavIcons";
+import { type OrderBookData } from "@/components/OrderBookPanel";
+import { type TradesTapeData } from "@/components/TradesTapePanel";
+import { DeskWindow } from "@/components/DeskWindowHead";
 import { DeskPick } from "@/components/DeskPick";
 import { ChartDeskSettings } from "@/components/ChartDeskSettings";
+import { ChartToolPick } from "@/components/ChartToolPick";
+import { ProfileSettingsPanel } from "@/components/ProfileSettingsPanel";
+import { useWorkspace } from "@/components/WorkspaceProvider";
 import { DomPanel } from "@/components/DomPanel";
 import { DomSettingsPanel } from "@/components/DomSettingsPanel";
 import { bindToolDrag, DeskMosaic, DeskWorkspace, useDeskDrag } from "@/components/DeskMosaic";
+import { PriceLinkProvider } from "@/components/PriceLink";
 import type { ChartDrawing, DrawTool } from "@/lib/chart";
 import type { LinearDeskInfo } from "@/lib/desks";
+import type { LinkGroup } from "@/lib/linkGroup";
 import {
   DEFAULT_DOM_SETTINGS,
   DEFAULT_ORDERFLOW_SETTINGS,
+  DEFAULT_VOLUME_PROFILE_SETTINGS,
+  normalizeVolumeProfileSettings,
   type DomSettings,
   type FootprintData,
   type OrderflowSettings,
+  type VolumeProfileSettings,
 } from "@/lib/orderflow";
 import {
   addChart,
   cloneDesk,
   collectChartLeaves,
   DEFAULT_DESK_LAYOUT,
+  footprintLeafIds,
   hasPanel,
   isDeskNode,
   NEW_CHART_DRAG,
   newChartLeaf,
+  promoteFootprintLeaves,
   removeLeaf,
   removePanel,
+  restoreMissingLeaves,
+  setLeafLinkGroup,
   togglePanel,
+  unifyMarketPanels,
   type DeskNode,
   type DeskPanelId,
 } from "@/lib/deskLayout";
+import { readChartDefaults, readDomDefaults, writeChartDefaults, writeDomDefaults } from "@/lib/deskDefaults";
+import {
+  canonicalizeSnapshot,
+  type DeskLayoutSnapshot,
+} from "@/lib/deskLayouts";
 
 type DeskChartResponse = {
   symbol: string;
@@ -56,13 +74,6 @@ type DeskChartResponse = {
 export type BybitDeskConfig = LinearDeskInfo;
 
 const DESK_STORE = "stocksense-desk";
-
-const CHART_STYLES: { id: ChartStyle; label: string }[] = [
-  { id: "candle", label: "Svíčky" },
-  { id: "hollow", label: "Duté" },
-  { id: "line", label: "Čára" },
-  { id: "off", label: "Vyp" },
-];
 
 const TIMEFRAMES = [
   { id: "1s", label: "1 S", defaultLookback: "1h" },
@@ -212,6 +223,7 @@ type ChartPrefs = {
   viz: ChartVizSettings;
   drawings: ChartDrawing[];
   fpViz: OrderflowSettings;
+  vpViz: VolumeProfileSettings;
   domViz: DomSettings;
 };
 
@@ -224,13 +236,10 @@ function normalizeTfLb(tfRaw: string | null, lbRaw: string | null) {
 }
 
 function defaultChartPrefs(): ChartPrefs {
+  const defaults = readChartDefaults();
   return {
-    tf: "1m",
-    lb: "1d",
-    viz: { ...DEFAULT_DESK_CHART_VIZ },
+    ...defaults,
     drawings: [],
-    fpViz: { ...DEFAULT_ORDERFLOW_SETTINGS },
-    domViz: { ...DEFAULT_DOM_SETTINGS },
   };
 }
 
@@ -244,9 +253,15 @@ function readChartPrefs(deskId: string, leafId: string): ChartPrefs {
       return {
         tf,
         lb,
-        viz: { ...DEFAULT_DESK_CHART_VIZ, ...(parsed.viz ?? {}) },
+        viz: normalizeChartViz(parsed.viz),
         drawings: Array.isArray(parsed.drawings) ? parsed.drawings : [],
         fpViz: { ...DEFAULT_ORDERFLOW_SETTINGS, ...((parsed as Record<string, unknown>).fpViz as Partial<OrderflowSettings> ?? {}) },
+        vpViz: normalizeVolumeProfileSettings(
+          (parsed as Record<string, unknown>).vpViz as Partial<VolumeProfileSettings> | undefined,
+          (parsed as Record<string, unknown>).vpViz
+            ? null
+            : ((parsed as Record<string, unknown>).fpViz as Partial<OrderflowSettings> | undefined)
+        ),
         domViz: { ...DEFAULT_DOM_SETTINGS, ...((parsed as Record<string, unknown>).domViz as Partial<DomSettings> ?? {}) },
       };
     }
@@ -261,7 +276,7 @@ function readChartPrefs(deskId: string, leafId: string): ChartPrefs {
     let viz = { ...DEFAULT_DESK_CHART_VIZ };
     try {
       const vraw = lsGet(deskPrefKey(deskId, "viz")) ?? lsGet("stocksense-desk-chart-viz");
-      if (vraw) viz = { ...viz, ...(JSON.parse(vraw) as Partial<ChartVizSettings>) };
+      if (vraw) viz = normalizeChartViz(JSON.parse(vraw) as Partial<ChartVizSettings>);
     } catch {
       /* ignore */
     }
@@ -281,12 +296,23 @@ function readChartPrefs(deskId: string, leafId: string): ChartPrefs {
       viz,
       drawings,
       fpViz: { ...DEFAULT_ORDERFLOW_SETTINGS },
+      vpViz: { ...DEFAULT_VOLUME_PROFILE_SETTINGS },
       domViz: { ...DEFAULT_DOM_SETTINGS },
     };
     lsSet(paneKey, JSON.stringify(prefs));
     return prefs;
   }
   return defaultChartPrefs();
+}
+
+function seedChartKind(deskId: string, leafId: string, kind: ChartKind) {
+  const prefs = readChartPrefs(deskId, leafId);
+  if (resolveChartKind(prefs.viz) === kind) {
+    lsSet(deskPrefKey(deskId, `pane-${leafId}`), JSON.stringify(prefs));
+    return;
+  }
+  const next = { ...prefs, viz: applyChartKind(prefs.viz, kind) };
+  lsSet(deskPrefKey(deskId, `pane-${leafId}`), JSON.stringify(next));
 }
 
 function usePersistedJson<T extends object>(key: string, fallback: T, legacyKey?: string) {
@@ -315,7 +341,11 @@ function usePersistedJson<T extends object>(key: string, fallback: T, legacyKey?
     setValue(fallback);
     lsSet(key, JSON.stringify(fallback));
   }, [key, fallback]);
-  return [value, update, reset] as const;
+  const replace = useCallback((next: T) => {
+    setValue(next);
+    lsSet(key, JSON.stringify(next));
+  }, [key]);
+  return [value, update, reset, replace] as const;
 }
 
 function usePersistedOpen(key: string, fallback = true, legacyKey?: string) {
@@ -336,9 +366,16 @@ function usePersistedOpen(key: string, fallback = true, legacyKey?: string) {
   return [open, toggle, set] as const;
 }
 
-export function BybitDesk({ config }: { config?: BybitDeskConfig | null }) {
+export function BybitDesk({
+  config,
+  layoutId,
+}: {
+  config?: BybitDeskConfig | null;
+  layoutId?: string;
+}) {
+  const { catalog, saveSnapshot } = useWorkspace();
   const blank = !config;
-  const deskId = config?.id ?? "home";
+  const deskId = layoutId ?? config?.id ?? "home";
   const apiBase = config ? `/desk/${config.id}` : "";
   const loadError = config ? `Načtení ${config.fallbackSymbol} selhalo` : "";
   const loadingLabel = config ? `Stahuji ${config.fallbackSymbol}…` : "";
@@ -354,7 +391,7 @@ export function BybitDesk({ config }: { config?: BybitDeskConfig | null }) {
     deskPrefKey(deskId, "fp-range"),
     FP_DEFAULT_RANGE
   );
-  const [domViz, patchDomViz, resetDomViz] = usePersistedJson<DomSettings>(
+  const [domViz, patchDomViz, , replaceDomViz] = usePersistedJson<DomSettings>(
     deskPrefKey(deskId, "dom-viz"),
     DEFAULT_DOM_SETTINGS
   );
@@ -365,41 +402,140 @@ export function BybitDesk({ config }: { config?: BybitDeskConfig | null }) {
   const [drawTool, setDrawTool] = useState<DrawTool>("none");
   const [layout, setLayoutState] = useState<DeskNode>(DEFAULT_DESK_LAYOUT);
   const [deskPrefsReady, setDeskPrefsReady] = useState(false);
+  const [layoutDirty, setLayoutDirty] = useState(false);
+  const skipLayoutDirty = useRef(true);
+  const layoutItem = catalog.items.find((item) => item.id === deskId) ?? null;
+
+  const captureSnapshot = useCallback(
+    (mosaic: DeskNode, viz: DomSettings): DeskLayoutSnapshot => {
+      const panes: Record<string, unknown> = {};
+      for (const leaf of collectChartLeaves(mosaic)) {
+        panes[leaf.id] = readChartPrefs(deskId, leaf.id);
+      }
+      return { mosaic, panes, domViz: viz };
+    },
+    [deskId]
+  );
+
+  const markLayoutDirty = useCallback(() => {
+    if (skipLayoutDirty.current) return;
+    setLayoutDirty(true);
+  }, []);
 
   useEffect(() => {
+    skipLayoutDirty.current = true;
+    let mosaic = cloneDesk(DEFAULT_DESK_LAYOUT);
+    const saved = layoutItem?.snapshot;
     try {
       const layoutRaw = lsGet(deskPrefKey(deskId, "layout"));
+      const promotedFrom: string[] = [];
       if (layoutRaw) {
         const parsed = JSON.parse(layoutRaw) as unknown;
         if (isDeskNode(parsed)) {
-          setLayoutState(removePanel(parsed, "footprint") ?? newChartLeaf());
+          promotedFrom.push(...footprintLeafIds(parsed));
+          mosaic = parsed;
         }
+      } else if (saved?.mosaic) {
+        promotedFrom.push(...footprintLeafIds(saved.mosaic));
+        mosaic = cloneDesk(saved.mosaic);
+        for (const [leafId, prefs] of Object.entries(saved.panes)) {
+          lsSet(deskPrefKey(deskId, `pane-${leafId}`), JSON.stringify(prefs));
+        }
+        lsSet(deskPrefKey(deskId, "dom-viz"), JSON.stringify(saved.domViz));
       } else {
-        let next = cloneDesk(DEFAULT_DESK_LAYOUT);
         const book = lsGet(deskPrefKey(deskId, "book")) ?? lsGet(`${DESK_STORE}-book`);
         const tape = lsGet(deskPrefKey(deskId, "tape")) ?? lsGet(`${DESK_STORE}-tape`);
-        if (book === "0") next = removePanel(next, "orderbook") ?? next;
-        if (tape === "0") next = removePanel(next, "tape") ?? next;
-        next = removePanel(next, "footprint") ?? next;
-        setLayoutState(next);
+        if (book === "0") mosaic = removePanel(mosaic, "orderbook") ?? mosaic;
+        if (tape === "0") mosaic = removePanel(mosaic, "tape") ?? mosaic;
+      }
+      if (saved?.mosaic) {
+        promotedFrom.push(...footprintLeafIds(saved.mosaic));
+        mosaic = restoreMissingLeaves(mosaic, promoteFootprintLeaves(cloneDesk(saved.mosaic)));
+        for (const [leafId, prefs] of Object.entries(saved.panes)) {
+          const key = deskPrefKey(deskId, `pane-${leafId}`);
+          const existingRaw = lsGet(key);
+          if (!existingRaw) {
+            lsSet(key, JSON.stringify(prefs));
+            continue;
+          }
+          try {
+            const existing = JSON.parse(existingRaw) as ChartPrefs;
+            const snap = prefs as Partial<ChartPrefs>;
+            const snapKind = resolveChartKind(snap.viz);
+            const workKind = resolveChartKind(existing.viz);
+            if (snapKind !== "candle" && workKind === "candle") {
+              lsSet(
+                key,
+                JSON.stringify({ ...existing, viz: applyChartKind(existing.viz, snapKind) })
+              );
+            }
+          } catch {
+            /* keep working pane */
+          }
+        }
+      }
+      mosaic = unifyMarketPanels(promoteFootprintLeaves(mosaic));
+      for (const leafId of new Set(promotedFrom)) {
+        seedChartKind(deskId, leafId, "footprint");
       }
     } catch {
       /* ignore */
     }
+    setLayoutState(mosaic);
+    lsSet(deskPrefKey(deskId, "layout"), JSON.stringify(mosaic));
+
+    let viz = { ...DEFAULT_DOM_SETTINGS };
+    try {
+      const raw = lsGet(deskPrefKey(deskId, "dom-viz"));
+      if (raw) viz = { ...DEFAULT_DOM_SETTINGS, ...(JSON.parse(raw) as Partial<DomSettings>) };
+    } catch {
+      /* ignore */
+    }
+    const working = captureSnapshot(mosaic, viz);
+    setLayoutDirty(saved ? canonicalizeSnapshot(working) !== canonicalizeSnapshot(saved) : false);
+    replaceDomViz(viz);
     setDeskPrefsReady(true);
+    queueMicrotask(() => {
+      skipLayoutDirty.current = false;
+    });
+    // Hydrate once per layout mount — catalog updates must not remount the desk.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deskId]);
 
   const setLayout = useCallback(
     (next: DeskNode) => {
       setLayoutState(next);
       lsSet(deskPrefKey(deskId, "layout"), JSON.stringify(next));
+      markLayoutDirty();
     },
-    [deskId]
+    [deskId, markLayoutDirty]
   );
 
-  const bookOpen = hasPanel(layout, "orderbook");
-  const tapeOpen = hasPanel(layout, "tape");
-  const domOpen = hasPanel(layout, "dom");
+  const patchDomVizDirty = useCallback(
+    (patch: Partial<DomSettings>) => {
+      patchDomViz(patch);
+      markLayoutDirty();
+    },
+    [patchDomViz, markLayoutDirty]
+  );
+
+  const resetDomVizDirty = useCallback(() => {
+    const defaults = readDomDefaults();
+    replaceDomViz(defaults);
+    markLayoutDirty();
+  }, [replaceDomViz, markLayoutDirty]);
+
+  const saveDomDefaults = useCallback(() => {
+    writeDomDefaults(domViz);
+  }, [domViz]);
+
+  const saveActiveLayout = useCallback(() => {
+    const snap = captureSnapshot(layout, domViz);
+    saveSnapshot(deskId, snap);
+    setLayoutDirty(false);
+  }, [captureSnapshot, layout, domViz, deskId, saveSnapshot]);
+
+  const domOpen = hasPanel(layout, "dom") || hasPanel(layout, "orderbook") || hasPanel(layout, "tape");
   const needFootprint = domOpen;
   const quoteLeafId = useMemo(() => collectChartLeaves(layout)[0]?.id ?? "chart", [layout]);
 
@@ -431,11 +567,11 @@ export function BybitDesk({ config }: { config?: BybitDeskConfig | null }) {
   }, [blank, loadOrderBook]);
 
   useEffect(() => {
-    if (blank) return;
+    if (blank || !domOpen) return;
     void loadTrades();
     const id = window.setInterval(() => void loadTrades(), 1500);
     return () => window.clearInterval(id);
-  }, [blank, loadTrades]);
+  }, [blank, domOpen, loadTrades]);
 
   const loadFootprint = useCallback(async () => {
     if (!apiBase) return;
@@ -467,6 +603,7 @@ export function BybitDesk({ config }: { config?: BybitDeskConfig | null }) {
   const up = (quoteData?.change_pct ?? quoteData?.change_pct_window ?? 0) >= 0;
 
   return (
+    <PriceLinkProvider>
     <DeskWorkspace layout={layout} onLayout={setLayout}>
     <div className="gold-page oil-page">
       {!blank ? (
@@ -491,6 +628,17 @@ export function BybitDesk({ config }: { config?: BybitDeskConfig | null }) {
       <HeaderExtra>
         <div className="header-desk">
           <div className="header-desk__tools">
+            <button
+              type="button"
+              className={`chart-chip chart-chip--soft chart-chip--icon desk-layout__save${layoutDirty ? " is-dirty" : ""}`}
+              disabled={!layoutDirty}
+              onClick={saveActiveLayout}
+              aria-label={layoutDirty ? "Uložit layout" : "Layout je uložený"}
+              title={layoutDirty ? "Uložit layout" : "Layout je uložený"}
+            >
+              <IconSave size={18} />
+            </button>
+            <span className="header-desk__div" aria-hidden />
             <div className="header-desk__sec" role="group" aria-label="Graf">
               <AddChartTool onAdd={() => setLayout(addChart(layout))} />
             </div>
@@ -516,8 +664,6 @@ export function BybitDesk({ config }: { config?: BybitDeskConfig | null }) {
             <span className="header-desk__div" aria-hidden />
             <DeskToolLaunchers
               open={{
-                orderbook: bookOpen,
-                tape: tapeOpen,
                 dom: domOpen,
               }}
               onToggle={(panel) => setLayout(togglePanel(layout, panel))}
@@ -533,30 +679,15 @@ export function BybitDesk({ config }: { config?: BybitDeskConfig | null }) {
       )}
 
       <div className="oil-page__desk">
+        {deskPrefsReady ? (
         <DeskMosaic
           layout={layout}
           onLayout={setLayout}
           renderPanel={(leaf) => {
-            if (leaf.panel === "orderbook") {
-              return (
-                <DeskBoundPanel leafId={leaf.id}>
-                  <OrderBookPanel
-                    book={orderBook}
-                    priceDigits={config?.priceDigits ?? 2}
-                  />
-                </DeskBoundPanel>
-              );
-            }
-            if (leaf.panel === "tape") {
-              return (
-                <DeskBoundPanel leafId={leaf.id}>
-                  <TradesTapePanel
-                    tape={tradesTape}
-                  />
-                </DeskBoundPanel>
-              );
-            }
-            if (leaf.panel === "dom") {
+            const linkGroup = leaf.linkGroup ?? null;
+            const onLinkGroupChange = (next: LinkGroup | null) =>
+              setLayout(setLeafLinkGroup(layout, leaf.id, next));
+            if (leaf.panel === "orderbook" || leaf.panel === "tape" || leaf.panel === "dom") {
               const tick = orderBook?.tick ?? config?.tick ?? 0.01;
               return (
                 <DeskBoundPanel leafId={leaf.id}>
@@ -565,17 +696,21 @@ export function BybitDesk({ config }: { config?: BybitDeskConfig | null }) {
                     tape={tradesTape}
                     footprint={footprint}
                     settings={domViz}
-                    onSettingsChange={patchDomViz}
+                    onSettingsChange={patchDomVizDirty}
                     priceDigits={config?.priceDigits ?? 2}
+                    leafId={leaf.id}
+                    linkGroup={linkGroup}
+                    onLinkGroupChange={onLinkGroupChange}
                     settingsPanel={
                       <DomSettingsPanel
                         settings={domViz}
                         tick={tick}
-                        onChange={patchDomViz}
-                        onReset={resetDomViz}
+                        onChange={patchDomVizDirty}
+                        onReset={resetDomVizDirty}
+                        onSaveDefault={saveDomDefaults}
                       />
                     }
-                    onClose={() => setLayout(togglePanel(layout, "dom"))}
+                    onClose={() => setLayout(removeLeaf(layout, leaf.id) ?? newChartLeaf())}
                   />
                 </DeskBoundPanel>
               );
@@ -605,14 +740,19 @@ export function BybitDesk({ config }: { config?: BybitDeskConfig | null }) {
                   orderBook={orderBook}
                   priceDigits={config?.priceDigits ?? 2}
                   tick={config?.tick}
+                  linkGroup={linkGroup}
+                  onLinkGroupChange={onLinkGroupChange}
+                  onPrefsDirty={markLayoutDirty}
                 />
               </DeskBoundPanel>
             );
           }}
         />
+        ) : null}
       </div>
     </div>
     </DeskWorkspace>
+    </PriceLinkProvider>
   );
 }
 
@@ -632,7 +772,7 @@ function AddChartTool({ onAdd }: { onAdd: () => void }) {
   );
 }
 
-type DeskToolId = Exclude<DeskPanelId, "chart" | "footprint">;
+type DeskToolId = Exclude<DeskPanelId, "chart" | "footprint" | "orderbook" | "tape">;
 
 const DESK_TOOLS: {
   id: DeskToolId;
@@ -640,9 +780,7 @@ const DESK_TOOLS: {
   hint: string;
   Icon: (p: { size?: number }) => ReactNode;
 }[] = [
-  { id: "orderbook", label: "Orderbook", hint: "Orderbook", Icon: IconBook },
-  { id: "tape", label: "Tape", hint: "Tape", Icon: IconTape },
-  { id: "dom", label: "DOM", hint: "DOM — hloubka trhu", Icon: IconDom },
+  { id: "dom", label: "DOM", hint: "DOM — kniha a hloubka", Icon: IconDom },
 ];
 
 function DeskToolLaunchers({
@@ -695,6 +833,9 @@ function DeskChartPane({
   orderBook,
   priceDigits,
   tick,
+  linkGroup = null,
+  onLinkGroupChange,
+  onPrefsDirty,
 }: {
   leafId: string;
   onDragStart?: (e: ReactPointerEvent<HTMLElement>) => void;
@@ -716,6 +857,9 @@ function DeskChartPane({
   orderBook: OrderBookData | null;
   priceDigits: number;
   tick?: number;
+  linkGroup?: LinkGroup | null;
+  onLinkGroupChange?: (next: LinkGroup | null) => void;
+  onPrefsDirty?: () => void;
 }) {
   const paneKey = deskPrefKey(deskId, `pane-${leafId}`);
   const [prefs, setPrefs] = useState<ChartPrefs>(defaultChartPrefs);
@@ -724,6 +868,9 @@ function DeskChartPane({
   const [loading, setLoading] = useState(!blank);
   const [live, setLive] = useState(false);
   const loadGen = useRef(0);
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+  const prevApiBase = useRef<string | null>(null);
   const [fpData, setFpData] = useState<{ tf: string; lb: string; data: FootprintData } | null>(null);
 
   useEffect(() => {
@@ -732,12 +879,22 @@ function DeskChartPane({
     setPrefsReady(true);
   }, [deskId, leafId, deskPrefsReady]);
 
+  useEffect(() => {
+    if (prevApiBase.current !== null && prevApiBase.current !== apiBase) {
+      setData(null);
+      setFpData(null);
+      setLive(false);
+    }
+    prevApiBase.current = apiBase;
+  }, [apiBase]);
+
   const persistPrefs = useCallback(
     (next: ChartPrefs) => {
       setPrefs(next);
       lsSet(paneKey, JSON.stringify(next));
+      onPrefsDirty?.();
     },
-    [paneKey]
+    [paneKey, onPrefsDirty]
   );
 
   const patchPrefs = useCallback(
@@ -747,8 +904,9 @@ function DeskChartPane({
         lsSet(paneKey, JSON.stringify(next));
         return next;
       });
+      onPrefsDirty?.();
     },
-    [paneKey]
+    [paneKey, onPrefsDirty]
   );
 
   const load = useCallback(
@@ -762,15 +920,15 @@ function DeskChartPane({
         );
         if (gen !== loadGen.current) return;
         setData(res);
-        onError(null);
+        onErrorRef.current(null);
       } catch (err) {
         if (gen !== loadGen.current) return;
-        if (!silent) onError(err instanceof Error ? err.message : loadError);
+        if (!silent) onErrorRef.current(err instanceof Error ? err.message : loadError);
       } finally {
-        if (gen === loadGen.current && !silent) setLoading(false);
+        if (gen === loadGen.current) setLoading(false);
       }
     },
-    [apiBase, loadError, onError]
+    [apiBase, loadError]
   );
 
   useEffect(() => {
@@ -789,7 +947,7 @@ function DeskChartPane({
   }, [isQuoteSource, live, onLive]);
 
   useEffect(() => {
-    if (blank || loading || !data?.source?.startsWith("bybit")) return;
+    if (blank || !data?.source?.startsWith("bybit")) return;
     let closed = false;
     let ws: WebSocket | null = null;
     let retry: number | null = null;
@@ -848,7 +1006,7 @@ function DeskChartPane({
         /* ignore */
       }
     };
-  }, [blank, prefs.tf, loading, data?.source, apiBase]);
+  }, [blank, prefs.tf, data?.source, apiBase]);
 
   useEffect(() => {
     if (blank || loading || live) return;
@@ -879,8 +1037,15 @@ function DeskChartPane({
     };
   }, [blank, prefs.tf, loading, live, apiBase]);
 
-  const wantFootprint = prefs.viz.footprint && !blank;
-  const wantDom = prefs.viz.dom && !blank;
+  const kind = resolveChartKind(prefs.viz);
+  const wantFootprint =
+    prefsReady &&
+    !blank &&
+    (kind === "footprint" ||
+      kind === "profile" ||
+      kind === "heatmap" ||
+      Boolean(prefs.viz.volumeProfile) ||
+      Boolean(prefs.viz.domOverlay));
   const fpTf = prefs.tf === "1s" ? "1m" : prefs.tf;
 
   const loadFp = useCallback(async () => {
@@ -897,11 +1062,11 @@ function DeskChartPane({
   }, [apiBase, fpTf, prefs.lb]);
 
   useEffect(() => {
-    if (!wantFootprint && !wantDom) return;
+    if (!wantFootprint) return;
     void loadFp();
     const id = window.setInterval(() => void loadFp(), 3000);
     return () => window.clearInterval(id);
-  }, [wantFootprint, wantDom, loadFp]);
+  }, [wantFootprint, loadFp]);
 
   const footprint = fpData && fpData.tf === fpTf && fpData.lb === prefs.lb ? fpData.data : null;
 
@@ -914,7 +1079,18 @@ function DeskChartPane({
   };
 
   const resetViz = () => {
-    persistPrefs({ ...prefs, viz: { ...DEFAULT_DESK_CHART_VIZ } });
+    persistPrefs({ ...prefs, viz: readChartDefaults().viz });
+  };
+
+  const saveChartDefaults = () => {
+    writeChartDefaults({
+      tf: prefs.tf,
+      lb: prefs.lb,
+      viz: prefs.viz,
+      fpViz: prefs.fpViz,
+      vpViz: prefs.vpViz,
+      domViz: prefs.domViz,
+    });
   };
 
   const ranges = LOOKBACKS_BY_TF[prefs.tf] || LOOKBACKS_BY_TF["1d"];
@@ -938,12 +1114,21 @@ function DeskChartPane({
       drawings={prefs.drawings}
       onSelectTimeframe={selectTimeframe}
       onSelectLookback={(lb) => patchPrefs({ lb })}
-      onSelectStyle={(id) => {
+      onSelectKind={(id) => {
         setPrefs((prev) => {
-          const next = { ...prev, viz: { ...prev.viz, style: id } };
+          const next = { ...prev, viz: applyChartKind(prev.viz, id) };
           lsSet(paneKey, JSON.stringify(next));
           return next;
         });
+        onPrefsDirty?.();
+      }}
+      onVizChange={(patch) => {
+        setPrefs((prev) => {
+          const next = { ...prev, viz: { ...prev.viz, ...patch } };
+          lsSet(paneKey, JSON.stringify(next));
+          return next;
+        });
+        onPrefsDirty?.();
       }}
       onDrawingsChange={(items) => patchPrefs({ drawings: items })}
       onDrawTool={onDrawTool}
@@ -952,12 +1137,6 @@ function DeskChartPane({
         patchPrefs({ drawings: [] });
         onDrawTool("none");
       }}
-      onToggleFootprint={() =>
-        patchPrefs({ viz: { ...prefs.viz, footprint: !prefs.viz.footprint } })
-      }
-      onToggleDom={() =>
-        patchPrefs({ viz: { ...prefs.viz, dom: !prefs.viz.dom } })
-      }
       settings={
         <ChartDeskSettings
           viz={prefs.viz}
@@ -967,20 +1146,19 @@ function DeskChartPane({
               lsSet(paneKey, JSON.stringify(next));
               return next;
             });
-            if (patch.dom === false) {
-              patchPrefs({ domViz: { ...DEFAULT_DOM_SETTINGS } });
-            }
-            if (patch.footprint === false) {
-              patchPrefs({ fpViz: { ...DEFAULT_ORDERFLOW_SETTINGS } });
-            }
+            onPrefsDirty?.();
           }}
           onVizReset={resetViz}
+          onSaveDefault={saveChartDefaults}
           fpViz={prefs.fpViz}
           onFpChange={(patch) => patchPrefs({ fpViz: { ...prefs.fpViz, ...patch } })}
-          onFpReset={() => patchPrefs({ fpViz: { ...DEFAULT_ORDERFLOW_SETTINGS } })}
+          onFpReset={() => patchPrefs({ fpViz: { ...readChartDefaults().fpViz } })}
+          vpViz={prefs.vpViz}
+          onVpChange={(patch) => patchPrefs({ vpViz: { ...prefs.vpViz, ...patch } })}
+          onVpReset={() => patchPrefs({ vpViz: { ...readChartDefaults().vpViz } })}
           domViz={prefs.domViz}
           onDomChange={(patch) => patchPrefs({ domViz: { ...prefs.domViz, ...patch } })}
-          onDomReset={() => patchPrefs({ domViz: { ...DEFAULT_DOM_SETTINGS } })}
+          onDomReset={() => patchPrefs({ domViz: { ...readChartDefaults().domViz } })}
           fpTick={footprint?.tick ?? tick ?? 0.01}
           domTick={tick ?? orderBook?.tick ?? 0.01}
         />
@@ -988,14 +1166,21 @@ function DeskChartPane({
       onClose={onClose}
       onDragStart={onDragStart}
       footprintData={footprint}
-      footprintLoading={(wantFootprint || wantDom) && !footprint}
+      footprintLoading={wantFootprint && !footprint}
       fpViz={prefs.fpViz}
       onFpVizChange={(patch) => patchPrefs({ fpViz: { ...prefs.fpViz, ...patch } })}
-      onFpVizReset={() => patchPrefs({ fpViz: { ...DEFAULT_ORDERFLOW_SETTINGS } })}
+      onFpVizReset={() => patchPrefs({ fpViz: { ...readChartDefaults().fpViz } })}
+      vpViz={prefs.vpViz}
+      onVpVizChange={(patch) => patchPrefs({ vpViz: { ...prefs.vpViz, ...patch } })}
+      onVpVizReset={() => patchPrefs({ vpViz: { ...readChartDefaults().vpViz } })}
       orderBook={orderBook}
       domViz={prefs.domViz}
+      onDomVizChange={(patch) => patchPrefs({ domViz: { ...prefs.domViz, ...patch } })}
       priceDigits={priceDigits ?? 2}
       tick={tick}
+      leafId={leafId}
+      linkGroup={linkGroup}
+      onLinkGroupChange={onLinkGroupChange}
     />
   );
 }
@@ -1017,13 +1202,12 @@ function DeskChartLeaf({
   drawings,
   onSelectTimeframe,
   onSelectLookback,
-  onSelectStyle,
+  onSelectKind,
+  onVizChange,
   onDrawingsChange,
   onDrawTool,
   onCloseDraw,
   onClearDraw,
-  onToggleFootprint,
-  onToggleDom,
   settings,
   onClose,
   footprintData,
@@ -1031,10 +1215,17 @@ function DeskChartLeaf({
   fpViz,
   onFpVizChange,
   onFpVizReset,
+  vpViz,
+  onVpVizChange,
+  onVpVizReset,
   orderBook,
   domViz,
+  onDomVizChange,
   priceDigits = 2,
   tick,
+  leafId,
+  linkGroup = null,
+  onLinkGroupChange,
 }: {
   onDragStart?: (e: ReactPointerEvent<HTMLElement>) => void;
   data: DeskChartResponse | null;
@@ -1052,13 +1243,12 @@ function DeskChartLeaf({
   drawings: ChartDrawing[];
   onSelectTimeframe: (id: string) => void;
   onSelectLookback: (id: string) => void;
-  onSelectStyle: (id: ChartStyle) => void;
+  onSelectKind: (id: ChartKind) => void;
+  onVizChange?: (patch: Partial<ChartVizSettings>) => void;
   onDrawingsChange: (items: ChartDrawing[]) => void;
   onDrawTool: (tool: DrawTool | ((t: DrawTool) => DrawTool)) => void;
   onCloseDraw: () => void;
   onClearDraw: () => void;
-  onToggleFootprint: () => void;
-  onToggleDom: () => void;
   settings?: ReactNode;
   onClose: () => void;
   footprintData?: FootprintData | null;
@@ -1066,63 +1256,121 @@ function DeskChartLeaf({
   fpViz?: OrderflowSettings;
   onFpVizChange?: (patch: Partial<OrderflowSettings>) => void;
   onFpVizReset?: () => void;
+  vpViz?: VolumeProfileSettings;
+  onVpVizChange?: (patch: Partial<VolumeProfileSettings>) => void;
+  onVpVizReset?: () => void;
   orderBook?: OrderBookData | null;
   domViz?: DomSettings;
+  onDomVizChange?: (patch: Partial<DomSettings>) => void;
   priceDigits?: number;
   tick?: number;
+  leafId?: string;
+  linkGroup?: LinkGroup | null;
+  onLinkGroupChange?: (next: LinkGroup | null) => void;
 }) {
-  const styleLabel = CHART_STYLES.find((s) => s.id === chartViz.style)?.label ?? "Svíčky";
+  const kind = resolveChartKind(chartViz);
+  const kindLabel = CHART_KINDS.find((s) => s.id === kind)?.label ?? "Svíčkový";
   return (
-    <div className="desk-charts">
-      <DeskWindowHead
-        title={
+    <DeskWindow
+      className="desk-charts"
+      title={
+        <DeskPick
+          label={kindLabel}
+          ariaLabel="Typ grafu"
+          value={kind}
+          options={CHART_KINDS}
+          onSelect={(id) => onSelectKind(id as ChartKind)}
+          className={`desk-win__pick desk-win__pick--type`}
+        />
+      }
+      extra={
+        <div className="desk-win__picks">
           <DeskPick
-            label={styleLabel}
-            ariaLabel="Typ grafu"
-            value={chartViz.style}
-            options={CHART_STYLES}
-            onSelect={(id) => onSelectStyle(id as ChartStyle)}
-            className={`desk-win__pick desk-win__pick--type`}
+            label={tfLabel}
+            ariaLabel="Timeframe"
+            value={timeframe}
+            options={TIMEFRAMES.map((t) => ({ id: t.id, label: t.label }))}
+            onSelect={onSelectTimeframe}
+            className="desk-win__pick"
           />
-        }
-        extra={
-          <div className="desk-win__picks">
-            <DeskPick
-              label={tfLabel}
-              ariaLabel="Timeframe"
-              value={timeframe}
-              options={TIMEFRAMES.map((t) => ({ id: t.id, label: t.label }))}
-              onSelect={onSelectTimeframe}
-              className="desk-win__pick"
-            />
-            <DeskPick
-              label={lbLabel}
-              ariaLabel="Období"
-              value={lookback}
-              options={ranges}
-              onSelect={onSelectLookback}
-              className="desk-win__pick"
-            />
-            <button
-              type="button"
-              className={`desk-win__pick${chartViz.footprint ? " is-active" : ""}`}
-              onClick={onToggleFootprint}
-            >
-              FP
-            </button>
-            <button
-              type="button"
-              className={`desk-win__pick${chartViz.dom ? " is-active" : ""}`}
-              onClick={onToggleDom}
-            >
-              DOM
-            </button>
-          </div>
-        }
-        onDragStart={onDragStart}
-        settings={settings}
-        onClose={onClose}
-      />
+          <DeskPick
+            label={lbLabel}
+            ariaLabel="Období"
+            value={lookback}
+            options={ranges}
+            onSelect={onSelectLookback}
+            className="desk-win__pick"
+          />
+          {kind === "candle" || kind === "footprint" ? (
+            <>
+              <ChartToolPick
+                label="VP"
+                ariaLabel="Volume profile"
+                title="Volume profile — zapnout a nastavit interval"
+                active={Boolean(chartViz.volumeProfile)}
+              >
+                <label className="fp-drawer__toggle">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(chartViz.volumeProfile)}
+                    onChange={() => onVizChange?.({ volumeProfile: !chartViz.volumeProfile })}
+                  />
+                  <span>
+                    <span className="fp-drawer__toggle-lab">Volume profile</span>
+                  </span>
+                </label>
+                {vpViz && onVpVizChange ? (
+                  <ProfileSettingsPanel
+                    overlay
+                    compact
+                    settings={vpViz}
+                    tick={footprintData?.tick ?? tick ?? 0.01}
+                    onChange={onVpVizChange}
+                    onReset={onVpVizReset ?? (() => undefined)}
+                  />
+                ) : null}
+              </ChartToolPick>
+              <ChartToolPick
+                label="DOM"
+                ariaLabel="DOM a heatmapa"
+                title="DOM a heatmapa — zapnout a nastavit"
+                active={Boolean(chartViz.domOverlay)}
+              >
+                <label className="fp-drawer__toggle">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(chartViz.domOverlay)}
+                    onChange={() => {
+                      const next = !chartViz.domOverlay;
+                      onVizChange?.({ domOverlay: next });
+                      if (next) onDomVizChange?.({ showHeatmap: true });
+                    }}
+                  />
+                  <span>
+                    <span className="fp-drawer__toggle-lab">DOM a heatmapa</span>
+                  </span>
+                </label>
+                {domViz && onDomVizChange ? (
+                  <DomSettingsPanel
+                    overlay
+                    compact
+                    settings={domViz}
+                    tick={tick ?? orderBook?.tick ?? 0.01}
+                    onChange={onDomVizChange}
+                    onReset={() => undefined}
+                  />
+                ) : null}
+              </ChartToolPick>
+            </>
+          ) : null}
+        </div>
+      }
+      onDragStart={onDragStart}
+      settings={settings}
+      onClose={onClose}
+      linkGroup={linkGroup}
+      onLinkGroupChange={onLinkGroupChange}
+    >
       <div className="desk-charts__pane">
         {data?.bars?.length ? (
           <>
@@ -1130,18 +1378,36 @@ function DeskChartLeaf({
               bars={data.bars}
               realtime
               showMa={false}
-              showVolume={chartViz.volume}
+              showVolume={kind === "candle" && chartViz.volume}
               secondsVisible={timeframe === "1m" || timeframe === "1s"}
               chartViz={chartViz}
               drawTool={drawTool}
               drawings={drawings}
               onDrawingsChange={onDrawingsChange}
-              footprintData={chartViz.footprint ? footprintData : undefined}
-              footprintSettings={chartViz.footprint ? fpViz : undefined}
-              footprintLoading={chartViz.footprint ? footprintLoading : false}
-              orderBook={chartViz.dom ? orderBook : undefined}
-              domSettings={chartViz.dom ? domViz : undefined}
+              footprintData={
+                kind === "footprint" ||
+                kind === "profile" ||
+                kind === "heatmap" ||
+                chartViz.volumeProfile ||
+                chartViz.domOverlay
+                  ? footprintData
+                  : undefined
+              }
+              footprintSettings={
+                kind === "footprint" || kind === "profile" ? fpViz : undefined
+              }
+              onFootprintSettingsChange={kind === "footprint" ? onFpVizChange : undefined}
+              volumeProfileSettings={
+                kind === "profile" || chartViz.volumeProfile ? vpViz : undefined
+              }
+              footprintLoading={
+                (kind === "footprint" || chartViz.volumeProfile) && footprintLoading
+              }
+              orderBook={kind === "heatmap" || chartViz.domOverlay ? orderBook : undefined}
+              domSettings={kind === "heatmap" || chartViz.domOverlay ? domViz : undefined}
               priceDigits={priceDigits}
+              linkId={leafId}
+              linkGroup={linkGroup}
             />
             {drawBarOpen ? (
               <div className="draw-toolbar" role="toolbar" aria-label="Kreslení">
@@ -1172,14 +1438,24 @@ function DeskChartLeaf({
             ) : null}
           </>
         ) : (
-          <div className="muted p-6 text-sm">{loading ? loadingLabel : blank ? "" : "Žádná OHLCV data."}</div>
+          <ChartBusy label={loading ? loadingLabel : blank ? "" : "Žádná OHLCV data."} />
         )}
-        {loading && data?.bars?.length ? (
-          <div className="chart-loading-overlay" aria-live="polite">
-            Načítám…
-          </div>
+        {Boolean(data?.bars?.length) && (loading || footprintLoading) ? (
+          <ChartBusy
+            label={footprintLoading && !loading ? "Načítám footprint…" : loadingLabel || "Načítám…"}
+          />
         ) : null}
       </div>
+    </DeskWindow>
+  );
+}
+
+function ChartBusy({ label }: { label: string }) {
+  if (!label) return null;
+  return (
+    <div className="chart-loading-overlay" aria-live="polite">
+      <span className="chart-loader" aria-hidden />
+      <span className="chart-loading-overlay__lab">{label}</span>
     </div>
   );
 }

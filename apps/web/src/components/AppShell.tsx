@@ -6,47 +6,24 @@ import { useCallback, useEffect, useState } from "react";
 import { StockSenseLogo } from "@/components/StockSenseLogo";
 import { SettingsPanel } from "@/components/SettingsPanel";
 import { HeaderExtraSlot, HeaderQuoteSlot } from "@/components/HeaderExtra";
+import { LayoutCreateModal } from "@/components/LayoutCreateModal";
+import { SymbolPick } from "@/components/SymbolPick";
+import { WorkspaceProvider, useWorkspace } from "@/components/WorkspaceProvider";
 import {
   IconClose,
-  IconDesk,
+  IconHome,
+  IconPlus,
   IconSettings,
+  LAYOUT_ICONS,
   RAIL_ICON_SIZE,
-  NAV_ICON_SIZE,
-  navIcons,
 } from "@/components/NavIcons";
 import { applyTheme, ColorMode, getStoredTheme } from "@/lib/theme";
 import { ChartVizProvider } from "@/lib/chartViz";
-import { LINEAR_DESKS, deskHref } from "@/lib/desks";
-
-const links: { href: string; label: string }[] = [
-  { href: "/", label: "Home" },
-  ...LINEAR_DESKS.map((d) => ({ href: deskHref(d.id), label: d.navLabel })),
-];
+import { deskHref } from "@/lib/desks";
+import type { LayoutIconId, WorkspaceLayout } from "@/lib/workspace";
 
 const RAIL_KEY = "stocksense-rail-collapsed";
 const DESKTOP_MQ = "(min-width: 768px)";
-
-function isActive(pathname: string, href: string) {
-  return pathname === href || (href !== "/" && pathname.startsWith(href));
-}
-
-function NavLabel({
-  href,
-  label,
-  size = NAV_ICON_SIZE,
-}: {
-  href: string;
-  label: string;
-  size?: number;
-}) {
-  const Icon = navIcons[href] ?? IconDesk;
-  return (
-    <span className="nav-item">
-      <Icon size={size} />
-      <span className="nav-item__label">{label}</span>
-    </span>
-  );
-}
 
 function useLockPageZoom() {
   useEffect(() => {
@@ -86,12 +63,26 @@ function useLockPageZoom() {
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  return (
+    <ChartVizProvider>
+      <WorkspaceProvider>
+        <AppShellInner>{children}</AppShellInner>
+      </WorkspaceProvider>
+    </ChartVizProvider>
+  );
+}
+
+function AppShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { catalog, active, createLayout, updateLayout, deleteLayout } = useWorkspace();
   const [menuOpen, setMenuOpen] = useState(false);
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [desktop, setDesktop] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [theme, setTheme] = useState<ColorMode>("dark");
+  const [modal, setModal] = useState<null | { mode: "create" } | { mode: "edit"; item: WorkspaceLayout }>(
+    null
+  );
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
   useLockPageZoom();
 
@@ -156,11 +147,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     applyTheme(mode);
   }
 
-  const current = links.find((l) => isActive(pathname, l.href));
-  const CurrentIcon = current ? navIcons[current.href] ?? IconDesk : null;
+  const homeActive = pathname === "/";
 
   return (
-    <ChartVizProvider>
     <div
       className={`app-shell min-h-screen pb-8 ${menuOpen ? "is-menu-open" : ""} ${
         railCollapsed ? "is-rail-collapsed" : ""
@@ -187,12 +176,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             >
               <StockSenseLogo height={28} />
             </button>
-            {current && CurrentIcon ? (
+            {homeActive ? (
               <span className="header-symbol-stack">
                 <span className="header-symbol">
-                  <CurrentIcon size={20} />
-                  <span className="header-symbol__name">{current.label}</span>
+                  <IconHome size={20} />
+                  <span className="header-symbol__name">Home</span>
                 </span>
+              </span>
+            ) : active ? (
+              <span className="header-symbol-stack">
+                <SymbolPick
+                  symbolId={active.symbolId}
+                  onSelect={(id) => updateLayout(active.id, { symbolId: id })}
+                />
                 <HeaderQuoteSlot />
               </span>
             ) : null}
@@ -230,28 +226,63 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <button
               type="button"
               className="app-rail__close"
-              aria-label="Zavřít menu"
+              aria-label="Zavřít"
               onClick={() => setMenuOpen(false)}
             >
               <IconClose size={18} />
             </button>
           </div>
           <nav className="app-rail__nav">
-            {links.map((l) => {
-              const active = isActive(pathname, l.href);
+            <Link
+              href="/"
+              className={`app-rail__link ${homeActive ? "is-active" : ""}`}
+              aria-current={homeActive ? "page" : undefined}
+              title="Home"
+              onClick={() => setMenuOpen(false)}
+            >
+              <span className="nav-item">
+                <IconHome size={RAIL_ICON_SIZE} />
+                <span className="nav-item__label">Home</span>
+              </span>
+            </Link>
+            {catalog.items.map((item) => {
+              const href = deskHref(item.id);
+              const isOn = pathname === href || pathname.startsWith(`${href}/`);
+              const Icon = LAYOUT_ICONS[item.icon] ?? LAYOUT_ICONS.desk;
               return (
                 <Link
-                  key={l.href}
-                  href={l.href}
-                  className={`app-rail__link ${active ? "is-active" : ""}`}
-                  aria-current={active ? "page" : undefined}
-                  title={l.label}
+                  key={item.id}
+                  href={href}
+                  className={`app-rail__link ${isOn ? "is-active" : ""}`}
+                  aria-current={isOn ? "page" : undefined}
+                  title={`${item.name} — pravý klik pro úpravu`}
                   onClick={() => setMenuOpen(false)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setModal({ mode: "edit", item });
+                  }}
                 >
-                  <NavLabel href={l.href} label={l.label} size={RAIL_ICON_SIZE} />
+                  <span className="nav-item">
+                    <Icon size={RAIL_ICON_SIZE} />
+                    <span className="nav-item__label">{item.name}</span>
+                  </span>
                 </Link>
               );
             })}
+            <button
+              type="button"
+              className="app-rail__link app-rail__add"
+              title="Nový layout"
+              onClick={() => {
+                setMenuOpen(false);
+                setModal({ mode: "create" });
+              }}
+            >
+              <span className="nav-item">
+                <IconPlus size={RAIL_ICON_SIZE} />
+                <span className="nav-item__label">Nový layout</span>
+              </span>
+            </button>
           </nav>
         </div>
       </aside>
@@ -264,7 +295,33 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         theme={theme}
         onThemeChange={setThemeMode}
       />
+
+      <LayoutCreateModal
+        open={modal !== null}
+        title={modal?.mode === "edit" ? "Upravit layout" : "Nový layout"}
+        confirmLabel={modal?.mode === "edit" ? "Uložit" : "Vytvořit"}
+        initialName={modal?.mode === "edit" ? modal.item.name : ""}
+        initialIcon={modal?.mode === "edit" ? modal.item.icon : "desk"}
+        onClose={() => setModal(null)}
+        onSubmit={(name, icon: LayoutIconId) => {
+          if (modal?.mode === "edit") {
+            updateLayout(modal.item.id, { name, icon });
+            setModal(null);
+            return;
+          }
+          createLayout(name, icon);
+          setModal(null);
+        }}
+        onDelete={
+          modal?.mode === "edit" && catalog.items.length > 1
+            ? () => {
+                if (!window.confirm(`Smazat layout „${modal.item.name}“?`)) return;
+                deleteLayout(modal.item.id);
+                setModal(null);
+              }
+            : undefined
+        }
+      />
     </div>
-    </ChartVizProvider>
   );
 }

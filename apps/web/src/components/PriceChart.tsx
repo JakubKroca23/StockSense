@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useRef, useState, memo, type MutableRefObject, type PointerEvent as ReactPointerEvent } from "react";
 import {
   ColorType,
   CrosshairMode,
@@ -18,15 +18,39 @@ import { ChartDrawOverlay } from "@/components/ChartDrawOverlay";
 import { DomOverlay } from "@/components/DomOverlay";
 import { FootprintOverlay } from "@/components/FootprintOverlay";
 import { FootprintFooter } from "@/components/FootprintFooter";
+import { ProfileOverlay } from "@/components/ProfileOverlay";
 import { applyIndicator, type ChartDrawing, type DrawTool, type OhlcvBar } from "@/lib/chart";
-import { footprintFooterEnabled, footprintFooterHeight } from "@/lib/orderflow";
 import type { OrderBookData } from "@/components/OrderBookPanel";
-import type { DomSettings, FootprintData, OrderflowSettings } from "@/lib/orderflow";
+import {
+  DEFAULT_ORDERFLOW_SETTINGS,
+  DEFAULT_VOLUME_PROFILE_SETTINGS,
+  FP_FOOTER_MAX,
+  footprintFooterEnabled,
+  footprintFooterHeight,
+  footprintFooterMinHeight,
+  profileUsesRightColumn,
+  type DomSettings,
+  type FootprintData,
+  type OrderflowSettings,
+  type VolumeProfileSettings,
+} from "@/lib/orderflow";
+import { usePriceLink } from "@/components/PriceLink";
+import type { LinkGroup } from "@/lib/linkGroup";
 
 export type ChartStyle = "candle" | "hollow" | "line" | "off";
 export type ChartCrosshair = "normal" | "magnet" | "off";
+export type ChartKind = "candle" | "footprint" | "heatmap" | "profile";
+
+export const CHART_KINDS: { id: ChartKind; label: string }[] = [
+  { id: "candle", label: "Svíčkový" },
+  { id: "footprint", label: "Footprint" },
+  { id: "heatmap", label: "Heatmapa" },
+  { id: "profile", label: "TPO & VP" },
+];
 
 export type ChartVizSettings = {
+  /** Primary chart type. Older prefs omit this and use `footprint` / `dom` flags. */
+  kind?: ChartKind;
   style: ChartStyle;
   grid: boolean;
   sma20: boolean;
@@ -43,6 +67,10 @@ export type ChartVizSettings = {
   rightOffset: number;
   footprint: boolean;
   dom: boolean;
+  /** Volume profile histogram overlay on candle / footprint. */
+  volumeProfile: boolean;
+  /** DOM + heatmap overlay on candle / footprint. */
+  domOverlay: boolean;
   /** Vlastní barvy — prázdné = téma aplikace. */
   upColor?: string;
   downColor?: string;
@@ -52,6 +80,7 @@ export type ChartVizSettings = {
 };
 
 export const DEFAULT_CHART_VIZ: ChartVizSettings = {
+  kind: "candle",
   style: "candle",
   grid: true,
   sma20: true,
@@ -68,6 +97,8 @@ export const DEFAULT_CHART_VIZ: ChartVizSettings = {
   rightOffset: 0,
   footprint: false,
   dom: false,
+  volumeProfile: false,
+  domOverlay: false,
 };
 
 export const DEFAULT_DESK_CHART_VIZ: ChartVizSettings = {
@@ -76,6 +107,35 @@ export const DEFAULT_DESK_CHART_VIZ: ChartVizSettings = {
   sma50: false,
   volume: true,
 };
+
+export function resolveChartKind(viz: Partial<ChartVizSettings> | undefined): ChartKind {
+  if (!viz) return "candle";
+  if (viz.kind === "candle" || viz.kind === "footprint" || viz.kind === "heatmap" || viz.kind === "profile") {
+    return viz.kind;
+  }
+  if (viz.footprint) return "footprint";
+  if (viz.dom) return "heatmap";
+  return "candle";
+}
+
+export function applyChartKind(viz: ChartVizSettings, kind: ChartKind): ChartVizSettings {
+  const style =
+    kind === "candle" ? (viz.style === "off" ? "candle" : viz.style) : "off";
+  return {
+    ...viz,
+    kind,
+    style,
+    footprint: kind === "footprint",
+    dom: kind === "heatmap",
+  };
+}
+
+export function normalizeChartViz(raw?: Partial<ChartVizSettings> | null): ChartVizSettings {
+  const merged = { ...DEFAULT_DESK_CHART_VIZ, ...(raw ?? {}) };
+  const kind =
+    raw && "kind" in raw ? resolveChartKind(raw) : resolveChartKind({ ...raw, kind: undefined });
+  return applyChartKind(merged, kind);
+}
 
 export type ChartBar = {
   ts: string;
@@ -115,10 +175,14 @@ type Props = {
   chartApiRef?: MutableRefObject<PriceChartHandle | null>;
   footprintData?: FootprintData | null;
   footprintSettings?: OrderflowSettings;
+  onFootprintSettingsChange?: (patch: Partial<OrderflowSettings>) => void;
   footprintLoading?: boolean;
+  volumeProfileSettings?: VolumeProfileSettings;
   orderBook?: OrderBookData | null;
   domSettings?: DomSettings;
   priceDigits?: number;
+  linkId?: string;
+  linkGroup?: LinkGroup | null;
 };
 
 export type PriceChartHandle = {
@@ -170,6 +234,27 @@ function readTheme(): Theme {
 
 /** Last candle sits fully left of the native price scale. */
 const LIVE_RIGHT_PAD = 0.42;
+
+function readVisiblePriceWindow(
+  series: ISeriesApi<"Candlestick">,
+  plot: HTMLElement
+): { top: number; bottom: number; height: number; screenTop: number } | null {
+  const h = plot.clientHeight;
+  if (h < 8) return null;
+  const top = series.coordinateToPrice(0);
+  let bottom: number | null = null;
+  let usedH = h;
+  for (let y = h - 1; y > 8; y -= 1) {
+    const p = series.coordinateToPrice(y);
+    if (p != null) {
+      bottom = p;
+      usedH = y;
+      break;
+    }
+  }
+  if (top == null || bottom == null || !(top > bottom)) return null;
+  return { top, bottom, height: usedH, screenTop: plot.getBoundingClientRect().top };
+}
 
 function stickLiveToPriceScale(chart: IChartApi, lastIndex: number) {
   const ts = chart.timeScale();
@@ -241,13 +326,14 @@ function candleLook(theme: Theme, viz: ChartVizSettings) {
   const off = viz.style === "off";
   const line = viz.style === "line";
   const hollow = viz.style === "hollow";
+  const keepLast = !off || viz.footprint;
   const up = pickColor(viz.upColor, theme.up);
   const down = pickColor(viz.downColor, theme.down);
   const wickUp = pickColor(viz.wickUpColor, up);
   const wickDown = pickColor(viz.wickDownColor, down);
   const hideBody = line || off;
   return {
-    visible: !off,
+    visible: keepLast,
     upColor: hideBody || hollow ? "rgba(0,0,0,0)" : up,
     downColor: hideBody || hollow ? "rgba(0,0,0,0)" : down,
     borderUpColor: hideBody ? "rgba(0,0,0,0)" : up,
@@ -256,8 +342,8 @@ function candleLook(theme: Theme, viz: ChartVizSettings) {
     wickDownColor: wickDown,
     wickVisible: !hideBody && viz.wicks,
     borderVisible: !hideBody,
-    priceLineVisible: viz.priceLine,
-    lastValueVisible: viz.lastValue && !off,
+    priceLineVisible: viz.priceLine && keepLast,
+    lastValueVisible: viz.lastValue && keepLast,
     priceLineColor: hexAlpha(theme.sense, 0.55),
     priceLineWidth: 1 as const,
     priceLineStyle: LineStyle.Dashed,
@@ -273,7 +359,7 @@ export function readChartThemeDefaults() {
   };
 }
 
-export function PriceChart({
+export const PriceChart = memo(function PriceChart({
   bars,
   height,
   levels = [],
@@ -289,14 +375,19 @@ export function PriceChart({
   chartApiRef,
   footprintData,
   footprintSettings,
+  onFootprintSettingsChange,
   footprintLoading,
+  volumeProfileSettings,
   orderBook,
   domSettings,
   priceDigits = 2,
+  linkId,
+  linkGroup = null,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<HTMLDivElement>(null);
+  const [plotEl, setPlotEl] = useState<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -312,19 +403,77 @@ export function PriceChart({
   const fill = height == null;
   const themeRev = useThemeRevision();
   const [chartTick, setChartTick] = useState(0);
+  const [dragFooterH, setDragFooterH] = useState<number | null>(null);
+  const [footerResizing, setFooterResizing] = useState(false);
+  const priceLink = usePriceLink();
+  const priceLinkRef = useRef(priceLink);
+  priceLinkRef.current = priceLink;
+  const applyingLinkRef = useRef(false);
 
+  const kind = resolveChartKind(chartViz);
+  const candleKind = kind === "candle";
+  const footprintReady = kind !== "footprint" || Boolean(footprintData);
   const viz: ChartVizSettings = {
     ...DEFAULT_CHART_VIZ,
-    sma20: showMa,
-    sma50: showMa,
     ...chartViz,
-    volume: showVolume,
+    kind,
+    style: candleKind
+      ? (chartViz?.style ?? "candle")
+      : footprintReady
+        ? "off"
+        : "candle",
+    sma20: candleKind && (chartViz?.sma20 ?? showMa),
+    sma50: candleKind && (chartViz?.sma50 ?? showMa),
+    ema20: candleKind && Boolean(chartViz?.ema20),
+    rsi: candleKind && Boolean(chartViz?.rsi),
+    volume: candleKind && showVolume,
+    footprint: kind === "footprint",
+    dom: kind === "heatmap",
+    volumeProfile: Boolean(chartViz?.volumeProfile),
+    domOverlay: Boolean(chartViz?.domOverlay),
+    barSpacing: kind === "footprint" ? Math.max(16, chartViz?.barSpacing ?? 9) : (chartViz?.barSpacing ?? 9),
   };
 
   const fpFooterH =
-    footprintData && footprintSettings && footprintFooterEnabled(footprintSettings)
-      ? footprintFooterHeight(footprintSettings)
+    kind === "footprint" &&
+    footprintData &&
+    footprintSettings &&
+    footprintFooterEnabled(footprintSettings)
+      ? dragFooterH ?? footprintFooterHeight(footprintSettings)
       : 0;
+
+  const onFooterResize = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!footprintSettings || !onFootprintSettingsChange) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const handle = e.currentTarget;
+    handle.setPointerCapture(e.pointerId);
+    const startY = e.clientY;
+    const startH = fpFooterH;
+    const minH = footprintFooterMinHeight(footprintSettings);
+    const plotH = plotRef.current?.clientHeight ?? 240;
+    const maxH = Math.min(FP_FOOTER_MAX, Math.max(minH, plotH + startH - 96));
+    setFooterResizing(true);
+    const onMove = (ev: PointerEvent) => {
+      const next = Math.round(Math.min(maxH, Math.max(minH, startH + (startY - ev.clientY))));
+      setDragFooterH(next);
+    };
+    const onUp = (ev: PointerEvent) => {
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      const next = Math.round(Math.min(maxH, Math.max(minH, startH + (startY - ev.clientY))));
+      setDragFooterH(null);
+      setFooterResizing(false);
+      onFootprintSettingsChange({ footerHeight: next });
+      try {
+        handle.releasePointerCapture(ev.pointerId);
+      } catch {
+        /* already released */
+      }
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+  };
 
   const measurePlot = () => {
     const plot = plotRef.current;
@@ -397,7 +546,7 @@ export function PriceChart({
         secondsVisible,
         rightOffset: LIVE_RIGHT_PAD,
         barSpacing: viz.barSpacing,
-        minBarSpacing: 3,
+        minBarSpacing: kind === "footprint" ? 8 : 3,
         fixLeftEdge: false,
         fixRightEdge: false,
         shiftVisibleRangeOnNewBar: true,
@@ -608,9 +757,9 @@ export function PriceChart({
   useEffect(() => {
     chartRef.current?.timeScale().applyOptions({
       barSpacing: viz.barSpacing,
-      minBarSpacing: 3,
+      minBarSpacing: kind === "footprint" ? 8 : 3,
     });
-  }, [viz.barSpacing]);
+  }, [viz.barSpacing, kind]);
 
   useEffect(() => {
     chartRef.current?.timeScale().applyOptions({
@@ -782,6 +931,67 @@ export function PriceChart({
     });
   }, [levels]);
 
+  useEffect(() => {
+    if (!linkGroup || !linkId || !chartTick) {
+      if (chartRef.current) {
+        seriesRef.current?.applyOptions({ autoscaleInfoProvider: undefined });
+        chartRef.current.priceScale("right").applyOptions({ autoScale: true });
+      }
+      return;
+    }
+    const chart = chartRef.current;
+    const series = seriesRef.current;
+    const plot = plotRef.current;
+    if (!chart || !series || !plot) return;
+
+    const publish = () => {
+      const api = priceLinkRef.current;
+      if (!api || applyingLinkRef.current) return;
+      const cur = api.scaleOf(linkGroup);
+      if (cur && cur.sourceId !== linkId && Date.now() < cur.leadUntil) return;
+      const win = readVisiblePriceWindow(series, plot);
+      if (!win) return;
+      api.publish(linkGroup, {
+        ...win,
+        pxPerPrice: win.height / (win.top - win.bottom),
+        sourceId: linkId,
+      });
+    };
+
+    publish();
+    const interval = window.setInterval(publish, 120);
+    return () => window.clearInterval(interval);
+  }, [linkGroup, linkId, chartTick]);
+
+  const incomingScale =
+    linkGroup && priceLink && linkId ? priceLink.scaleOf(linkGroup) : null;
+
+  useEffect(() => {
+    if (!linkGroup || !linkId || !chartTick) return;
+    const chart = chartRef.current;
+    const series = seriesRef.current;
+    if (!chart || !series) return;
+    if (!incomingScale || incomingScale.sourceId === linkId) return;
+    const span = incomingScale.top - incomingScale.bottom;
+    if (!(span > 0)) return;
+    applyingLinkRef.current = true;
+    const sm = chart.priceScale("right").options().scaleMargins;
+    const contentMax = incomingScale.top - span * sm.top;
+    const contentMin = incomingScale.bottom + span * sm.bottom;
+    series.applyOptions({
+      autoscaleInfoProvider: () => ({
+        priceRange: { minValue: contentMin, maxValue: contentMax },
+      }),
+    });
+    chart.priceScale("right").applyOptions({ autoScale: true });
+    const frame = requestAnimationFrame(() => {
+      series.applyOptions({ autoscaleInfoProvider: undefined });
+      chart.priceScale("right").applyOptions({ autoScale: false });
+      applyingLinkRef.current = false;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [incomingScale, linkGroup, linkId, chartTick]);
+
   if (!bars.length) {
     return <p className="muted text-sm">Graf zatím nemá data.</p>;
   }
@@ -789,10 +999,16 @@ export function PriceChart({
   return (
     <div
       ref={wrapRef}
-      className={`price-chart${fill ? " price-chart--fill" : ""}${className ? ` ${className}` : ""}`}
+      className={`price-chart${fill ? " price-chart--fill" : ""}${footerResizing ? " is-fp-footer-resize" : ""}${className ? ` ${className}` : ""}`}
     >
       <div ref={mainRef} className="price-chart__main">
-        <div ref={plotRef} className="price-chart__plot">
+        <div
+          ref={(node) => {
+            plotRef.current = node;
+            setPlotEl((cur) => (cur === node ? cur : node));
+          }}
+          className="price-chart__plot"
+        >
           <div
             ref={containerRef}
             className="price-chart__canvas"
@@ -801,44 +1017,93 @@ export function PriceChart({
           <ChartDrawOverlay
             chart={chartTick ? chartRef.current : null}
             series={chartTick ? seriesRef.current : null}
-            wrap={plotRef.current}
+            wrap={plotEl}
             tool={drawTool}
             drawings={drawings}
             onChange={onDrawingsChange || (() => undefined)}
           />
-          {footprintData && footprintSettings ? (
+          {kind === "footprint" && footprintData && footprintSettings ? (
             <FootprintOverlay
               chart={chartTick ? chartRef.current : null}
               series={chartTick ? seriesRef.current : null}
-              wrap={plotRef.current}
+              wrap={plotEl}
               data={footprintData}
               settings={footprintSettings}
               priceDigits={priceDigits}
-              footerH={fpFooterH}
             />
           ) : null}
-          {orderBook && domSettings ? (
+          {kind === "heatmap" && orderBook && domSettings ? (
             <DomOverlay
               chart={chartTick ? chartRef.current : null}
               series={chartTick ? seriesRef.current : null}
-              wrap={plotRef.current}
+              wrap={plotEl}
+              book={orderBook}
+              footprint={footprintData ?? null}
+              settings={{ ...domSettings, showHeatmap: true }}
+              priceDigits={priceDigits}
+              fillHeat
+            />
+          ) : null}
+          {kind === "profile" ? (
+            <ProfileOverlay
+              chart={chartTick ? chartRef.current : null}
+              series={chartTick ? seriesRef.current : null}
+              wrap={plotEl}
+              bars={bars}
+              footprint={footprintData ?? null}
+              settings={volumeProfileSettings ?? { ...DEFAULT_VOLUME_PROFILE_SETTINGS }}
+              tpoSettings={footprintSettings ?? { ...DEFAULT_ORDERFLOW_SETTINGS }}
+              priceDigits={priceDigits}
+            />
+          ) : null}
+          {(kind === "candle" || kind === "footprint") && viz.domOverlay && orderBook && domSettings ? (
+            <DomOverlay
+              chart={chartTick ? chartRef.current : null}
+              series={chartTick ? seriesRef.current : null}
+              wrap={plotEl}
               book={orderBook}
               footprint={footprintData ?? null}
               settings={domSettings}
               priceDigits={priceDigits}
+              rightInset={
+                viz.volumeProfile && profileUsesRightColumn(volumeProfileSettings?.profileRange)
+                  ? Math.max(48, Math.min(volumeProfileSettings?.profileWidth ?? 90, 180))
+                  : 0
+              }
+            />
+          ) : null}
+          {(kind === "candle" || kind === "footprint") && viz.volumeProfile ? (
+            <ProfileOverlay
+              chart={chartTick ? chartRef.current : null}
+              series={chartTick ? seriesRef.current : null}
+              wrap={plotEl}
+              bars={bars}
+              footprint={footprintData ?? null}
+              settings={volumeProfileSettings ?? { ...DEFAULT_VOLUME_PROFILE_SETTINGS }}
+              priceDigits={priceDigits}
+              overlay
             />
           ) : null}
         </div>
         {fpFooterH > 0 && footprintData && footprintSettings ? (
-          <FootprintFooter
-            chart={chartTick ? chartRef.current : null}
-            wrap={mainRef.current}
-            data={footprintData}
-            settings={footprintSettings}
-            height={fpFooterH}
-          />
+          <>
+            <button
+              type="button"
+              className="fp-footer-resize"
+              aria-label="Výška spodní tabulky footprintu"
+              title="Táhni pro výšku tabulky"
+              onPointerDown={onFooterResize}
+            />
+            <FootprintFooter
+              chart={chartTick ? chartRef.current : null}
+              wrap={mainRef.current}
+              data={footprintData}
+              settings={footprintSettings}
+              height={fpFooterH}
+            />
+          </>
         ) : null}
       </div>
     </div>
   );
-}
+});

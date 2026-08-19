@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { TICK_GROUPS, readOrderflowTheme, type OrderflowSettings } from "@/lib/orderflow";
+import { TICK_GROUPS, activeClusterFormat, clusterFormatPatch, readOrderflowTheme, type OrderflowSettings } from "@/lib/orderflow";
+import { SettingsActionRow } from "@/components/SettingsActionRow";
 import { useThemeRevision } from "@/lib/theme";
 
 type Props = {
@@ -9,12 +10,13 @@ type Props = {
   tick: number;
   onChange: (patch: Partial<OrderflowSettings>) => void;
   onReset: () => void;
+  onSaveDefault?: () => void;
   /** V grafu se používají jen volby, které overlay skutečně kreslí. */
   mode?: "chart" | "panel";
   inDeskMenu?: boolean;
 };
 
-type FpSectionId = "cluster" | "heat" | "imbalance" | "signals" | "colors" | "footer";
+type FpSectionId = "cluster" | "heat" | "imbalance" | "signals" | "footer";
 
 function ColorField({
   label,
@@ -60,6 +62,7 @@ export function FootprintSettingsPanel({
   tick,
   onChange,
   onReset,
+  onSaveDefault,
   mode = "panel",
   inDeskMenu = false,
 }: Props) {
@@ -72,33 +75,13 @@ export function FootprintSettingsPanel({
       [
         { id: "cluster", label: "Cluster" },
         { id: "heat", label: "Heat" },
-        { id: "imbalance", label: "Nerovnováhy" },
+        { id: "imbalance", label: "Imbalance" },
         { id: "signals", label: "Signály" },
-        { id: "colors", label: "Barvy" },
         { id: "footer", label: "Spodní tabulka" },
       ] as const satisfies ReadonlyArray<{ id: FpSectionId; label: string }>,
     []
   );
   const [active, setActive] = useState<FpSectionId>("cluster");
-
-  const hasCustomColors = Boolean(
-    settings.upColor ||
-      settings.downColor ||
-      settings.senseColor ||
-      settings.textColor ||
-      settings.imbalanceBuyColor ||
-      settings.imbalanceSellColor
-  );
-
-  const resetColors = () =>
-    onChange({
-      upColor: undefined,
-      downColor: undefined,
-      senseColor: undefined,
-      textColor: undefined,
-      imbalanceBuyColor: undefined,
-      imbalanceSellColor: undefined,
-    });
 
   useEffect(() => {
     if (!sections.some((section) => section.id === active)) {
@@ -132,14 +115,124 @@ export function FootprintSettingsPanel({
         {active === "cluster" ? (
         <section className="fp-drawer__sec">
           <h3>Cluster</h3>
-          <p className="fp-drawer__lead">Co se píše do kaňky u každé svíčky.</p>
+          <p className="fp-drawer__lead">Rozložení sloupce: text, heatmapa, svíčka a profil.</p>
           <div className="fp-drawer__item">
             <div className="fp-drawer__item-top">
-              <span>Obsah buňky</span>
+              <span>Formát clusteru</span>
             </div>
             <p className="fp-drawer__hint">
-              Bid × Ask = prodeje vlevo, nákupy vpravo. Delta = rozdíl ask−bid. Objem = součet.
-              Profil = barevné pruhy podle velikosti.
+              Ladder = čísla. Profile = histogram bid/ask nebo delty na každé hladině.
+            </p>
+            <div className="fp-drawer__seg">
+              {(
+                [
+                  ["bidask-ladder", "Bid Ask Ladder"],
+                  ["bidask-profile", "Bid Ask Profile"],
+                  ["delta-ladder", "Delta Ladder"],
+                  ["delta-profile", "Delta Profile"],
+                ] as const
+              ).map(([id, lab]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`fp-drawer__chip ${activeClusterFormat(settings) === id ? "is-active" : ""}`}
+                  onClick={() => onChange(clusterFormatPatch(id))}
+                >
+                  {lab}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="fp-drawer__item">
+            <div className="fp-drawer__item-top">
+              <span>Rychlé rozložení</span>
+            </div>
+            <div className="fp-drawer__seg">
+              {(
+                [
+                  ["bidask-mid", "Bid×Ask střed"],
+                  ["bidask-left", "Bid×Ask vlevo"],
+                  ["delta", "Delta"],
+                  ["candle", "Svíčky"],
+                  ["prof-left", "Profil vlevo"],
+                  ["prof-right", "Profil vpravo"],
+                ] as const
+              ).map(([id, lab]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className="fp-drawer__chip"
+                  onClick={() => {
+                    if (id === "bidask-mid") {
+                      onChange({
+                        cellMode: "bidask",
+                        showText: true,
+                        heatMode: "off",
+                        candlePosition: "center",
+                        showCandle: true,
+                        profileSide: "off",
+                      });
+                    } else if (id === "bidask-left") {
+                      onChange({
+                        cellMode: "bidask",
+                        showText: true,
+                        heatMode: "volume",
+                        candlePosition: "left",
+                        showCandle: true,
+                        profileSide: "off",
+                      });
+                    } else if (id === "delta") {
+                      onChange({
+                        cellMode: "delta",
+                        showText: true,
+                        heatMode: "delta",
+                        candlePosition: "center",
+                        showCandle: true,
+                        profileSide: "off",
+                      });
+                    } else if (id === "candle") {
+                      onChange({
+                        cellMode: "bidask",
+                        showText: false,
+                        heatMode: "off",
+                        candlePosition: "center",
+                        showCandle: true,
+                        profileSide: "off",
+                      });
+                    } else if (id === "prof-left") {
+                      onChange({
+                        cellMode: "bidask",
+                        showText: false,
+                        heatMode: "off",
+                        candlePosition: "right",
+                        showCandle: true,
+                        profileSide: "left",
+                        profileStyle: "bars",
+                      });
+                    } else {
+                      onChange({
+                        cellMode: "bidask",
+                        showText: false,
+                        heatMode: "off",
+                        candlePosition: "left",
+                        showCandle: true,
+                        profileSide: "right",
+                        profileStyle: "bars",
+                      });
+                    }
+                  }}
+                >
+                  {lab}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="fp-drawer__item">
+            <div className="fp-drawer__item-top">
+              <span>Text v buňce</span>
+            </div>
+            <p className="fp-drawer__hint">
+              Bid × Ask = prodeje vlevo, nákupy vpravo. Delta = ask − bid. Objem = součet.
             </p>
             <div className="fp-drawer__seg">
               {(
@@ -147,14 +240,14 @@ export function FootprintSettingsPanel({
                   ["bidask", "Bid × Ask"],
                   ["delta", "Delta"],
                   ["volume", "Objem"],
-                  ["profile", "Profil"],
+                  ["profile", "Profil buňky"],
                 ] as const
               ).map(([id, lab]) => (
                 <button
                   key={id}
                   type="button"
                   className={`fp-drawer__chip ${settings.cellMode === id ? "is-active" : ""}`}
-                  onClick={() => onChange({ cellMode: id })}
+                  onClick={() => onChange({ cellMode: id, showText: true })}
                 >
                   {lab}
                 </button>
@@ -283,22 +376,154 @@ export function FootprintSettingsPanel({
               <span className="fp-drawer__toggle-lab">Čísla v buňkách</span>
               <span className="fp-drawer__hint">
                 {chart
-                  ? "Zobrazí text v clusteru; při úzkých svíčkách se zjednoduší na delta/objem."
+                  ? "Bid/ask, delta nebo objem vedle svíčky."
                   : "Při malém zoomu se skryjí automaticky."}
               </span>
             </span>
           </label>
-          <label className="fp-drawer__toggle">
-            <input
-              type="checkbox"
-              checked={settings.showCandle}
-              onChange={(e) => onChange({ showCandle: e.target.checked })}
-            />
-            <span>
-              <span className="fp-drawer__toggle-lab">Svíčka ve sloupci</span>
-              <span className="fp-drawer__hint">Tenké OHLC tělo u levého okraje clusteru.</span>
-            </span>
-          </label>
+          <div className="fp-drawer__item">
+            <div className="fp-drawer__item-top">
+              <span>Svíčka</span>
+            </div>
+            <p className="fp-drawer__hint">
+              Uprostřed sedí mezi bidy a asky. Vlevo/vpravo je na kraji sloupce.
+            </p>
+            <div className="fp-drawer__seg">
+              {(
+                [
+                  ["off", "Vyp"],
+                  ["left", "Vlevo"],
+                  ["center", "Uprostřed"],
+                  ["right", "Vpravo"],
+                ] as const
+              ).map(([id, lab]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`fp-drawer__chip ${
+                    (settings.candlePosition ?? (settings.showCandle ? "left" : "off")) === id
+                      ? "is-active"
+                      : ""
+                  }`}
+                  onClick={() => onChange({ candlePosition: id, showCandle: id !== "off" })}
+                >
+                  {lab}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="fp-drawer__item">
+            <div className="fp-drawer__item-top">
+              <span>Profil u svíčky</span>
+            </div>
+            <p className="fp-drawer__hint">
+              Histogram nalevo nebo napravo od svíčky. Obě strany = bid vlevo, ask vpravo.
+            </p>
+            <div className="fp-drawer__seg">
+              {(
+                [
+                  ["off", "Vyp"],
+                  ["left", "Vlevo"],
+                  ["right", "Vpravo"],
+                  ["both", "Obě"],
+                ] as const
+              ).map(([id, lab]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`fp-drawer__chip ${
+                    (settings.profileSide ?? "off") === id ? "is-active" : ""
+                  }`}
+                  onClick={() =>
+                    onChange({
+                      profileSide: id,
+                      profileStyle: id === "off" ? settings.profileStyle : "bars",
+                    })
+                  }
+                >
+                  {lab}
+                </button>
+              ))}
+            </div>
+            {(settings.profileSide ?? "off") !== "off" ? (
+              <div className="fp-drawer__seg" style={{ marginTop: "0.45rem" }}>
+                {(
+                  [
+                    ["volume", "Objem"],
+                    ["delta", "Delta"],
+                  ] as const
+                ).map(([id, lab]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className={`fp-drawer__chip ${
+                      (settings.profileCellMetric ?? "volume") === id ? "is-active" : ""
+                    }`}
+                    onClick={() => onChange({ profileCellMetric: id })}
+                  >
+                    {lab}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <div className="fp-drawer__item">
+            <div className="fp-drawer__item-top">
+              <span>Barvy</span>
+            </div>
+            <p className="fp-drawer__hint">Profil, svíčka a písmo. Prázdné = barvy z tématu.</p>
+            <div className="fp-drawer__colors">
+              <ColorField
+                label="Nákup / ask"
+                hint="Ask strana, kladná delta, nákupní bary profilu."
+                value={settings.upColor}
+                fallback={themeColors.up}
+                onChange={(upColor) => onChange({ upColor })}
+              />
+              <ColorField
+                label="Prodej / bid"
+                hint="Bid strana, záporná delta, prodejní bary profilu."
+                value={settings.downColor}
+                fallback={themeColors.down}
+                onChange={(downColor) => onChange({ downColor })}
+              />
+              <ColorField
+                label="Svíčka nákup"
+                hint="Tělo a knot cluster svíčky při close ≥ open."
+                value={settings.candleUpColor}
+                fallback={themeColors.candleUp}
+                onChange={(candleUpColor) => onChange({ candleUpColor })}
+              />
+              <ColorField
+                label="Svíčka prodej"
+                hint="Tělo a knot cluster svíčky při close < open."
+                value={settings.candleDownColor}
+                fallback={themeColors.candleDown}
+                onChange={(candleDownColor) => onChange({ candleDownColor })}
+              />
+              <ColorField
+                label="Písmo nákup"
+                hint="Čísla ask strany a kladné delty."
+                value={settings.fontBuyColor}
+                fallback={settings.upColor?.trim() || themeColors.up}
+                onChange={(fontBuyColor) => onChange({ fontBuyColor })}
+              />
+              <ColorField
+                label="Písmo prodej"
+                hint="Čísla bid strany a záporné delty."
+                value={settings.fontSellColor}
+                fallback={settings.downColor?.trim() || themeColors.down}
+                onChange={(fontSellColor) => onChange({ fontSellColor })}
+              />
+              <ColorField
+                label="Písmo"
+                hint="Objem a neutrální čísla v clusteru."
+                value={settings.textColor}
+                fallback={themeColors.text}
+                onChange={(textColor) => onChange({ textColor })}
+              />
+            </div>
+          </div>
         </section>
         ) : null}
 
@@ -363,12 +588,41 @@ export function FootprintSettingsPanel({
               ))}
             </div>
           </div>
+          <div className="fp-drawer__item">
+            <div className="fp-drawer__item-top">
+              <span>Barvy</span>
+            </div>
+            <p className="fp-drawer__hint">Delta heat bere nákup/prodej, objem heat bere akcent.</p>
+            <div className="fp-drawer__colors">
+              <ColorField
+                label="Nákup / ask"
+                hint="Kladná delta v heat mapě."
+                value={settings.upColor}
+                fallback={themeColors.up}
+                onChange={(upColor) => onChange({ upColor })}
+              />
+              <ColorField
+                label="Prodej / bid"
+                hint="Záporná delta v heat mapě."
+                value={settings.downColor}
+                fallback={themeColors.down}
+                onChange={(downColor) => onChange({ downColor })}
+              />
+              <ColorField
+                label="Akcent"
+                hint="Heat mapa podle objemu."
+                value={settings.senseColor}
+                fallback={themeColors.sense}
+                onChange={(senseColor) => onChange({ senseColor })}
+              />
+            </div>
+          </div>
         </section>
         ) : null}
 
         {active === "imbalance" ? (
         <section className="fp-drawer__sec">
-          <h3>Nerovnováhy</h3>
+          <h3>Imbalance</h3>
           <p className="fp-drawer__lead">
             Diagonální porovnání Bid(P) proti Ask(P+1) — aukce se páruje po diagonále, ne
             vodorovně.
@@ -381,9 +635,38 @@ export function FootprintSettingsPanel({
             />
             <span>
               <span className="fp-drawer__toggle-lab">Zvýrazňovat imbalance</span>
-              <span className="fp-drawer__hint">Barevně zvýrazní buňky s extrémním poměrem bid/ask.</span>
+              <span className="fp-drawer__hint">Tečka na kraji buňky při extrémním poměru bid/ask.</span>
             </span>
           </label>
+          {settings.showImbalance ? (
+            <div className="fp-drawer__item">
+              <div className="fp-drawer__item-top">
+                <span>Zvýraznit</span>
+              </div>
+              <p className="fp-drawer__hint">
+                Jen stacked = tečky jen u imbalancí, které tvoří stacked sérii.
+              </p>
+              <div className="fp-drawer__seg">
+                {(
+                  [
+                    ["all", "Všechny"],
+                    ["stacked", "Jen stacked"],
+                  ] as const
+                ).map(([id, lab]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className={`fp-drawer__chip ${
+                      (settings.imbalanceHighlight ?? "all") === id ? "is-active" : ""
+                    }`}
+                    onClick={() => onChange({ imbalanceHighlight: id })}
+                  >
+                    {lab}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <div className="fp-drawer__item">
             <div className="fp-drawer__item-top">
               <span>Práh poměru</span>
@@ -420,7 +703,7 @@ export function FootprintSettingsPanel({
               <span>Opacita imbalance</span>
               <span className="fp-drawer__item-val">{settings.imbalanceFillOpacity} %</span>
             </div>
-            <p className="fp-drawer__hint">Výraznost podbarvení jednotlivých imbalance buněk.</p>
+            <p className="fp-drawer__hint">Výraznost tečky na kraji buňky.</p>
             <input
               type="range"
               min={5}
@@ -434,7 +717,7 @@ export function FootprintSettingsPanel({
               <span>Opacita stacked imbalance</span>
               <span className="fp-drawer__item-val">{settings.imbalanceStackedFillOpacity} %</span>
             </div>
-            <p className="fp-drawer__hint">Výraznost buněk, které patří do stacked zóny.</p>
+            <p className="fp-drawer__hint">Výraznost stacked tečky.</p>
             <input
               type="range"
               min={5}
@@ -442,6 +725,28 @@ export function FootprintSettingsPanel({
               value={settings.imbalanceStackedFillOpacity}
               onChange={(e) => onChange({ imbalanceStackedFillOpacity: Number(e.target.value) })}
             />
+          </div>
+          <div className="fp-drawer__item">
+            <div className="fp-drawer__item-top">
+              <span>Barvy</span>
+            </div>
+            <p className="fp-drawer__hint">Podbarvení buy a sell imbalance buněk. Prázdné = barvy z tématu.</p>
+            <div className="fp-drawer__colors">
+              <ColorField
+                label="Imbalance buy"
+                hint="Zvýraznění buy imbalance."
+                value={settings.imbalanceBuyColor}
+                fallback={themeColors.up}
+                onChange={(imbalanceBuyColor) => onChange({ imbalanceBuyColor })}
+              />
+              <ColorField
+                label="Imbalance sell"
+                hint="Zvýraznění sell imbalance."
+                value={settings.imbalanceSellColor}
+                fallback={themeColors.down}
+                onChange={(imbalanceSellColor) => onChange({ imbalanceSellColor })}
+              />
+            </div>
           </div>
           <label className="fp-drawer__toggle">
             <input
@@ -653,7 +958,7 @@ export function FootprintSettingsPanel({
             />
             <span>
               <span className="fp-drawer__toggle-lab">Bid/Ask Fade</span>
-              <span className="fp-drawer__hint">Slábnoucí agrese na extrémech knotu — malý trojúhelník.</span>
+              <span className="fp-drawer__hint">Slábnoucí agrese na extrémech knotu — větší šipka na bid/ask straně.</span>
             </span>
           </label>
           <label className="fp-drawer__toggle">
@@ -665,7 +970,7 @@ export function FootprintSettingsPanel({
             <span>
               <span className="fp-drawer__toggle-lab">Absorpce</span>
               <span className="fp-drawer__hint">
-                Velká delta bez posunu ceny = pasivní strana nasává — čárkovaný obdélník.
+                Velká delta bez posunu ceny = pasivní strana nasává — výrazný rámeček s výplní.
               </span>
             </span>
           </label>
@@ -714,64 +1019,21 @@ export function FootprintSettingsPanel({
               </div>
             </>
           ) : null}
-        </section>
-        ) : null}
-
-        {active === "colors" ? (
-        <section className="fp-drawer__sec">
-          <h3>Barvy</h3>
-          <p className="fp-drawer__lead">
-            Bid/ask, heat mapa, POC, imbalance a CVD. Prázdné = barvy z tématu aplikace.
-          </p>
-          <div className="fp-drawer__colors">
-            <ColorField
-              label="Nákup / ask"
-              hint="Bullish delta, ask strana, buy imbalance."
-              value={settings.upColor}
-              fallback={themeColors.up}
-              onChange={(upColor) => onChange({ upColor })}
-            />
-            <ColorField
-              label="Prodej / bid"
-              hint="Bearish delta, bid strana, sell imbalance."
-              value={settings.downColor}
-              fallback={themeColors.down}
-              onChange={(downColor) => onChange({ downColor })}
-            />
-            <ColorField
-              label="Akcent"
-              hint="POC, value area, heat mapa objemu, CVD linka."
-              value={settings.senseColor}
-              fallback={themeColors.sense}
-              onChange={(senseColor) => onChange({ senseColor })}
-            />
-            <ColorField
-              label="Text v buňkách"
-              hint="Objem a neutrální čísla v clusteru."
-              value={settings.textColor}
-              fallback={themeColors.text}
-              onChange={(textColor) => onChange({ textColor })}
-            />
-            <ColorField
-              label="Imbalance buy"
-              hint="Barva zvýraznění buy imbalance."
-              value={settings.imbalanceBuyColor}
-              fallback={themeColors.up}
-              onChange={(imbalanceBuyColor) => onChange({ imbalanceBuyColor })}
-            />
-            <ColorField
-              label="Imbalance sell"
-              hint="Barva zvýraznění sell imbalance."
-              value={settings.imbalanceSellColor}
-              fallback={themeColors.down}
-              onChange={(imbalanceSellColor) => onChange({ imbalanceSellColor })}
-            />
+          <div className="fp-drawer__item">
+            <div className="fp-drawer__item-top">
+              <span>Barvy</span>
+            </div>
+            <p className="fp-drawer__hint">POC, value area a absorpce. Prázdné = barvy z tématu.</p>
+            <div className="fp-drawer__colors">
+              <ColorField
+                label="Akcent"
+                hint="POC, value area a značky signálů."
+                value={settings.senseColor}
+                fallback={themeColors.sense}
+                onChange={(senseColor) => onChange({ senseColor })}
+              />
+            </div>
           </div>
-          {hasCustomColors ? (
-            <button type="button" className="fp-drawer__link-reset" onClick={resetColors}>
-              Obnovit barvy z tématu
-            </button>
-          ) : null}
         </section>
         ) : null}
 
@@ -845,22 +1107,53 @@ export function FootprintSettingsPanel({
               <span>Výška CVD</span>
               <span className="fp-drawer__item-val">{settings.cvdHeight} px</span>
             </div>
-            <p className="fp-drawer__hint">Výška CVD heatmap řádku ve spodní tabulce.</p>
+            <p className="fp-drawer__hint">
+              Výška celé tabulky se mění tažením za dělící linku nad ní. Tento posuvník je jen CVD řádek.
+            </p>
             <input
               type="range"
               min={28}
               max={180}
               value={settings.cvdHeight}
-              onChange={(e) => onChange({ cvdHeight: Number(e.target.value) })}
+              onChange={(e) =>
+                onChange({ cvdHeight: Number(e.target.value), footerHeight: undefined })
+              }
               disabled={!settings.showCvd}
             />
+          </div>
+          <div className="fp-drawer__item">
+            <div className="fp-drawer__item-top">
+              <span>Barvy</span>
+            </div>
+            <p className="fp-drawer__hint">Delta řádky a CVD. Prázdné = barvy z tématu.</p>
+            <div className="fp-drawer__colors">
+              <ColorField
+                label="Nákup / ask"
+                hint="Kladná delta v řádcích pod grafem."
+                value={settings.upColor}
+                fallback={themeColors.up}
+                onChange={(upColor) => onChange({ upColor })}
+              />
+              <ColorField
+                label="Prodej / bid"
+                hint="Záporná delta v řádcích pod grafem."
+                value={settings.downColor}
+                fallback={themeColors.down}
+                onChange={(downColor) => onChange({ downColor })}
+              />
+              <ColorField
+                label="Akcent"
+                hint="CVD linka a volume heatmap ve spodní tabulce."
+                value={settings.senseColor}
+                fallback={themeColors.sense}
+                onChange={(senseColor) => onChange({ senseColor })}
+              />
+            </div>
           </div>
         </section>
         ) : null}
 
-        <button type="button" className="fp-drawer__reset" onClick={onReset}>
-          Výchozí
-        </button>
+        <SettingsActionRow onReset={onReset} onSaveDefault={onSaveDefault} />
       </div>
     </section>
   );

@@ -1,3 +1,5 @@
+import { isLinkGroup, type LinkGroup } from "@/lib/linkGroup";
+
 export type DeskPanelId = "chart" | "orderbook" | "tape" | "footprint" | "dom";
 
 export type DropZone = "center" | "left" | "right" | "top" | "bottom";
@@ -6,6 +8,8 @@ export type DeskLeaf = {
   type: "leaf";
   id: string;
   panel: DeskPanelId;
+  /** Panels with the same letter share price-scale settings (row height / visible range). */
+  linkGroup?: LinkGroup;
 };
 
 export type DeskSplit = {
@@ -38,19 +42,10 @@ export const DEFAULT_DESK_LAYOUT: DeskNode = {
   type: "split",
   id: "root",
   dir: "row",
-  sizes: [72, 28],
+  sizes: [68, 32],
   children: [
     { type: "leaf", id: "chart", panel: "chart" },
-    {
-      type: "split",
-      id: "side",
-      dir: "col",
-      sizes: [50, 50],
-      children: [
-        { type: "leaf", id: "orderbook", panel: "orderbook" },
-        { type: "leaf", id: "tape", panel: "tape" },
-      ],
-    },
+    { type: "leaf", id: "dom", panel: "dom" },
   ],
 };
 
@@ -62,7 +57,9 @@ export function isDeskNode(v: unknown): v is DeskNode {
   if (!v || typeof v !== "object") return false;
   const n = v as DeskNode;
   if (n.type === "leaf") {
-    return PANELS.includes(n.panel) && typeof n.id === "string";
+    if (!PANELS.includes(n.panel) || typeof n.id !== "string") return false;
+    if (n.linkGroup != null && !isLinkGroup(n.linkGroup)) return false;
+    return true;
   }
   if (n.type === "split") {
     return (
@@ -74,6 +71,30 @@ export function isDeskNode(v: unknown): v is DeskNode {
     );
   }
   return false;
+}
+
+export function unifyMarketPanels(node: DeskNode): DeskNode {
+  const hasBook = hasPanel(node, "orderbook");
+  const hasTape = hasPanel(node, "tape");
+  if (!hasBook && !hasTape) return node;
+  let next = node;
+  if (!hasPanel(next, "dom")) {
+    let converted = false;
+    const walk = (n: DeskNode): DeskNode => {
+      if (n.type === "leaf") {
+        if (!converted && (n.panel === "orderbook" || n.panel === "tape")) {
+          converted = true;
+          return { type: "leaf", id: "dom", panel: "dom", linkGroup: n.linkGroup };
+        }
+        return n;
+      }
+      return { ...n, children: n.children.map(walk) };
+    };
+    next = walk(next);
+  }
+  next = removePanel(next, "orderbook") ?? next;
+  next = removePanel(next, "tape") ?? next;
+  return next;
 }
 
 export function hasPanel(node: DeskNode, panel: DeskPanelId): boolean {
@@ -91,17 +112,33 @@ export function collectPanels(node: DeskNode): Set<DeskPanelId> {
   return out;
 }
 
-export function collectChartLeaves(node: DeskNode): DeskLeaf[] {
+export function collectLeaves(node: DeskNode): DeskLeaf[] {
   const out: DeskLeaf[] = [];
   const walk = (n: DeskNode) => {
-    if (n.type === "leaf") {
-      if (n.panel === "chart") out.push(n);
-      return;
-    }
-    n.children.forEach(walk);
+    if (n.type === "leaf") out.push(n);
+    else n.children.forEach(walk);
   };
   walk(node);
   return out;
+}
+
+export function collectChartLeaves(node: DeskNode): DeskLeaf[] {
+  return collectLeaves(node).filter((leaf) => leaf.panel === "chart");
+}
+
+/** Old dedicated footprint windows become chart panes — footprint is a chart type now. */
+export function promoteFootprintLeaves(node: DeskNode): DeskNode {
+  if (node.type === "leaf") {
+    if (node.panel !== "footprint") return node;
+    return { type: "leaf", id: node.id, panel: "chart", linkGroup: node.linkGroup };
+  }
+  return { ...node, children: node.children.map(promoteFootprintLeaves) };
+}
+
+export function footprintLeafIds(node: DeskNode): string[] {
+  return collectLeaves(node)
+    .filter((leaf) => leaf.panel === "footprint")
+    .map((leaf) => leaf.id);
 }
 
 export function findLeaf(node: DeskNode, id: string): DeskLeaf | null {
@@ -125,7 +162,10 @@ export function firstLeafOf(node: DeskNode, panel: DeskPanelId): DeskLeaf | null
 export function panelKindFromId(id: string): DeskPanelId {
   for (const panel of PANELS) {
     if (panel === "chart") continue;
-    if (id === panel || id.startsWith(`${panel}-`)) return panel;
+    if (id === panel || id.startsWith(`${panel}-`)) {
+      if (panel === "orderbook" || panel === "tape") return "dom";
+      return panel;
+    }
   }
   return "chart";
 }
@@ -234,12 +274,9 @@ export function movePanel(root: DeskNode, sourceId: string, targetId: string, zo
   return insertAt(base, targetId, incoming, zone);
 }
 
-export function addPanel(root: DeskNode, panel: DeskPanelId): DeskNode {
-  if (panel === "chart") return addChart(root);
-  if (hasPanel(root, panel)) return root;
-  const incoming = leafOf(panel);
-  if (panel === "footprint") {
-    // Cluster charts need chart-sized real estate, not the narrow side column.
+export function attachLeaf(root: DeskNode, incoming: DeskLeaf): DeskNode {
+  if (findLeaf(root, incoming.id)) return root;
+  if (incoming.panel === "chart" || incoming.panel === "footprint") {
     const target = firstLeafOf(root, "chart");
     if (target) return insertAt(root, target.id, incoming, "bottom");
   }
@@ -284,6 +321,22 @@ export function addPanel(root: DeskNode, panel: DeskPanelId): DeskNode {
   };
 }
 
+export function addPanel(root: DeskNode, panel: DeskPanelId): DeskNode {
+  if (panel === "chart") return addChart(root);
+  if (hasPanel(root, panel)) return root;
+  return attachLeaf(root, leafOf(panel));
+}
+
+export function restoreMissingLeaves(working: DeskNode, saved: DeskNode): DeskNode {
+  const have = new Set(collectLeaves(working).map((leaf) => leaf.id));
+  let next = working;
+  for (const leaf of collectLeaves(saved)) {
+    if (have.has(leaf.id)) continue;
+    next = attachLeaf(next, leaf);
+  }
+  return next;
+}
+
 export function addChart(root: DeskNode): DeskNode {
   const incoming = newChartLeaf();
   const target = firstLeafOf(root, "chart");
@@ -311,6 +364,17 @@ export function resizeSplit(node: DeskNode, splitId: string, sizes: number[]): D
   if (node.type === "leaf") return node;
   if (node.id === splitId) return { ...node, sizes: normalizeSizes(sizes) };
   return { ...node, children: node.children.map((ch) => resizeSplit(ch, splitId, sizes)) };
+}
+
+export function setLeafLinkGroup(node: DeskNode, id: string, group: LinkGroup | null): DeskNode {
+  if (node.type === "leaf") {
+    if (node.id !== id) return node;
+    if (!group) {
+      return { type: "leaf", id: node.id, panel: node.panel };
+    }
+    return { ...node, linkGroup: group };
+  }
+  return { ...node, children: node.children.map((ch) => setLeafLinkGroup(ch, id, group)) };
 }
 
 export function dropZoneFromPoint(rect: DOMRect, x: number, y: number): DropZone {

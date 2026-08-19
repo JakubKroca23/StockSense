@@ -1,5 +1,9 @@
 "use client";
 
+import type { PointerEvent as ReactPointerEvent } from "react";
+import { LinkGroupPick } from "@/components/LinkGroupPick";
+import type { LinkGroup } from "@/lib/linkGroup";
+
 export type TradePrint = {
   id: string;
   ts: string;
@@ -54,18 +58,37 @@ export function TradesTapePanel({
   tape,
   collapsed = false,
   onToggle,
+  onDragStart,
+  linkGroup = null,
+  onLinkGroupChange,
 }: {
   tape: TradesTapeData | null;
   collapsed?: boolean;
   onToggle?: () => void;
+  onDragStart?: (e: ReactPointerEvent<HTMLElement>) => void;
+  linkGroup?: LinkGroup | null;
+  onLinkGroupChange?: (next: LinkGroup | null) => void;
 }) {
   const prints = tape?.trades ?? [];
 
+  const onHeadDrag = (e: ReactPointerEvent<HTMLElement>) => {
+    if (!onDragStart) return;
+    if (!(e.target instanceof HTMLElement)) return;
+    if (!e.target.closest(".trades-tape__head, .desk-panel__toggle")) return;
+    if (e.target.closest(".link-group, button")) return;
+    onDragStart(e);
+  };
+
   const title = (
-    <p className="trades-tape__title">
-      {onToggle ? <span className="desk-panel__caret">{collapsed ? "▸" : "▾"}</span> : null}
-      Historie
-    </p>
+    <div className="trades-tape__title-row">
+      <p className="trades-tape__title">
+        {onToggle ? <span className="desk-panel__caret">{collapsed ? "▸" : "▾"}</span> : null}
+        Historie
+      </p>
+      {onLinkGroupChange ? (
+        <LinkGroupPick value={linkGroup} onChange={onLinkGroupChange} />
+      ) : null}
+    </div>
   );
 
   const head = onToggle ? (
@@ -95,7 +118,7 @@ export function TradesTapePanel({
 
   if (!tape) {
     return (
-      <aside className={`trades-tape ${collapsed ? "is-collapsed" : ""}`}>
+      <aside className={`trades-tape ${collapsed ? "is-collapsed" : ""}`} onPointerDown={onHeadDrag}>
         {head}
         {!collapsed && <p className="muted text-sm mt-2">Načítám obchody…</p>}
       </aside>
@@ -109,7 +132,7 @@ export function TradesTapePanel({
       : 0.5;
 
   return (
-    <aside className={`trades-tape ${collapsed ? "is-collapsed" : ""}`}>
+    <aside className={`trades-tape ${collapsed ? "is-collapsed" : ""}`} onPointerDown={onHeadDrag}>
       {head}
 
       {!collapsed && (

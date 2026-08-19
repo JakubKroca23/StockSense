@@ -1,23 +1,21 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
-/** Compact dropdown used in desk window headers (chart type, timeframe, lookback). */
-export function DeskPick({
+/** Header tool (VP / DOM): open a settings flyout, keep the button lit while the tool is on. */
+export function ChartToolPick({
   label,
   ariaLabel,
-  value,
-  options,
-  onSelect,
-  className,
+  title,
+  active,
+  children,
 }: {
   label: string;
   ariaLabel: string;
-  value: string;
-  options: { id: string; label: string }[];
-  onSelect: (id: string) => void;
-  className?: string;
+  title?: string;
+  active: boolean;
+  children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -46,7 +44,8 @@ export function DeskPick({
   useLayoutEffect(() => {
     if (!open || !btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
-    const left = Math.min(r.left, Math.max(8, window.innerWidth - 200));
+    const width = 280;
+    const left = Math.min(r.left, Math.max(8, window.innerWidth - width - 8));
     setPos({ top: r.bottom + 6, left: Math.max(8, left) });
   }, [open]);
 
@@ -55,31 +54,28 @@ export function DeskPick({
       <button
         ref={btnRef}
         type="button"
-        className={`${className ?? "chart-chip header-desk__tf-btn"}${open ? " is-active" : ""}`}
-        aria-haspopup="menu"
+        className={`desk-win__pick${active || open ? " is-active" : ""}`}
+        aria-haspopup="dialog"
         aria-expanded={open}
+        aria-pressed={active}
         aria-label={ariaLabel}
+        title={title}
+        onPointerDown={(e) => e.stopPropagation()}
         onClick={() => setOpen((v) => !v)}
       >
         {label}
       </button>
       {open &&
         createPortal(
-          <div ref={menuRef} className="tf-menu" role="menu" style={{ top: pos.top, left: pos.left }}>
-            {options.map((opt) => (
-              <button
-                key={opt.id}
-                type="button"
-                role="menuitem"
-                className={`tf-menu__item ${value === opt.id ? "is-active" : ""}`}
-                onClick={() => {
-                  onSelect(opt.id);
-                  setOpen(false);
-                }}
-              >
-                {opt.label}
-              </button>
-            ))}
+          <div
+            ref={menuRef}
+            className="tf-menu desk-win__tool-menu"
+            role="dialog"
+            aria-label={ariaLabel}
+            style={{ top: pos.top, left: pos.left }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            {children}
           </div>,
           document.body
         )}
