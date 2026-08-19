@@ -152,6 +152,13 @@ export function ChartSettingsPanel({ viz, onChange, onReset, compact = false }: 
               <span className="fp-drawer__toggle-lab">Volume histogram</span>
             </span>
           </label>
+          <label className="fp-drawer__toggle">
+            <input type="checkbox" checked={viz.footprint} onChange={(e) => onChange({ footprint: e.target.checked })} />
+            <span>
+              <span className="fp-drawer__toggle-lab">Footprint</span>
+              <span className="fp-drawer__hint">Orderflow cluster chart pod grafem.</span>
+            </span>
+          </label>
         </section>
 
         <section className="fp-drawer__sec">

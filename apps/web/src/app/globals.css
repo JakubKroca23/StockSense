@@ -4916,6 +4916,7 @@ textarea {
 }
 
 .desk-mod__leaf .desk-charts,
+.desk-mod__leaf .desk-charts__body,
 .desk-mod__leaf .desk-charts__pane {
   flex: 1 1 auto;
   min-height: 0;
@@ -5068,6 +5069,38 @@ textarea {
   min-height: 0;
   height: 100%;
   overflow: hidden;
+}
+
+.desk-charts__body {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.desk-charts__body--split {
+  flex-direction: row;
+}
+
+.desk-charts__body--split > .desk-charts__pane {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.desk-charts__body--split > .desk-charts__fp {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--line, #243049);
+  display: flex;
+  flex-direction: column;
+}
+
+.desk-charts__body--split > .desk-charts__fp > .fp-panel {
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
 }
 
 .desk-charts__pane {
