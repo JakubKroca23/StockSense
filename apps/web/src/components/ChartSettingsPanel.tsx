@@ -1,23 +1,94 @@
 "use client";
 
-import type { ChartVizSettings } from "@/components/PriceChart";
+import { useMemo } from "react";
+import { readChartThemeDefaults, type ChartVizSettings } from "@/components/PriceChart";
+import { useThemeRevision } from "@/lib/theme";
 
 type Props = {
   viz: ChartVizSettings;
   onChange: (patch: Partial<ChartVizSettings>) => void;
   onReset: () => void;
+  compact?: boolean;
+  inDeskMenu?: boolean;
 };
 
-export function ChartSettingsPanel({ viz, onChange, onReset }: Props) {
+function ColorField({
+  label,
+  hint,
+  value,
+  fallback,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  value?: string;
+  fallback: string;
+  onChange: (next: string | undefined) => void;
+}) {
+  const shown = value?.trim() || fallback;
+  const custom = Boolean(value?.trim());
+
   return (
-    <section className="settings-block">
-      <div className="settings-block__head">
-        <div>
-          <h2>Graf</h2>
-          <p className="settings-block__sub">Vzhled svíček, mřížka, indikátory a měřítko.</p>
+    <label className="fp-drawer__color">
+      <input
+        type="color"
+        value={shown}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label={label}
+      />
+      <span>
+        <span className="fp-drawer__color-lab">{label}</span>
+        {hint ? <span className="fp-drawer__hint">{hint}</span> : null}
+        {custom ? (
+          <button
+            type="button"
+            className="fp-drawer__color-reset"
+            onClick={(e) => {
+              e.preventDefault();
+              onChange(undefined);
+            }}
+          >
+            Vrátit na téma
+          </button>
+        ) : null}
+      </span>
+    </label>
+  );
+}
+
+export function ChartSettingsPanel({ viz, onChange, onReset, compact = false, inDeskMenu = false }: Props) {
+  const hideHead = compact || inDeskMenu;
+  const themeRev = useThemeRevision();
+  const themeColors = useMemo(() => readChartThemeDefaults(), [themeRev]);
+
+  const candlesOn = viz.style !== "off";
+  const showCandleColors = viz.style === "candle" || viz.style === "hollow";
+  const showLineColor = viz.style === "line";
+
+  const resetColors = () =>
+    onChange({
+      upColor: undefined,
+      downColor: undefined,
+      wickUpColor: undefined,
+      wickDownColor: undefined,
+      lineColor: undefined,
+    });
+
+  const hasCustomColors = Boolean(
+    viz.upColor || viz.downColor || viz.wickUpColor || viz.wickDownColor || viz.lineColor
+  );
+
+  return (
+    <section className={`settings-block${inDeskMenu ? " is-desk-menu" : compact ? " is-compact" : ""}`}>
+      {hideHead ? null : (
+        <div className="settings-block__head">
+          <div>
+            <h2>Graf</h2>
+            <p className="settings-block__sub">Vzhled svíček, mřížka, indikátory a měřítko.</p>
+          </div>
         </div>
-      </div>
-      <div className="settings-chart">
+      )}
+      <div className={`settings-chart${inDeskMenu ? " settings-chart--grid" : ""}`}>
         <section className="fp-drawer__sec">
           <h3>Vzhled</h3>
           <p className="fp-drawer__lead">Jak se kreslí cena a kříž.</p>
@@ -25,12 +96,16 @@ export function ChartSettingsPanel({ viz, onChange, onReset }: Props) {
             <div className="fp-drawer__item-top">
               <span>Styl</span>
             </div>
+            <p className="fp-drawer__hint">
+              Vyp = jen indikátory / footprint / DOM bez svíček. Čára = close price.
+            </p>
             <div className="fp-drawer__seg">
               {(
                 [
                   ["candle", "Svíčky"],
                   ["hollow", "Duté"],
                   ["line", "Čára"],
+                  ["off", "Vyp"],
                 ] as const
               ).map(([id, lab]) => (
                 <button
@@ -74,8 +149,13 @@ export function ChartSettingsPanel({ viz, onChange, onReset }: Props) {
               <span className="fp-drawer__hint">Vodorovné a svislé čáry v pozadí.</span>
             </span>
           </label>
-          <label className="fp-drawer__toggle">
-            <input type="checkbox" checked={viz.wicks} onChange={(e) => onChange({ wicks: e.target.checked })} />
+          <label className={`fp-drawer__toggle${!candlesOn || viz.style === "line" ? " is-muted" : ""}`}>
+            <input
+              type="checkbox"
+              checked={viz.wicks}
+              disabled={!candlesOn || viz.style === "line"}
+              onChange={(e) => onChange({ wicks: e.target.checked })}
+            />
             <span>
               <span className="fp-drawer__toggle-lab">Knoty</span>
               <span className="fp-drawer__hint">High / low čárky na svíčkách.</span>
@@ -116,6 +196,63 @@ export function ChartSettingsPanel({ viz, onChange, onReset }: Props) {
           </label>
         </section>
 
+        <section className={`fp-drawer__sec${!candlesOn && !showLineColor ? " is-muted" : ""}`}>
+          <h3>Barvy</h3>
+          <p className="fp-drawer__hint">
+            {viz.style === "off"
+              ? "Zapněte svíčky nebo čáru pro úpravu barev."
+              : "Prázdné hodnoty berou barvy z tématu aplikace. Volume histogram používá stejné barvy."}
+          </p>
+          {showCandleColors ? (
+            <div className="fp-drawer__colors">
+              <ColorField
+                label="Růst — tělo"
+                hint="Barva bullish svíčky."
+                value={viz.upColor}
+                fallback={themeColors.up}
+                onChange={(upColor) => onChange({ upColor })}
+              />
+              <ColorField
+                label="Pokles — tělo"
+                hint="Barva bearish svíčky."
+                value={viz.downColor}
+                fallback={themeColors.down}
+                onChange={(downColor) => onChange({ downColor })}
+              />
+              <ColorField
+                label="Knot růst"
+                hint="High/low u rostoucí svíčky."
+                value={viz.wickUpColor}
+                fallback={viz.upColor?.trim() || themeColors.up}
+                onChange={(wickUpColor) => onChange({ wickUpColor })}
+              />
+              <ColorField
+                label="Knot pokles"
+                hint="High/low u klesající svíčky."
+                value={viz.wickDownColor}
+                fallback={viz.downColor?.trim() || themeColors.down}
+                onChange={(wickDownColor) => onChange({ wickDownColor })}
+              />
+            </div>
+          ) : null}
+          {showLineColor ? (
+            <div className="fp-drawer__colors">
+              <ColorField
+                label="Čára close"
+                hint="Barva line chartu."
+                value={viz.lineColor}
+                fallback={themeColors.line}
+                onChange={(lineColor) => onChange({ lineColor })}
+              />
+            </div>
+          ) : null}
+          {hasCustomColors ? (
+            <button type="button" className="fp-drawer__link-reset" onClick={resetColors}>
+              Obnovit barvy z tématu
+            </button>
+          ) : null}
+        </section>
+
         <section className="fp-drawer__sec">
           <h3>Indikátory</h3>
           <p className="fp-drawer__lead">Čáry přes graf. Volume histogram je pod svíčkami.</p>
@@ -147,6 +284,20 @@ export function ChartSettingsPanel({ viz, onChange, onReset }: Props) {
             <input type="checkbox" checked={viz.volume} onChange={(e) => onChange({ volume: e.target.checked })} />
             <span>
               <span className="fp-drawer__toggle-lab">Volume histogram</span>
+            </span>
+          </label>
+          <label className="fp-drawer__toggle">
+            <input type="checkbox" checked={viz.footprint} onChange={(e) => onChange({ footprint: e.target.checked })} />
+            <span>
+              <span className="fp-drawer__toggle-lab">Footprint</span>
+              <span className="fp-drawer__hint">Orderflow cluster chart přímo v grafu.</span>
+            </span>
+          </label>
+          <label className="fp-drawer__toggle">
+            <input type="checkbox" checked={viz.dom} onChange={(e) => onChange({ dom: e.target.checked })} />
+            <span>
+              <span className="fp-drawer__toggle-lab">DOM</span>
+              <span className="fp-drawer__hint">Hloubka trhu zarovnaná na stejné cenové úrovně.</span>
             </span>
           </label>
         </section>

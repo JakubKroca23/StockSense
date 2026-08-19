@@ -40,5 +40,7 @@ export type {
 
 export { DepthTracker, EMPTY_DEPTH_STAT, medianDepth } from "./depth";
 
-export type { OrderflowTheme } from "./theme";
-export { alpha, readOrderflowTheme } from "./theme";
+export type { OrderflowTheme, OrderflowColorSettings } from "./theme";
+export { alpha, readOrderflowTheme, resolveOrderflowTheme } from "./theme";
+export { FP_STAT_ROW_H, footprintFooterEnabled, footprintFooterHeight } from "./footer";
+export { findLevelTouchEndIndex, findStackedZoneEndIndex, resolveStackedDash } from "./stacked";

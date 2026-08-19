@@ -16,9 +16,12 @@ import {
   aggregateProfile,
   alpha,
   buildOrderflow,
+  findLevelTouchEndIndex,
+  findStackedZoneEndIndex,
   fmtCompact,
   fmtSignedCompact,
-  readOrderflowTheme,
+  resolveStackedDash,
+  resolveOrderflowTheme,
   type FootprintData,
   type OrderflowBar,
   type OrderflowCalcOptions,
@@ -80,7 +83,11 @@ function fmtClock(ms: number, interval: string) {
 
 function metrics(w: number, h: number, s: OrderflowSettings) {
   const profileW = s.showProfile ? clamp(s.profileWidth, 40, 220) : 0;
-  const statRows = (s.showDeltaRow ? 1 : 0) + (s.showVolumeRow ? 1 : 0);
+  const statRows =
+    (s.showDeltaRow ? 1 : 0) +
+    (s.showMaxDeltaRow ? 1 : 0) +
+    (s.showMinDeltaRow ? 1 : 0) +
+    (s.showVolumeRow ? 1 : 0);
   const cvdH = s.showCvd ? clamp(s.cvdHeight, 28, 180) : 0;
   const footerH = statRows * STAT_ROW_H + cvdH + TIME_H;
   const plotW = Math.max(80, w - AXIS_W - profileW);
@@ -315,9 +322,9 @@ export function FootprintPanel({
     const ctx = sizeCanvas(canvas, size.w, size.h);
     if (!ctx) return;
     if (!themeRef.current || themeRevRef.current !== themeRev) {
-      themeRef.current = readOrderflowTheme();
       themeRevRef.current = themeRev;
     }
+    themeRef.current = resolveOrderflowTheme(settings);
     const theme = themeRef.current;
     drawFootprint(ctx, {
       w: size.w,
@@ -560,7 +567,8 @@ function drawFootprint(ctx: CanvasRenderingContext2D, args: DrawArgs) {
   const keyHi = Math.ceil(keyTop) + 1;
 
   const font = theme.font;
-  const heatMax = series.maxCell || 1;
+  const globalHeatMax = series.maxCell || 1;
+  const usePerBar = s.heatScale === "bar";
   const heatAlpha = clamp(s.heatOpacity, 0, 100) / 100;
 
   // ---- price grid -------------------------------------------------------
@@ -637,37 +645,43 @@ function drawFootprint(ctx: CanvasRenderingContext2D, args: DrawArgs) {
       const yTop = yc - rh / 2;
 
       // heat background
-      if (s.heatMode !== "off") {
-        const intensity =
-          s.heatMode === "delta"
-            ? Math.min(1, Math.abs(cell.delta) / heatMax)
-            : Math.min(1, cell.volume / heatMax);
+      const profileCellFill = s.cellMode === "profile" && s.profileStyle === "cells";
+      const fillMode = profileCellFill ? s.profileCellMetric : s.heatMode;
+      if (fillMode !== "off") {
+        const heatMax = usePerBar ? (bar.maxCell || 1) : globalHeatMax;
+        const raw = fillMode === "delta" ? Math.abs(cell.delta) : cell.volume;
+        const intensity = Math.min(1, raw / heatMax);
         if (intensity > 0.01) {
           const base =
-            s.heatMode === "delta" ? (cell.delta >= 0 ? theme.up : theme.down) : theme.sense;
+            fillMode === "delta" ? (cell.delta >= 0 ? theme.up : theme.down) : theme.sense;
           ctx.fillStyle = alpha(base, 0.06 + intensity * 0.55 * heatAlpha);
           ctx.fillRect(cellX, yTop, cellW, rh);
         }
       }
 
-      if (s.cellMode === "profile") {
-        const ratio = bar.maxCell > 0 ? cell.volume / bar.maxCell : 0;
-        const totalW = Math.max(0, cellW * ratio);
-        const sellW = cell.volume > 0 ? (cell.sell / cell.volume) * totalW : 0;
+      if (s.cellMode === "profile" && s.profileStyle === "bars") {
+        const mid = cellX + cellW / 2;
+        const maxSide = bar.maxCell > 0 ? bar.maxCell : 1;
+        const halfW = cellW / 2;
+        const sellW = Math.max(0, (cell.sell / maxSide) * halfW);
+        const buyW = Math.max(0, (cell.buy / maxSide) * halfW);
+        const h = Math.max(1, rh - 2);
         ctx.fillStyle = alpha(theme.down, 0.75);
-        ctx.fillRect(cellX, yTop + 1, sellW, Math.max(1, rh - 2));
+        ctx.fillRect(mid - sellW, yTop + 1, sellW, h);
         ctx.fillStyle = alpha(theme.up, 0.75);
-        ctx.fillRect(cellX + sellW, yTop + 1, Math.max(0, totalW - sellW), Math.max(1, rh - 2));
+        ctx.fillRect(mid, yTop + 1, buyW, h);
       }
 
       // diagonal imbalance markers
       if (s.showImbalance && (cell.buyImbalance || cell.sellImbalance)) {
+        const imbNorm = clamp(s.imbalanceFillOpacity, 0, 100) / 100;
+        const imbStack = clamp(s.imbalanceStackedFillOpacity, 0, 100) / 100;
         if (cell.buyImbalance) {
-          ctx.fillStyle = alpha(theme.up, cell.stacked ? 0.42 : 0.24);
+          ctx.fillStyle = alpha(theme.imbalanceBuy, cell.stacked ? imbStack : imbNorm);
           ctx.fillRect(cellX + half, yTop + 0.5, half, rh - 1);
         }
         if (cell.sellImbalance) {
-          ctx.fillStyle = alpha(theme.down, cell.stacked ? 0.42 : 0.24);
+          ctx.fillStyle = alpha(theme.imbalanceSell, cell.stacked ? imbStack : imbNorm);
           ctx.fillRect(cellX, yTop + 0.5, half, rh - 1);
         }
       }
@@ -688,7 +702,7 @@ function drawFootprint(ctx: CanvasRenderingContext2D, args: DrawArgs) {
         ctx.fill();
       }
 
-      if (!canLabel || s.cellMode === "profile") continue;
+      if (!canLabel || (s.cellMode === "profile" && s.profileStyle !== "cells")) continue;
       ctx.font = `${cellFont}px ${font}`;
       if (s.cellMode === "bidask") {
         ctx.textAlign = "right";
@@ -721,27 +735,52 @@ function drawFootprint(ctx: CanvasRenderingContext2D, args: DrawArgs) {
 
   // ---- stacked imbalance zones project forward as S/R -------------------
   if (s.showImbalance && s.showStacked) {
-    ctx.setLineDash([5, 4]);
-    ctx.lineWidth = 1;
+    ctx.setLineDash(resolveStackedDash(s.stackedLineStyle));
+    ctx.lineWidth = s.stackedLineWidth;
     for (let i = first; i <= lastVisible; i += 1) {
       const bar = bars[i];
       if (!bar.zones.length) continue;
       const x = xOf(i);
       for (const zone of bar.zones) {
         const color = zone.side === "buy" ? theme.up : theme.down;
+        const stopIndex = Math.min(findStackedZoneEndIndex(bars, zone, i), lastVisible + 1);
+        const xEnd = stopIndex <= lastVisible ? xOf(stopIndex) : plotW;
+        if (xEnd <= x + bw) continue;
         const yTop = yOf(zone.toKey) - rh / 2;
         const yBot = yOf(zone.fromKey) + rh / 2;
         if (yBot < 0 || yTop > plotH) continue;
-        ctx.fillStyle = alpha(color, 0.1);
-        ctx.fillRect(x + bw, yTop, Math.max(0, plotW - x - bw), Math.max(1, yBot - yTop));
-        ctx.strokeStyle = alpha(color, 0.7);
+        ctx.fillStyle = alpha(color, Math.max(0, Math.min(1, s.stackedFillOpacity / 100)));
+        ctx.fillRect(x + bw, yTop, Math.max(0, xEnd - x - bw), Math.max(1, yBot - yTop));
+        ctx.strokeStyle = alpha(color, Math.max(0, Math.min(1, s.stackedLineOpacity / 100)));
         ctx.beginPath();
         ctx.moveTo(x + bw, Math.round(yTop) + 0.5);
-        ctx.lineTo(plotW, Math.round(yTop) + 0.5);
+        ctx.lineTo(xEnd, Math.round(yTop) + 0.5);
         ctx.moveTo(x + bw, Math.round(yBot) + 0.5);
-        ctx.lineTo(plotW, Math.round(yBot) + 0.5);
+        ctx.lineTo(xEnd, Math.round(yBot) + 0.5);
         ctx.stroke();
       }
+    }
+    ctx.setLineDash([]);
+  }
+
+  if (s.showPoc && s.extendPoc) {
+    ctx.setLineDash(resolveStackedDash(s.pocLineStyle));
+    ctx.lineWidth = s.pocLineWidth;
+    ctx.strokeStyle = alpha(theme.sense, Math.max(0, Math.min(1, s.pocLineOpacity / 100)));
+    for (let i = first; i <= lastVisible; i += 1) {
+      const bar = bars[i];
+      if (bar.poc == null) continue;
+      const stopIndex = Math.min(findLevelTouchEndIndex(bars, bar.poc, i), lastVisible + 1);
+      const x = xOf(i);
+      const xEnd = stopIndex <= lastVisible ? xOf(stopIndex) : plotW;
+      if (xEnd <= x + bw) continue;
+      const y = yOf(bar.poc / series.step);
+      if (y < 0 || y > plotH) continue;
+      const lineY = Math.round(y) + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(x + bw, lineY);
+      ctx.lineTo(xEnd, lineY);
+      ctx.stroke();
     }
     ctx.setLineDash([]);
   }
@@ -822,6 +861,11 @@ function drawFootprint(ctx: CanvasRenderingContext2D, args: DrawArgs) {
   }
 
   const lastBar = bars[lastIdx];
+  const maxCellDelta = (bar: OrderflowBar) =>
+    bar.cells.reduce((max, cell) => Math.max(max, cell.delta), 0);
+  const minCellDelta = (bar: OrderflowBar) =>
+    bar.cells.reduce((min, cell) => Math.min(min, cell.delta), 0);
+  const maxAbsCvd = bars.reduce((max, bar) => Math.max(max, Math.abs(bar.cvd)), 0);
   const lastY = yOf(lastBar.close / series.step);
   if (lastY >= 0 && lastY <= plotH) {
     const up = lastBar.close >= lastBar.open;
@@ -888,6 +932,28 @@ function drawFootprint(ctx: CanvasRenderingContext2D, args: DrawArgs) {
           : null
     );
   }
+  if (s.showMaxDeltaRow) {
+    drawStatRow(
+      "Δ max",
+      (bar) => fmtSignedCompact(maxCellDelta(bar)),
+      () => theme.up,
+      (bar) =>
+        series.maxAbsDelta > 0
+          ? alpha(theme.up, 0.08 + (Math.abs(maxCellDelta(bar)) / series.maxAbsDelta) * 0.3)
+          : null
+    );
+  }
+  if (s.showMinDeltaRow) {
+    drawStatRow(
+      "Δ min",
+      (bar) => fmtSignedCompact(minCellDelta(bar)),
+      () => theme.down,
+      (bar) =>
+        series.maxAbsDelta > 0
+          ? alpha(theme.down, 0.08 + (Math.abs(minCellDelta(bar)) / series.maxAbsDelta) * 0.3)
+          : null
+    );
+  }
   if (s.showVolumeRow) {
     drawStatRow(
       "Vol",
@@ -910,54 +976,23 @@ function drawFootprint(ctx: CanvasRenderingContext2D, args: DrawArgs) {
     ctx.lineTo(plotW + profileW, top + 0.5);
     ctx.stroke();
 
-    let lo = Number.POSITIVE_INFINITY;
-    let hi = Number.NEGATIVE_INFINITY;
-    for (let i = first; i <= lastVisible; i += 1) {
-      lo = Math.min(lo, bars[i].cvd);
-      hi = Math.max(hi, bars[i].cvd);
-    }
-    if (!Number.isFinite(lo) || !Number.isFinite(hi)) {
-      lo = 0;
-      hi = 0;
-    }
-    if (hi - lo < 1e-9) {
-      hi += 1;
-      lo -= 1;
-    }
-    const pad = (hi - lo) * 0.12;
-    lo -= pad;
-    hi += pad;
-    const cvdY = (v: number) => top + cvdH - ((v - lo) / (hi - lo)) * cvdH;
-
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, top, plotW, cvdH);
     ctx.clip();
-    if (lo < 0 && hi > 0) {
-      const zero = Math.round(cvdY(0)) + 0.5;
-      ctx.strokeStyle = alpha(theme.line, 0.9);
-      ctx.setLineDash([3, 3]);
-      ctx.beginPath();
-      ctx.moveTo(0, zero);
-      ctx.lineTo(plotW, zero);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-    ctx.beginPath();
     for (let i = first; i <= lastVisible; i += 1) {
-      const x = xOf(i) + bw / 2;
-      const y = cvdY(bars[i].cvd);
-      if (i === first) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+      const bar = bars[i];
+      const x = xOf(i);
+      const intensity = maxAbsCvd > 0 ? Math.min(1, Math.abs(bar.cvd) / maxAbsCvd) : 0;
+      const base = bar.cvd >= 0 ? theme.up : theme.down;
+      ctx.fillStyle = alpha(base, 0.08 + intensity * 0.42);
+      ctx.fillRect(x + 1, top + 1, Math.max(1, bw - 2), Math.max(1, cvdH - 2));
+      if (bw >= 28) {
+        ctx.textAlign = "center";
+        ctx.fillStyle = Math.abs(bar.cvd) > 0 ? alpha(theme.text, 0.92) : alpha(theme.muted, 0.8);
+        ctx.fillText(fmtSignedCompact(bar.cvd), x + bw / 2, top + cvdH / 2);
+      }
     }
-    ctx.strokeStyle = theme.sense;
-    ctx.lineWidth = 1.4;
-    ctx.stroke();
-    ctx.lineTo(xOf(lastVisible) + bw / 2, top + cvdH);
-    ctx.lineTo(xOf(first) + bw / 2, top + cvdH);
-    ctx.closePath();
-    ctx.fillStyle = alpha(theme.sense, 0.12);
-    ctx.fill();
     ctx.restore();
 
     ctx.textAlign = "left";

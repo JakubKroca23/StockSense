@@ -1,16 +1,42 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useMemo, useRef, useState, cloneElement, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from "react";
 import { apiFetch, apiWsUrl } from "@/lib/api";
-import { PriceChart, type ChartBar } from "@/components/PriceChart";
+import { PriceChart, type ChartBar, type ChartStyle, type ChartVizSettings, DEFAULT_DESK_CHART_VIZ } from "@/components/PriceChart";
 import { HeaderExtra, HeaderQuote } from "@/components/HeaderExtra";
-import { IconDraw } from "@/components/NavIcons";
+import { IconBook, IconDom, IconDraw, IconTape, IconAddChart } from "@/components/NavIcons";
 import { OrderBookPanel, type OrderBookData } from "@/components/OrderBookPanel";
 import { TradesTapePanel, type TradesTapeData } from "@/components/TradesTapePanel";
+import { DeskWindowHead } from "@/components/DeskWindowHead";
+import { DeskPick } from "@/components/DeskPick";
+import { ChartDeskSettings } from "@/components/ChartDeskSettings";
+import { DomPanel } from "@/components/DomPanel";
+import { DomSettingsPanel } from "@/components/DomSettingsPanel";
+import { bindToolDrag, DeskMosaic, DeskWorkspace, useDeskDrag } from "@/components/DeskMosaic";
 import type { ChartDrawing, DrawTool } from "@/lib/chart";
 import type { LinearDeskInfo } from "@/lib/desks";
-import { useChartViz } from "@/lib/chartViz";
+import {
+  DEFAULT_DOM_SETTINGS,
+  DEFAULT_ORDERFLOW_SETTINGS,
+  type DomSettings,
+  type FootprintData,
+  type OrderflowSettings,
+} from "@/lib/orderflow";
+import {
+  addChart,
+  cloneDesk,
+  collectChartLeaves,
+  DEFAULT_DESK_LAYOUT,
+  hasPanel,
+  isDeskNode,
+  NEW_CHART_DRAG,
+  newChartLeaf,
+  removeLeaf,
+  removePanel,
+  togglePanel,
+  type DeskNode,
+  type DeskPanelId,
+} from "@/lib/deskLayout";
 
 type DeskChartResponse = {
   symbol: string;
@@ -30,7 +56,13 @@ type DeskChartResponse = {
 export type BybitDeskConfig = LinearDeskInfo;
 
 const DESK_STORE = "stocksense-desk";
-const DEFAULT_DRAWINGS = { items: [] as ChartDrawing[] };
+
+const CHART_STYLES: { id: ChartStyle; label: string }[] = [
+  { id: "candle", label: "Svíčky" },
+  { id: "hollow", label: "Duté" },
+  { id: "line", label: "Čára" },
+  { id: "off", label: "Vyp" },
+];
 
 const TIMEFRAMES = [
   { id: "1s", label: "1 S", defaultLookback: "1h" },
@@ -43,6 +75,11 @@ const TIMEFRAMES = [
   { id: "1d", label: "D", defaultLookback: "6mo" },
   { id: "1wk", label: "W", defaultLookback: "2y" },
 ] as const;
+
+/** Footprint bars are aggregated from 1m clusters — no sub-minute timeframe upstream. */
+const FP_TIMEFRAMES = TIMEFRAMES.filter((t) => t.id !== "1s");
+
+const FP_DEFAULT_RANGE = { tf: "1m", lb: "1d" };
 
 const LOOKBACKS_BY_TF: Record<string, { id: string; label: string }[]> = {
   "1s": [
@@ -149,114 +186,126 @@ function applyLiveBar(prev: DeskChartResponse, live: ChartBar, extra?: Partial<D
   };
 }
 
-function HeaderPick({
-  label,
-  ariaLabel,
-  value,
-  options,
-  onSelect,
-}: {
-  label: string;
-  ariaLabel: string;
-  value: string;
-  options: { id: string; label: string }[];
-  onSelect: (id: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    const onPtr = (e: PointerEvent) => {
-      const t = e.target;
-      if (!(t instanceof Node)) return;
-      if (btnRef.current?.contains(t) || menuRef.current?.contains(t)) return;
-      setOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("pointerdown", onPtr);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("pointerdown", onPtr);
-    };
-  }, [open]);
-
-  useLayoutEffect(() => {
-    if (!open || !btnRef.current) return;
-    const r = btnRef.current.getBoundingClientRect();
-    const header = document.querySelector(".app-header");
-    const headerBottom = header?.getBoundingClientRect().bottom ?? r.bottom;
-    setPos({ top: headerBottom + 8, left: r.left });
-  }, [open]);
-
-  return (
-    <>
-      <button
-        ref={btnRef}
-        type="button"
-        className={`chart-chip header-desk__tf-btn ${open ? "is-active" : ""}`}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={ariaLabel}
-        onClick={() => setOpen((v) => !v)}
-      >
-        {label}
-      </button>
-      {open &&
-        createPortal(
-          <div
-            ref={menuRef}
-            className="tf-menu"
-            role="menu"
-            style={{ top: pos.top, left: pos.left }}
-          >
-            {options.map((opt) => (
-              <button
-                key={opt.id}
-                type="button"
-                role="menuitem"
-                className={`tf-menu__item ${value === opt.id ? "is-active" : ""}`}
-                onClick={() => {
-                  onSelect(opt.id);
-                  setOpen(false);
-                }}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>,
-          document.body
-        )}
-    </>
-  );
+function lsGet(key: string) {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
 }
 
-function usePersistedJson<T extends object>(key: string, fallback: T) {
+function lsSet(key: string, value: string) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    /* ignore */
+  }
+}
+
+function deskPrefKey(deskId: string, name: string) {
+  return `${DESK_STORE}-${deskId}-${name}`;
+}
+
+type ChartPrefs = {
+  tf: string;
+  lb: string;
+  viz: ChartVizSettings;
+  drawings: ChartDrawing[];
+  fpViz: OrderflowSettings;
+  domViz: DomSettings;
+};
+
+function normalizeTfLb(tfRaw: string | null, lbRaw: string | null) {
+  const tfOk = TIMEFRAMES.some((t) => t.id === tfRaw) ? tfRaw! : "1m";
+  const allowed = LOOKBACKS_BY_TF[tfOk] || LOOKBACKS_BY_TF["1d"];
+  const tfMeta = TIMEFRAMES.find((t) => t.id === tfOk);
+  const lbOk = allowed.some((r) => r.id === lbRaw) ? lbRaw! : tfMeta?.defaultLookback || "1d";
+  return { tf: tfOk, lb: lbOk };
+}
+
+function defaultChartPrefs(): ChartPrefs {
+  return {
+    tf: "1m",
+    lb: "1d",
+    viz: { ...DEFAULT_DESK_CHART_VIZ },
+    drawings: [],
+    fpViz: { ...DEFAULT_ORDERFLOW_SETTINGS },
+    domViz: { ...DEFAULT_DOM_SETTINGS },
+  };
+}
+
+function readChartPrefs(deskId: string, leafId: string): ChartPrefs {
+  const paneKey = deskPrefKey(deskId, `pane-${leafId}`);
+  try {
+    const raw = lsGet(paneKey);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<ChartPrefs>;
+      const { tf, lb } = normalizeTfLb(parsed.tf ?? null, parsed.lb ?? null);
+      return {
+        tf,
+        lb,
+        viz: { ...DEFAULT_DESK_CHART_VIZ, ...(parsed.viz ?? {}) },
+        drawings: Array.isArray(parsed.drawings) ? parsed.drawings : [],
+        fpViz: { ...DEFAULT_ORDERFLOW_SETTINGS, ...((parsed as Record<string, unknown>).fpViz as Partial<OrderflowSettings> ?? {}) },
+        domViz: { ...DEFAULT_DOM_SETTINGS, ...((parsed as Record<string, unknown>).domViz as Partial<DomSettings> ?? {}) },
+      };
+    }
+  } catch {
+    /* ignore */
+  }
+  if (leafId === "chart") {
+    const { tf, lb } = normalizeTfLb(
+      lsGet(deskPrefKey(deskId, "tf")) ?? lsGet(`${DESK_STORE}-tf`),
+      lsGet(deskPrefKey(deskId, "lb")) ?? lsGet(`${DESK_STORE}-lb`)
+    );
+    let viz = { ...DEFAULT_DESK_CHART_VIZ };
+    try {
+      const vraw = lsGet(deskPrefKey(deskId, "viz")) ?? lsGet("stocksense-desk-chart-viz");
+      if (vraw) viz = { ...viz, ...(JSON.parse(vraw) as Partial<ChartVizSettings>) };
+    } catch {
+      /* ignore */
+    }
+    let drawings: ChartDrawing[] = [];
+    try {
+      const draw = lsGet(deskPrefKey(deskId, "draw")) ?? lsGet(`${DESK_STORE}-draw-${deskId}`);
+      if (draw) {
+        const parsed = JSON.parse(draw) as { items?: ChartDrawing[] };
+        drawings = Array.isArray(parsed.items) ? parsed.items : [];
+      }
+    } catch {
+      /* ignore */
+    }
+    const prefs = {
+      tf,
+      lb,
+      viz,
+      drawings,
+      fpViz: { ...DEFAULT_ORDERFLOW_SETTINGS },
+      domViz: { ...DEFAULT_DOM_SETTINGS },
+    };
+    lsSet(paneKey, JSON.stringify(prefs));
+    return prefs;
+  }
+  return defaultChartPrefs();
+}
+
+function usePersistedJson<T extends object>(key: string, fallback: T, legacyKey?: string) {
   const [value, setValue] = useState<T>(fallback);
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem(key);
+      const raw = lsGet(key) ?? (legacyKey ? lsGet(legacyKey) : null);
       if (!raw) return;
       const parsed = JSON.parse(raw) as Partial<T>;
       if (parsed && typeof parsed === "object") setValue({ ...fallback, ...parsed });
     } catch {
       /* ignore */
     }
-  }, [key, fallback]);
+  }, [key, fallback, legacyKey]);
   const update = useCallback(
     (patch: Partial<T>) => {
       setValue((prev) => {
         const next = { ...prev, ...patch };
-        try {
-          window.localStorage.setItem(key, JSON.stringify(next));
-        } catch {
-          /* ignore */
-        }
+        lsSet(key, JSON.stringify(next));
         return next;
       });
     },
@@ -264,56 +313,98 @@ function usePersistedJson<T extends object>(key: string, fallback: T) {
   );
   const reset = useCallback(() => {
     setValue(fallback);
-    try {
-      window.localStorage.setItem(key, JSON.stringify(fallback));
-    } catch {
-      /* ignore */
-    }
+    lsSet(key, JSON.stringify(fallback));
   }, [key, fallback]);
   return [value, update, reset] as const;
 }
 
-export function BybitDesk({ config }: { config: BybitDeskConfig }) {
-  const apiBase = `/desk/${config.id}`;
-  const loadError = `Načtení ${config.fallbackSymbol} selhalo`;
-  const loadingLabel = `Stahuji ${config.fallbackSymbol}…`;
-  const [data, setData] = useState<DeskChartResponse | null>(null);
+function usePersistedOpen(key: string, fallback = true, legacyKey?: string) {
+  const [open, setOpen] = useState(fallback);
+  useEffect(() => {
+    const raw = lsGet(key) ?? (legacyKey ? lsGet(legacyKey) : null);
+    if (raw === "0") setOpen(false);
+    if (raw === "1") setOpen(true);
+  }, [key, legacyKey]);
+  const set = useCallback((next: boolean | ((v: boolean) => boolean)) => {
+    setOpen((v) => {
+      const val = typeof next === "function" ? next(v) : next;
+      lsSet(key, val ? "1" : "0");
+      return val;
+    });
+  }, [key]);
+  const toggle = useCallback(() => set((v) => !v), [set]);
+  return [open, toggle, set] as const;
+}
+
+export function BybitDesk({ config }: { config?: BybitDeskConfig | null }) {
+  const blank = !config;
+  const deskId = config?.id ?? "home";
+  const apiBase = config ? `/desk/${config.id}` : "";
+  const loadError = config ? `Načtení ${config.fallbackSymbol} selhalo` : "";
+  const loadingLabel = config ? `Stahuji ${config.fallbackSymbol}…` : "";
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [timeframe, setTimeframe] = useState("1m");
-  const [lookback, setLookback] = useState("1d");
-  const [live, setLive] = useState(false);
+  const [quoteData, setQuoteData] = useState<DeskChartResponse | null>(null);
+  const [quoteLive, setQuoteLive] = useState(false);
   const [tradesTape, setTradesTape] = useState<TradesTapeData | null>(null);
   const [orderBook, setOrderBook] = useState<OrderBookData | null>(null);
-  const [drawBarOpen, setDrawBarOpen] = useState(false);
-  const { viz: chartViz } = useChartViz();
-  const [drawingsStore, setDrawingsStore] = usePersistedJson<{ items: ChartDrawing[] }>(
-    `${DESK_STORE}-draw-${config.id}`,
-    DEFAULT_DRAWINGS
+  const [fpFetch, setFpFetch] = useState<{ tf: string; lb: string; data: FootprintData } | null>(
+    null
+  );
+  const [fpRange, patchFpRange] = usePersistedJson(
+    deskPrefKey(deskId, "fp-range"),
+    FP_DEFAULT_RANGE
+  );
+  const [domViz, patchDomViz, resetDomViz] = usePersistedJson<DomSettings>(
+    deskPrefKey(deskId, "dom-viz"),
+    DEFAULT_DOM_SETTINGS
+  );
+  const [drawBarOpen, , setDrawBarOpen] = usePersistedOpen(
+    deskPrefKey(deskId, "draw-bar"),
+    false
   );
   const [drawTool, setDrawTool] = useState<DrawTool>("none");
-
+  const [layout, setLayoutState] = useState<DeskNode>(DEFAULT_DESK_LAYOUT);
   const [deskPrefsReady, setDeskPrefsReady] = useState(false);
 
   useEffect(() => {
     try {
-      const tfRaw = window.localStorage.getItem(`${DESK_STORE}-tf`);
-      const lbRaw = window.localStorage.getItem(`${DESK_STORE}-lb`);
-      const tfOk = TIMEFRAMES.some((t) => t.id === tfRaw) ? tfRaw! : "1m";
-      const allowed = LOOKBACKS_BY_TF[tfOk] || LOOKBACKS_BY_TF["1d"];
-      const tfMeta = TIMEFRAMES.find((t) => t.id === tfOk);
-      const lbOk = allowed.some((r) => r.id === lbRaw)
-        ? lbRaw!
-        : tfMeta?.defaultLookback || "1d";
-      setTimeframe(tfOk);
-      setLookback(lbOk);
+      const layoutRaw = lsGet(deskPrefKey(deskId, "layout"));
+      if (layoutRaw) {
+        const parsed = JSON.parse(layoutRaw) as unknown;
+        if (isDeskNode(parsed)) {
+          setLayoutState(removePanel(parsed, "footprint") ?? newChartLeaf());
+        }
+      } else {
+        let next = cloneDesk(DEFAULT_DESK_LAYOUT);
+        const book = lsGet(deskPrefKey(deskId, "book")) ?? lsGet(`${DESK_STORE}-book`);
+        const tape = lsGet(deskPrefKey(deskId, "tape")) ?? lsGet(`${DESK_STORE}-tape`);
+        if (book === "0") next = removePanel(next, "orderbook") ?? next;
+        if (tape === "0") next = removePanel(next, "tape") ?? next;
+        next = removePanel(next, "footprint") ?? next;
+        setLayoutState(next);
+      }
     } catch {
       /* ignore */
     }
     setDeskPrefsReady(true);
-  }, []);
+  }, [deskId]);
+
+  const setLayout = useCallback(
+    (next: DeskNode) => {
+      setLayoutState(next);
+      lsSet(deskPrefKey(deskId, "layout"), JSON.stringify(next));
+    },
+    [deskId]
+  );
+
+  const bookOpen = hasPanel(layout, "orderbook");
+  const tapeOpen = hasPanel(layout, "tape");
+  const domOpen = hasPanel(layout, "dom");
+  const needFootprint = domOpen;
+  const quoteLeafId = useMemo(() => collectChartLeaves(layout)[0]?.id ?? "chart", [layout]);
 
   const loadOrderBook = useCallback(async () => {
+      if (!apiBase) return;
       try {
         const res = await apiFetch<OrderBookData>(`${apiBase}/orderbook?limit=200`);
         setOrderBook(res);
@@ -323,6 +414,7 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
     }, [apiBase]);
 
   const loadTrades = useCallback(async () => {
+    if (!apiBase) return;
     try {
       const res = await apiFetch<TradesTapeData>(`${apiBase}/trades?limit=90`);
       setTradesTape(res);
@@ -331,48 +423,377 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
     }
   }, [apiBase]);
 
-  const loadGen = useRef(0);
-  const load = useCallback(async (iv: string, lb: string, silent = false) => {
-    const gen = ++loadGen.current;
-    if (!silent) setLoading(true);
-    try {
-      const res = await apiFetch<DeskChartResponse>(
-        `${apiBase}/chart?interval=${encodeURIComponent(iv)}&lookback=${encodeURIComponent(lb)}`
-      );
-      if (gen !== loadGen.current) return;
-      setData(res);
-      setError(null);
-    } catch (err) {
-      if (gen !== loadGen.current) return;
-      if (!silent) setError(err instanceof Error ? err.message : loadError);
-    } finally {
-      if (gen === loadGen.current && !silent) setLoading(false);
-    }
-  }, [apiBase, loadError]);
-
   useEffect(() => {
-    if (!deskPrefsReady) return;
-    void load(timeframe, lookback);
-  }, [deskPrefsReady, load, timeframe, lookback]);
-
-  useEffect(() => {
+    if (blank) return;
     void loadOrderBook();
     const id = window.setInterval(() => void loadOrderBook(), 650);
     return () => window.clearInterval(id);
-  }, [loadOrderBook]);
+  }, [blank, loadOrderBook]);
 
   useEffect(() => {
+    if (blank) return;
     void loadTrades();
     const id = window.setInterval(() => void loadTrades(), 1500);
     return () => window.clearInterval(id);
-  }, [loadTrades]);
+  }, [blank, loadTrades]);
+
+  const loadFootprint = useCallback(async () => {
+    if (!apiBase) return;
+    const { tf, lb } = fpRange;
+    try {
+      const res = await apiFetch<FootprintData>(
+        `${apiBase}/footprint?interval=${encodeURIComponent(tf)}&lookback=${encodeURIComponent(lb)}`
+      );
+      setFpFetch({ tf, lb, data: res });
+    } catch {
+      /* keep last clusters */
+    }
+  }, [apiBase, fpRange]);
 
   useEffect(() => {
-    if (loading || !data?.source?.startsWith("bybit")) return;
+    if (blank || !needFootprint) return;
+    void loadFootprint();
+    const id = window.setInterval(() => void loadFootprint(), 3000);
+    return () => {
+      window.clearInterval(id);
+    };
+  }, [blank, needFootprint, loadFootprint]);
+
+  /** Stale bars from a previous timeframe must not leak into the panel while a refetch is in flight. */
+  const footprint =
+    fpFetch && fpFetch.tf === fpRange.tf && fpFetch.lb === fpRange.lb ? fpFetch.data : null;
+  const footprintLoading = needFootprint && !footprint;
+
+  const up = (quoteData?.change_pct ?? quoteData?.change_pct_window ?? 0) >= 0;
+
+  return (
+    <DeskWorkspace layout={layout} onLayout={setLayout}>
+    <div className="gold-page oil-page">
+      {!blank ? (
+      <HeaderQuote>
+        <p className="header-desk__quote">
+          <span className="header-desk__px-row">
+            <span className="cryptosense__px">{fmtPrice(quoteData?.price, config.priceDigits)}</span>
+            <span className={`cryptosense__chg ${up ? "is-up" : "is-down"}`}>
+              {fmtPct(quoteData?.change_pct ?? quoteData?.change_pct_window)}
+            </span>
+          </span>
+          <span className={`header-desk__live${quoteLive ? " is-on" : ""}`} title={config.liveTitle}>
+            <span className="header-desk__live-dot" aria-hidden />
+            live
+            <span className="header-desk__venue">
+              {orderBook?.execution_exchange || tradesTape?.execution_exchange || "bybit"}
+            </span>
+          </span>
+        </p>
+      </HeaderQuote>
+      ) : null}
+      <HeaderExtra>
+        <div className="header-desk">
+          <div className="header-desk__tools">
+            <div className="header-desk__sec" role="group" aria-label="Graf">
+              <AddChartTool onAdd={() => setLayout(addChart(layout))} />
+            </div>
+            <span className="header-desk__div" aria-hidden />
+            <div className="header-desk__sec" role="group" aria-label="Kreslení">
+              <button
+                type="button"
+                className={`chart-chip chart-chip--soft chart-chip--icon ${drawBarOpen ? "is-active" : ""}`}
+                onClick={() => {
+                  setDrawBarOpen((open) => {
+                    const next = !open;
+                    if (!next) setDrawTool("none");
+                    return next;
+                  });
+                }}
+                aria-pressed={drawBarOpen}
+                aria-label="Kreslení"
+                title="Kreslení"
+              >
+                <IconDraw size={18} />
+              </button>
+            </div>
+            <span className="header-desk__div" aria-hidden />
+            <DeskToolLaunchers
+              open={{
+                orderbook: bookOpen,
+                tape: tapeOpen,
+                dom: domOpen,
+              }}
+              onToggle={(panel) => setLayout(togglePanel(layout, panel))}
+            />
+          </div>
+        </div>
+      </HeaderExtra>
+
+      {error && (
+        <p className="card gold-page__error" role="alert">
+          {error}
+        </p>
+      )}
+
+      <div className="oil-page__desk">
+        <DeskMosaic
+          layout={layout}
+          onLayout={setLayout}
+          renderPanel={(leaf) => {
+            if (leaf.panel === "orderbook") {
+              return (
+                <DeskBoundPanel leafId={leaf.id}>
+                  <OrderBookPanel
+                    book={orderBook}
+                    priceDigits={config?.priceDigits ?? 2}
+                  />
+                </DeskBoundPanel>
+              );
+            }
+            if (leaf.panel === "tape") {
+              return (
+                <DeskBoundPanel leafId={leaf.id}>
+                  <TradesTapePanel
+                    tape={tradesTape}
+                  />
+                </DeskBoundPanel>
+              );
+            }
+            if (leaf.panel === "dom") {
+              const tick = orderBook?.tick ?? config?.tick ?? 0.01;
+              return (
+                <DeskBoundPanel leafId={leaf.id}>
+                  <DomPanel
+                    book={orderBook}
+                    tape={tradesTape}
+                    footprint={footprint}
+                    settings={domViz}
+                    onSettingsChange={patchDomViz}
+                    priceDigits={config?.priceDigits ?? 2}
+                    settingsPanel={
+                      <DomSettingsPanel
+                        settings={domViz}
+                        tick={tick}
+                        onChange={patchDomViz}
+                        onReset={resetDomViz}
+                      />
+                    }
+                    onClose={() => setLayout(togglePanel(layout, "dom"))}
+                  />
+                </DeskBoundPanel>
+              );
+            }
+            return (
+              <DeskBoundPanel leafId={leaf.id}>
+                <DeskChartPane
+                  leafId={leaf.id}
+                  deskId={deskId}
+                  deskPrefsReady={deskPrefsReady}
+                  apiBase={apiBase}
+                  loadError={loadError}
+                  loadingLabel={loadingLabel}
+                  blank={blank}
+                  drawBarOpen={drawBarOpen}
+                  drawTool={drawTool}
+                  onDrawTool={setDrawTool}
+                  onCloseDraw={() => {
+                    setDrawBarOpen(false);
+                    setDrawTool("none");
+                  }}
+                  onClose={() => setLayout(removeLeaf(layout, leaf.id) ?? newChartLeaf())}
+                  isQuoteSource={leaf.id === quoteLeafId}
+                  onQuote={setQuoteData}
+                  onLive={setQuoteLive}
+                  onError={setError}
+                  orderBook={orderBook}
+                  priceDigits={config?.priceDigits ?? 2}
+                  tick={config?.tick}
+                />
+              </DeskBoundPanel>
+            );
+          }}
+        />
+      </div>
+    </div>
+    </DeskWorkspace>
+  );
+}
+
+function AddChartTool({ onAdd }: { onAdd: () => void }) {
+  const drag = useDeskDrag();
+  const begin = drag?.beginDrag ?? (() => {});
+  return (
+    <button
+      type="button"
+      className="chart-chip chart-chip--soft chart-chip--icon"
+      onPointerDown={bindToolDrag(NEW_CHART_DRAG, begin, onAdd)}
+      aria-label="Přidat graf"
+      title="Přidat graf — klikni nebo přetáhni do desku"
+    >
+      <IconAddChart size={18} />
+    </button>
+  );
+}
+
+type DeskToolId = Exclude<DeskPanelId, "chart" | "footprint">;
+
+const DESK_TOOLS: {
+  id: DeskToolId;
+  label: string;
+  hint: string;
+  Icon: (p: { size?: number }) => ReactNode;
+}[] = [
+  { id: "orderbook", label: "Orderbook", hint: "Orderbook", Icon: IconBook },
+  { id: "tape", label: "Tape", hint: "Tape", Icon: IconTape },
+  { id: "dom", label: "DOM", hint: "DOM — hloubka trhu", Icon: IconDom },
+];
+
+function DeskToolLaunchers({
+  open,
+  onToggle,
+}: {
+  open: Record<DeskToolId, boolean>;
+  onToggle: (panel: DeskToolId) => void;
+}) {
+  const drag = useDeskDrag();
+  const begin = drag?.beginDrag ?? (() => {});
+  return (
+    <div className="header-desk__sec" role="group" aria-label="Nástroje">
+      {DESK_TOOLS.map(({ id, label, hint, Icon }) => (
+        <button
+          key={id}
+          type="button"
+          className={`chart-chip chart-chip--soft chart-chip--icon ${open[id] ? "is-active" : ""}`}
+          onPointerDown={bindToolDrag(id, begin, () => onToggle(id))}
+          aria-pressed={open[id]}
+          aria-label={label}
+          title={`${hint} — přetáhni do desku`}
+        >
+          <Icon size={18} />
+          <span className="header-desk__tool-name">{label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function DeskChartPane({
+  leafId,
+  onDragStart,
+  deskId,
+  deskPrefsReady,
+  apiBase,
+  loadError,
+  loadingLabel,
+  blank,
+  drawBarOpen,
+  drawTool,
+  onDrawTool,
+  onCloseDraw,
+  onClose,
+  isQuoteSource,
+  onQuote,
+  onLive,
+  onError,
+  orderBook,
+  priceDigits,
+  tick,
+}: {
+  leafId: string;
+  onDragStart?: (e: ReactPointerEvent<HTMLElement>) => void;
+  deskId: string;
+  deskPrefsReady: boolean;
+  apiBase: string;
+  loadError: string;
+  loadingLabel: string;
+  blank: boolean;
+  drawBarOpen: boolean;
+  drawTool: DrawTool;
+  onDrawTool: (tool: DrawTool | ((t: DrawTool) => DrawTool)) => void;
+  onCloseDraw: () => void;
+  onClose: () => void;
+  isQuoteSource: boolean;
+  onQuote: (data: DeskChartResponse | null) => void;
+  onLive: (live: boolean) => void;
+  onError: (msg: string | null) => void;
+  orderBook: OrderBookData | null;
+  priceDigits: number;
+  tick?: number;
+}) {
+  const paneKey = deskPrefKey(deskId, `pane-${leafId}`);
+  const [prefs, setPrefs] = useState<ChartPrefs>(defaultChartPrefs);
+  const [prefsReady, setPrefsReady] = useState(false);
+  const [data, setData] = useState<DeskChartResponse | null>(null);
+  const [loading, setLoading] = useState(!blank);
+  const [live, setLive] = useState(false);
+  const loadGen = useRef(0);
+  const [fpData, setFpData] = useState<{ tf: string; lb: string; data: FootprintData } | null>(null);
+
+  useEffect(() => {
+    if (!deskPrefsReady) return;
+    setPrefs(readChartPrefs(deskId, leafId));
+    setPrefsReady(true);
+  }, [deskId, leafId, deskPrefsReady]);
+
+  const persistPrefs = useCallback(
+    (next: ChartPrefs) => {
+      setPrefs(next);
+      lsSet(paneKey, JSON.stringify(next));
+    },
+    [paneKey]
+  );
+
+  const patchPrefs = useCallback(
+    (patch: Partial<ChartPrefs>) => {
+      setPrefs((prev) => {
+        const next = { ...prev, ...patch };
+        lsSet(paneKey, JSON.stringify(next));
+        return next;
+      });
+    },
+    [paneKey]
+  );
+
+  const load = useCallback(
+    async (iv: string, lb: string, silent = false) => {
+      if (!apiBase) return;
+      const gen = ++loadGen.current;
+      if (!silent) setLoading(true);
+      try {
+        const res = await apiFetch<DeskChartResponse>(
+          `${apiBase}/chart?interval=${encodeURIComponent(iv)}&lookback=${encodeURIComponent(lb)}`
+        );
+        if (gen !== loadGen.current) return;
+        setData(res);
+        onError(null);
+      } catch (err) {
+        if (gen !== loadGen.current) return;
+        if (!silent) onError(err instanceof Error ? err.message : loadError);
+      } finally {
+        if (gen === loadGen.current && !silent) setLoading(false);
+      }
+    },
+    [apiBase, loadError, onError]
+  );
+
+  useEffect(() => {
+    if (blank || !prefsReady) return;
+    void load(prefs.tf, prefs.lb);
+  }, [blank, prefsReady, load, prefs.tf, prefs.lb]);
+
+  useEffect(() => {
+    if (!isQuoteSource) return;
+    onQuote(data);
+  }, [isQuoteSource, data, onQuote]);
+
+  useEffect(() => {
+    if (!isQuoteSource) return;
+    onLive(live);
+  }, [isQuoteSource, live, onLive]);
+
+  useEffect(() => {
+    if (blank || loading || !data?.source?.startsWith("bybit")) return;
     let closed = false;
     let ws: WebSocket | null = null;
     let retry: number | null = null;
-    const tf = timeframe;
+    const tf = prefs.tf;
 
     const connect = () => {
       if (closed) return;
@@ -427,10 +848,10 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
         /* ignore */
       }
     };
-  }, [timeframe, loading, data?.source, apiBase]);
+  }, [blank, prefs.tf, loading, data?.source, apiBase]);
 
   useEffect(() => {
-    if (loading || live) return;
+    if (blank || loading || live) return;
     let cancelled = false;
     let inflight = false;
     const tick = async () => {
@@ -439,7 +860,7 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
       inflight = true;
       try {
         const snap = await apiFetch<OilLiveResponse>(
-          `${apiBase}/live?interval=${encodeURIComponent(timeframe)}`
+          `${apiBase}/live?interval=${encodeURIComponent(prefs.tf)}`
         );
         if (cancelled) return;
         setData((prev) => (prev ? applyLiveBar(prev, snap.bar, { change_pct: snap.change_pct }) : prev));
@@ -456,182 +877,324 @@ export function BybitDesk({ config }: { config: BybitDeskConfig }) {
       window.clearTimeout(first);
       window.clearInterval(id);
     };
-  }, [timeframe, loading, live, apiBase]);
+  }, [blank, prefs.tf, loading, live, apiBase]);
 
-  function selectTimeframe(tfId: string) {
+  const wantFootprint = prefs.viz.footprint && !blank;
+  const wantDom = prefs.viz.dom && !blank;
+  const fpTf = prefs.tf === "1s" ? "1m" : prefs.tf;
+
+  const loadFp = useCallback(async () => {
+    if (!apiBase) return;
+    const lb = prefs.lb;
+    try {
+      const res = await apiFetch<FootprintData>(
+        `${apiBase}/footprint?interval=${encodeURIComponent(fpTf)}&lookback=${encodeURIComponent(lb)}`
+      );
+      setFpData({ tf: fpTf, lb, data: res });
+    } catch {
+      /* keep last */
+    }
+  }, [apiBase, fpTf, prefs.lb]);
+
+  useEffect(() => {
+    if (!wantFootprint && !wantDom) return;
+    void loadFp();
+    const id = window.setInterval(() => void loadFp(), 3000);
+    return () => window.clearInterval(id);
+  }, [wantFootprint, wantDom, loadFp]);
+
+  const footprint = fpData && fpData.tf === fpTf && fpData.lb === prefs.lb ? fpData.data : null;
+
+  const selectTimeframe = (tfId: string) => {
     const tf = TIMEFRAMES.find((t) => t.id === tfId);
     if (!tf) return;
     const allowed = LOOKBACKS_BY_TF[tfId] || LOOKBACKS_BY_TF["1d"];
-    const nextLb = allowed.some((r) => r.id === lookback) ? lookback : tf.defaultLookback;
-    setTimeframe(tfId);
-    setLookback(nextLb);
-  }
+    const nextLb = allowed.some((r) => r.id === prefs.lb) ? prefs.lb : tf.defaultLookback;
+    patchPrefs({ tf: tfId, lb: nextLb });
+  };
 
-  useEffect(() => {
-    if (!deskPrefsReady) return;
-    try {
-      window.localStorage.setItem(`${DESK_STORE}-tf`, timeframe);
-      window.localStorage.setItem(`${DESK_STORE}-lb`, lookback);
-    } catch {
-      /* ignore */
-    }
-  }, [deskPrefsReady, timeframe, lookback]);
+  const resetViz = () => {
+    persistPrefs({ ...prefs, viz: { ...DEFAULT_DESK_CHART_VIZ } });
+  };
 
-  const up = (data?.change_pct ?? data?.change_pct_window ?? 0) >= 0;
-  const ranges = LOOKBACKS_BY_TF[timeframe] || LOOKBACKS_BY_TF["1d"];
-  const tfLabel = TIMEFRAMES.find((t) => t.id === timeframe)?.label ?? timeframe;
-  const lbLabel = ranges.find((r) => r.id === lookback)?.label ?? lookback;
+  const ranges = LOOKBACKS_BY_TF[prefs.tf] || LOOKBACKS_BY_TF["1d"];
+  const tfLabel = TIMEFRAMES.find((t) => t.id === prefs.tf)?.label ?? prefs.tf;
+  const lbLabel = ranges.find((r) => r.id === prefs.lb)?.label ?? prefs.lb;
 
   return (
-    <div className="gold-page oil-page">
-      <HeaderQuote>
-        <p className="header-desk__quote">
-          <span className="header-desk__px-row">
-            <span className="cryptosense__px">{fmtPrice(data?.price, config.priceDigits)}</span>
-            <span className={`cryptosense__chg ${up ? "is-up" : "is-down"}`}>
-              {fmtPct(data?.change_pct ?? data?.change_pct_window)}
-            </span>
-          </span>
-          <span className={`header-desk__live${live ? " is-on" : ""}`} title={config.liveTitle}>
-            <span className="header-desk__live-dot" aria-hidden />
-            live
-            <span className="header-desk__venue">
-              {orderBook?.execution_exchange || tradesTape?.execution_exchange || "bybit"}
-            </span>
-          </span>
-        </p>
-      </HeaderQuote>
-      <HeaderExtra>
-        <div className="header-desk">
-          <div className="header-desk__tools">
-            <div className="header-desk__sec" role="group" aria-label="Timeframe">
-              <HeaderPick
-                label={tfLabel}
-                ariaLabel="Timeframe"
-                value={timeframe}
-                options={TIMEFRAMES.map((t) => ({ id: t.id, label: t.label }))}
-                onSelect={selectTimeframe}
-              />
-              <HeaderPick
-                label={lbLabel}
-                ariaLabel="Období"
-                value={lookback}
-                options={ranges}
-                onSelect={setLookback}
-              />
-            </div>
-            <span className="header-desk__div" aria-hidden />
-            <div className="header-desk__sec" role="group" aria-label="Kreslení">
-              <button
-                type="button"
-                className={`chart-chip chart-chip--soft chart-chip--icon ${drawBarOpen ? "is-active" : ""}`}
-                onClick={() => {
-                  setDrawBarOpen((open) => {
-                    const next = !open;
-                    if (!next) setDrawTool("none");
-                    return next;
-                  });
-                }}
-                aria-pressed={drawBarOpen}
-                aria-label="Kreslení"
-                title="Kreslení"
-              >
-                <IconDraw size={18} />
-              </button>
-            </div>
+    <DeskChartLeaf
+      data={data}
+      loading={loading}
+      loadingLabel={loadingLabel}
+      blank={blank}
+      timeframe={prefs.tf}
+      lookback={prefs.lb}
+      ranges={ranges}
+      tfLabel={tfLabel}
+      lbLabel={lbLabel}
+      chartViz={prefs.viz}
+      drawBarOpen={drawBarOpen}
+      drawTool={drawTool}
+      drawings={prefs.drawings}
+      onSelectTimeframe={selectTimeframe}
+      onSelectLookback={(lb) => patchPrefs({ lb })}
+      onSelectStyle={(id) => {
+        setPrefs((prev) => {
+          const next = { ...prev, viz: { ...prev.viz, style: id } };
+          lsSet(paneKey, JSON.stringify(next));
+          return next;
+        });
+      }}
+      onDrawingsChange={(items) => patchPrefs({ drawings: items })}
+      onDrawTool={onDrawTool}
+      onCloseDraw={onCloseDraw}
+      onClearDraw={() => {
+        patchPrefs({ drawings: [] });
+        onDrawTool("none");
+      }}
+      onToggleFootprint={() =>
+        patchPrefs({ viz: { ...prefs.viz, footprint: !prefs.viz.footprint } })
+      }
+      onToggleDom={() =>
+        patchPrefs({ viz: { ...prefs.viz, dom: !prefs.viz.dom } })
+      }
+      settings={
+        <ChartDeskSettings
+          viz={prefs.viz}
+          onVizChange={(patch) => {
+            setPrefs((prev) => {
+              const next = { ...prev, viz: { ...prev.viz, ...patch } };
+              lsSet(paneKey, JSON.stringify(next));
+              return next;
+            });
+            if (patch.dom === false) {
+              patchPrefs({ domViz: { ...DEFAULT_DOM_SETTINGS } });
+            }
+            if (patch.footprint === false) {
+              patchPrefs({ fpViz: { ...DEFAULT_ORDERFLOW_SETTINGS } });
+            }
+          }}
+          onVizReset={resetViz}
+          fpViz={prefs.fpViz}
+          onFpChange={(patch) => patchPrefs({ fpViz: { ...prefs.fpViz, ...patch } })}
+          onFpReset={() => patchPrefs({ fpViz: { ...DEFAULT_ORDERFLOW_SETTINGS } })}
+          domViz={prefs.domViz}
+          onDomChange={(patch) => patchPrefs({ domViz: { ...prefs.domViz, ...patch } })}
+          onDomReset={() => patchPrefs({ domViz: { ...DEFAULT_DOM_SETTINGS } })}
+          fpTick={footprint?.tick ?? tick ?? 0.01}
+          domTick={tick ?? orderBook?.tick ?? 0.01}
+        />
+      }
+      onClose={onClose}
+      onDragStart={onDragStart}
+      footprintData={footprint}
+      footprintLoading={(wantFootprint || wantDom) && !footprint}
+      fpViz={prefs.fpViz}
+      onFpVizChange={(patch) => patchPrefs({ fpViz: { ...prefs.fpViz, ...patch } })}
+      onFpVizReset={() => patchPrefs({ fpViz: { ...DEFAULT_ORDERFLOW_SETTINGS } })}
+      orderBook={orderBook}
+      domViz={prefs.domViz}
+      priceDigits={priceDigits ?? 2}
+      tick={tick}
+    />
+  );
+}
+
+function DeskChartLeaf({
+  onDragStart,
+  data,
+  loading,
+  loadingLabel,
+  blank,
+  timeframe,
+  lookback,
+  ranges,
+  tfLabel,
+  lbLabel,
+  chartViz,
+  drawBarOpen,
+  drawTool,
+  drawings,
+  onSelectTimeframe,
+  onSelectLookback,
+  onSelectStyle,
+  onDrawingsChange,
+  onDrawTool,
+  onCloseDraw,
+  onClearDraw,
+  onToggleFootprint,
+  onToggleDom,
+  settings,
+  onClose,
+  footprintData,
+  footprintLoading,
+  fpViz,
+  onFpVizChange,
+  onFpVizReset,
+  orderBook,
+  domViz,
+  priceDigits = 2,
+  tick,
+}: {
+  onDragStart?: (e: ReactPointerEvent<HTMLElement>) => void;
+  data: DeskChartResponse | null;
+  loading: boolean;
+  loadingLabel: string;
+  blank: boolean;
+  timeframe: string;
+  lookback: string;
+  ranges: { id: string; label: string }[];
+  tfLabel: string;
+  lbLabel: string;
+  chartViz: ChartVizSettings;
+  drawBarOpen: boolean;
+  drawTool: DrawTool;
+  drawings: ChartDrawing[];
+  onSelectTimeframe: (id: string) => void;
+  onSelectLookback: (id: string) => void;
+  onSelectStyle: (id: ChartStyle) => void;
+  onDrawingsChange: (items: ChartDrawing[]) => void;
+  onDrawTool: (tool: DrawTool | ((t: DrawTool) => DrawTool)) => void;
+  onCloseDraw: () => void;
+  onClearDraw: () => void;
+  onToggleFootprint: () => void;
+  onToggleDom: () => void;
+  settings?: ReactNode;
+  onClose: () => void;
+  footprintData?: FootprintData | null;
+  footprintLoading?: boolean;
+  fpViz?: OrderflowSettings;
+  onFpVizChange?: (patch: Partial<OrderflowSettings>) => void;
+  onFpVizReset?: () => void;
+  orderBook?: OrderBookData | null;
+  domViz?: DomSettings;
+  priceDigits?: number;
+  tick?: number;
+}) {
+  const styleLabel = CHART_STYLES.find((s) => s.id === chartViz.style)?.label ?? "Svíčky";
+  return (
+    <div className="desk-charts">
+      <DeskWindowHead
+        title={
+          <DeskPick
+            label={styleLabel}
+            ariaLabel="Typ grafu"
+            value={chartViz.style}
+            options={CHART_STYLES}
+            onSelect={(id) => onSelectStyle(id as ChartStyle)}
+            className={`desk-win__pick desk-win__pick--type`}
+          />
+        }
+        extra={
+          <div className="desk-win__picks">
+            <DeskPick
+              label={tfLabel}
+              ariaLabel="Timeframe"
+              value={timeframe}
+              options={TIMEFRAMES.map((t) => ({ id: t.id, label: t.label }))}
+              onSelect={onSelectTimeframe}
+              className="desk-win__pick"
+            />
+            <DeskPick
+              label={lbLabel}
+              ariaLabel="Období"
+              value={lookback}
+              options={ranges}
+              onSelect={onSelectLookback}
+              className="desk-win__pick"
+            />
+            <button
+              type="button"
+              className={`desk-win__pick${chartViz.footprint ? " is-active" : ""}`}
+              onClick={onToggleFootprint}
+            >
+              FP
+            </button>
+            <button
+              type="button"
+              className={`desk-win__pick${chartViz.dom ? " is-active" : ""}`}
+              onClick={onToggleDom}
+            >
+              DOM
+            </button>
           </div>
-        </div>
-      </HeaderExtra>
-
-      {error && (
-        <p className="card gold-page__error" role="alert">
-          {error}
-        </p>
-      )}
-
-      <div className="oil-page__desk">
-      <section className="card instrument-chart gold-page__chart">
-        <div className="instrument-chart__stage crypto-chart-stage gold-page__chart-pane">
-          {data?.bars?.length ? (
-            <div className="desk-charts">
-              <div className="desk-charts__pane">
-                <PriceChart
-                  bars={data.bars}
-                  realtime
-                  showMa={false}
-                  showVolume={chartViz.volume}
-                  secondsVisible={timeframe === "1m" || timeframe === "1s"}
-                  chartViz={chartViz}
-                  drawTool={drawTool}
-                  drawings={drawingsStore.items}
-                  onDrawingsChange={(items) => setDrawingsStore({ items })}
-                />
-                {drawBarOpen ? (
-                  <div className="draw-toolbar" role="toolbar" aria-label="Kreslení">
-                    {(
-                      [
-                        ["trend", "Trend"],
-                        ["ray", "Ray"],
-                        ["rect", "Box"],
-                        ["hline", "H"],
-                      ] as const
-                    ).map(([id, lab]) => (
-                      <button
-                        key={id}
-                        type="button"
-                        className={`draw-toolbar__btn ${drawTool === id ? "is-active" : ""}`}
-                        onClick={() => setDrawTool((t) => (t === id ? "none" : id))}
-                      >
-                        {lab}
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      className="draw-toolbar__btn"
-                      onClick={() => {
-                        setDrawingsStore({ items: [] });
-                        setDrawTool("none");
-                      }}
-                      title="Smazat kresby"
-                    >
-                      Smazat
-                    </button>
-                    <button
-                      type="button"
-                      className="draw-toolbar__btn"
-                      onClick={() => {
-                        setDrawBarOpen(false);
-                        setDrawTool("none");
-                      }}
-                      title="Zavřít kreslení"
-                    >
-                      Hotovo
-                    </button>
-                  </div>
-                ) : null}
+        }
+        onDragStart={onDragStart}
+        settings={settings}
+        onClose={onClose}
+      />
+      <div className="desk-charts__pane">
+        {data?.bars?.length ? (
+          <>
+            <PriceChart
+              bars={data.bars}
+              realtime
+              showMa={false}
+              showVolume={chartViz.volume}
+              secondsVisible={timeframe === "1m" || timeframe === "1s"}
+              chartViz={chartViz}
+              drawTool={drawTool}
+              drawings={drawings}
+              onDrawingsChange={onDrawingsChange}
+              footprintData={chartViz.footprint ? footprintData : undefined}
+              footprintSettings={chartViz.footprint ? fpViz : undefined}
+              footprintLoading={chartViz.footprint ? footprintLoading : false}
+              orderBook={chartViz.dom ? orderBook : undefined}
+              domSettings={chartViz.dom ? domViz : undefined}
+              priceDigits={priceDigits}
+            />
+            {drawBarOpen ? (
+              <div className="draw-toolbar" role="toolbar" aria-label="Kreslení">
+                {(
+                  [
+                    ["trend", "Trend"],
+                    ["ray", "Ray"],
+                    ["rect", "Box"],
+                    ["hline", "H"],
+                  ] as const
+                ).map(([id, lab]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className={`draw-toolbar__btn ${drawTool === id ? "is-active" : ""}`}
+                    onClick={() => onDrawTool((t) => (t === id ? "none" : id))}
+                  >
+                    {lab}
+                  </button>
+                ))}
+                <button type="button" className="draw-toolbar__btn" onClick={onClearDraw} title="Smazat kresby">
+                  Smazat
+                </button>
+                <button type="button" className="draw-toolbar__btn" onClick={onCloseDraw} title="Zavřít kreslení">
+                  Hotovo
+                </button>
               </div>
-            </div>
-          ) : (
-            <div className="muted p-6 text-sm">
-              {loading ? loadingLabel : "Žádná OHLCV data."}
-            </div>
-          )}
-          {loading && data?.bars?.length ? (
-            <div className="chart-loading-overlay" aria-live="polite">
-              Načítám…
-            </div>
-          ) : null}
-        </div>
-      </section>
-      <div className="oil-page__ob-side">
-            <div className="oil-page__panel">
-              <OrderBookPanel book={orderBook} priceDigits={config.priceDigits} />
-            </div>
-            <div className="oil-page__panel">
-              <TradesTapePanel tape={tradesTape} />
-            </div>
-      </div>
+            ) : null}
+          </>
+        ) : (
+          <div className="muted p-6 text-sm">{loading ? loadingLabel : blank ? "" : "Žádná OHLCV data."}</div>
+        )}
+        {loading && data?.bars?.length ? (
+          <div className="chart-loading-overlay" aria-live="polite">
+            Načítám…
+          </div>
+        ) : null}
       </div>
     </div>
   );
+}
+
+function DeskBoundPanel({
+  leafId,
+  children,
+}: {
+  leafId: string;
+  children: ReactElement<{ onDragStart?: (e: ReactPointerEvent<HTMLElement>) => void }>;
+}) {
+  const drag = useDeskDrag();
+  return cloneElement(children, {
+    onDragStart: (e: ReactPointerEvent<HTMLElement>) => {
+      drag?.beginDrag(leafId, e.clientX, e.clientY);
+    },
+  });
 }

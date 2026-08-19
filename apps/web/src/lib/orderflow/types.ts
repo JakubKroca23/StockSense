@@ -46,6 +46,10 @@ export type OrderflowSettings = {
   showText: boolean;
   showCandle: boolean;
   showPoc: boolean;
+  extendPoc: boolean;
+  pocLineStyle: "solid" | "dashed" | "dotted";
+  pocLineWidth: number;
+  pocLineOpacity: number;
   showValueArea: boolean;
   valueAreaPct: number;
   showImbalance: boolean;
@@ -53,19 +57,40 @@ export type OrderflowSettings = {
   imbalanceRatio: number;
   /** Absolute volume floor that kills statistically irrelevant imbalances. */
   imbalanceMinVolume: number;
+  imbalanceFillOpacity: number;
+  imbalanceStackedFillOpacity: number;
+  imbalanceBuyColor?: string;
+  imbalanceSellColor?: string;
+  /** Heat scale: "bar" normalizes per bar, "global" across all visible bars. */
+  heatScale: "bar" | "global";
+  /** How profile cells are rendered in `cellMode=profile`. */
+  profileStyle: "bars" | "cells";
+  /** Metric used when `profileStyle=cells`. */
+  profileCellMetric: "volume" | "delta";
   showStacked: boolean;
   stackedMin: number;
+  stackedLineStyle: "solid" | "dashed" | "dotted";
+  stackedLineWidth: number;
+  stackedFillOpacity: number;
+  stackedLineOpacity: number;
   showFade: boolean;
   showAbsorption: boolean;
   /** |delta| / volume needed to call a bar absorbed. */
   absorptionRatio: number;
   showDeltaRow: boolean;
+  showMaxDeltaRow: boolean;
+  showMinDeltaRow: boolean;
   showVolumeRow: boolean;
   showCvd: boolean;
   cvdHeight: number;
   showProfile: boolean;
   profileWidth: number;
   heatOpacity: number;
+  /** Vlastní barvy — prázdné = téma aplikace. */
+  upColor?: string;
+  downColor?: string;
+  senseColor?: string;
+  textColor?: string;
 };
 
 export const DEFAULT_ORDERFLOW_SETTINGS: OrderflowSettings = {
@@ -77,17 +102,34 @@ export const DEFAULT_ORDERFLOW_SETTINGS: OrderflowSettings = {
   showText: true,
   showCandle: true,
   showPoc: true,
+  extendPoc: false,
+  pocLineStyle: "solid",
+  pocLineWidth: 1,
+  pocLineOpacity: 70,
   showValueArea: true,
   valueAreaPct: 70,
   showImbalance: true,
   imbalanceRatio: 300,
   imbalanceMinVolume: 0,
+  imbalanceFillOpacity: 22,
+  imbalanceStackedFillOpacity: 40,
+  imbalanceBuyColor: undefined,
+  imbalanceSellColor: undefined,
+  heatScale: "bar",
+  profileStyle: "bars",
+  profileCellMetric: "volume",
   showStacked: true,
   stackedMin: 3,
+  stackedLineStyle: "dashed",
+  stackedLineWidth: 1,
+  stackedFillOpacity: 8,
+  stackedLineOpacity: 55,
   showFade: true,
   showAbsorption: true,
   absorptionRatio: 0.35,
   showDeltaRow: true,
+  showMaxDeltaRow: true,
+  showMinDeltaRow: true,
   showVolumeRow: true,
   showCvd: true,
   cvdHeight: 56,

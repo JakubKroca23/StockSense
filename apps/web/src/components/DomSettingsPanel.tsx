@@ -7,13 +7,14 @@ type Props = {
   tick: number;
   onChange: (patch: Partial<DomSettings>) => void;
   onReset: () => void;
+  inDeskMenu?: boolean;
 };
 
-export function DomSettingsPanel({ settings, tick, onChange, onReset }: Props) {
+export function DomSettingsPanel({ settings, tick, onChange, onReset, inDeskMenu = false }: Props) {
   const step = tick * settings.tickGroup;
   return (
-    <section className="settings-block is-compact">
-      <div className="settings-chart">
+    <section className={`settings-block${inDeskMenu ? " is-desk-menu" : " is-compact"}`}>
+      <div className={`settings-chart${inDeskMenu ? " settings-chart--grid" : ""}`}>
         <section className="fp-drawer__sec">
           <h3>Žebřík</h3>
           <p className="fp-drawer__lead">Rozlišení cenových hladin a chování scrollu.</p>

@@ -7,6 +7,8 @@ export type OrderflowTheme = {
   sense: string;
   up: string;
   down: string;
+  imbalanceBuy: string;
+  imbalanceSell: string;
   grid: string;
   bg: string;
   bgSoft: string;
@@ -24,11 +26,41 @@ export function readOrderflowTheme(): OrderflowTheme {
     sense: g("--sense", "#5dde8a"),
     up: g("--chart-up", "#5dde8a"),
     down: g("--chart-down", "#e05a8a"),
+    imbalanceBuy: g("--chart-up", "#5dde8a"),
+    imbalanceSell: g("--chart-down", "#e05a8a"),
     grid: g("--chart-grid", "rgba(158,182,255,0.08)"),
     bg: g("--chart-bg", "#060a12"),
     bgSoft: g("--bg-soft", "#182238"),
     bgElevated: g("--bg-elevated", "#121a2b"),
     font: g("--font-body", '"IBM Plex Sans", sans-serif'),
+  };
+}
+
+export type OrderflowColorSettings = {
+  upColor?: string;
+  downColor?: string;
+  senseColor?: string;
+  textColor?: string;
+  imbalanceBuyColor?: string;
+  imbalanceSellColor?: string;
+};
+
+function pickColor(custom: string | undefined, fallback: string): string {
+  const v = custom?.trim();
+  return v ? v : fallback;
+}
+
+export function resolveOrderflowTheme(settings?: OrderflowColorSettings): OrderflowTheme {
+  const base = readOrderflowTheme();
+  if (!settings) return base;
+  return {
+    ...base,
+    up: pickColor(settings.upColor, base.up),
+    down: pickColor(settings.downColor, base.down),
+    imbalanceBuy: pickColor(settings.imbalanceBuyColor, base.up),
+    imbalanceSell: pickColor(settings.imbalanceSellColor, base.down),
+    sense: pickColor(settings.senseColor, base.sense),
+    text: pickColor(settings.textColor, base.text),
   };
 }
 

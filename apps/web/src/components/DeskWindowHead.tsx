@@ -27,7 +27,7 @@ export function DeskWindowHead({
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0, maxH: 420 });
+  const [pos, setPos] = useState({ top: 0, left: 0, maxH: 640, width: 560 });
 
   useEffect(() => {
     if (!open) return;
@@ -51,14 +51,17 @@ export function DeskWindowHead({
   useLayoutEffect(() => {
     if (!open || !btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
-    const width = Math.min(22 * 16, window.innerWidth - 16);
+    const width = Math.min(560, window.innerWidth - 16);
     const left = Math.min(Math.max(8, r.right - width), window.innerWidth - width - 8);
     const spaceBelow = window.innerHeight - r.bottom - 12;
     const spaceAbove = r.top - 12;
-    const openDown = spaceBelow >= 220 || spaceBelow >= spaceAbove;
-    const maxH = Math.min(28 * 16, Math.max(180, openDown ? spaceBelow : spaceAbove));
-    const top = openDown ? r.bottom + 6 : Math.max(8, r.top - maxH - 6);
-    setPos({ top, left, maxH });
+    const openDown = spaceBelow >= 280 || spaceBelow >= spaceAbove;
+    const maxH = Math.min(
+      Math.floor(window.innerHeight * 0.88),
+      Math.max(320, openDown ? spaceBelow : spaceAbove)
+    );
+    const top = openDown ? r.bottom + 8 : Math.max(8, r.top - maxH - 8);
+    setPos({ top, left, maxH, width });
   }, [open]);
 
   return (
@@ -126,10 +129,10 @@ export function DeskWindowHead({
         ? createPortal(
             <div
               ref={menuRef}
-              className="desk-win__menu"
+              className="desk-win__menu desk-win__menu--wide"
               role="dialog"
               aria-label="Nastavení panelu"
-              style={{ top: pos.top, left: pos.left, maxHeight: pos.maxH }}
+              style={{ top: pos.top, left: pos.left, maxHeight: pos.maxH, width: pos.width }}
             >
               {settings}
             </div>,

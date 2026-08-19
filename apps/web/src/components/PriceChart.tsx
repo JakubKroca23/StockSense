@@ -15,9 +15,15 @@ import {
 } from "lightweight-charts";
 import { useThemeRevision } from "@/lib/theme";
 import { ChartDrawOverlay } from "@/components/ChartDrawOverlay";
+import { DomOverlay } from "@/components/DomOverlay";
+import { FootprintOverlay } from "@/components/FootprintOverlay";
+import { FootprintFooter } from "@/components/FootprintFooter";
 import { applyIndicator, type ChartDrawing, type DrawTool, type OhlcvBar } from "@/lib/chart";
+import { footprintFooterEnabled, footprintFooterHeight } from "@/lib/orderflow";
+import type { OrderBookData } from "@/components/OrderBookPanel";
+import type { DomSettings, FootprintData, OrderflowSettings } from "@/lib/orderflow";
 
-export type ChartStyle = "candle" | "hollow" | "line";
+export type ChartStyle = "candle" | "hollow" | "line" | "off";
 export type ChartCrosshair = "normal" | "magnet" | "off";
 
 export type ChartVizSettings = {
@@ -35,6 +41,14 @@ export type ChartVizSettings = {
   crosshair: ChartCrosshair;
   barSpacing: number;
   rightOffset: number;
+  footprint: boolean;
+  dom: boolean;
+  /** Vlastní barvy — prázdné = téma aplikace. */
+  upColor?: string;
+  downColor?: string;
+  wickUpColor?: string;
+  wickDownColor?: string;
+  lineColor?: string;
 };
 
 export const DEFAULT_CHART_VIZ: ChartVizSettings = {
@@ -52,6 +66,8 @@ export const DEFAULT_CHART_VIZ: ChartVizSettings = {
   crosshair: "normal",
   barSpacing: 9,
   rightOffset: 0,
+  footprint: false,
+  dom: false,
 };
 
 export const DEFAULT_DESK_CHART_VIZ: ChartVizSettings = {
@@ -97,6 +113,12 @@ type Props = {
   drawings?: ChartDrawing[];
   onDrawingsChange?: (next: ChartDrawing[]) => void;
   chartApiRef?: MutableRefObject<PriceChartHandle | null>;
+  footprintData?: FootprintData | null;
+  footprintSettings?: OrderflowSettings;
+  footprintLoading?: boolean;
+  orderBook?: OrderBookData | null;
+  domSettings?: DomSettings;
+  priceDigits?: number;
 };
 
 export type PriceChartHandle = {
@@ -210,26 +232,44 @@ function volumeMargins(volume: boolean): { top: number; bottom: number } {
   return volume ? { top: 0.84, bottom: 0 } : { top: 1, bottom: 0 };
 }
 
-function candleLook(
-  theme: Theme,
-  viz: ChartVizSettings,
-) {
-  const hide = viz.style === "line";
+function pickColor(custom: string | undefined, fallback: string): string {
+  const v = custom?.trim();
+  return v ? v : fallback;
+}
+
+function candleLook(theme: Theme, viz: ChartVizSettings) {
+  const off = viz.style === "off";
+  const line = viz.style === "line";
   const hollow = viz.style === "hollow";
+  const up = pickColor(viz.upColor, theme.up);
+  const down = pickColor(viz.downColor, theme.down);
+  const wickUp = pickColor(viz.wickUpColor, up);
+  const wickDown = pickColor(viz.wickDownColor, down);
+  const hideBody = line || off;
   return {
-    upColor: hide || hollow ? "rgba(0,0,0,0)" : theme.up,
-    downColor: hide || hollow ? "rgba(0,0,0,0)" : theme.down,
-    borderUpColor: hide ? "rgba(0,0,0,0)" : theme.up,
-    borderDownColor: hide ? "rgba(0,0,0,0)" : theme.down,
-    wickUpColor: theme.up,
-    wickDownColor: theme.down,
-    wickVisible: !hide && viz.wicks,
-    borderVisible: !hide,
+    visible: !off,
+    upColor: hideBody || hollow ? "rgba(0,0,0,0)" : up,
+    downColor: hideBody || hollow ? "rgba(0,0,0,0)" : down,
+    borderUpColor: hideBody ? "rgba(0,0,0,0)" : up,
+    borderDownColor: hideBody ? "rgba(0,0,0,0)" : down,
+    wickUpColor: wickUp,
+    wickDownColor: wickDown,
+    wickVisible: !hideBody && viz.wicks,
+    borderVisible: !hideBody,
     priceLineVisible: viz.priceLine,
-    lastValueVisible: viz.lastValue,
+    lastValueVisible: viz.lastValue && !off,
     priceLineColor: hexAlpha(theme.sense, 0.55),
     priceLineWidth: 1 as const,
     priceLineStyle: LineStyle.Dashed,
+  };
+}
+
+export function readChartThemeDefaults() {
+  const theme = readTheme();
+  return {
+    up: theme.up,
+    down: theme.down,
+    line: theme.sense,
   };
 }
 
@@ -247,9 +287,16 @@ export function PriceChart({
   drawings = [],
   onDrawingsChange,
   chartApiRef,
+  footprintData,
+  footprintSettings,
+  footprintLoading,
+  orderBook,
+  domSettings,
+  priceDigits = 2,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLDivElement>(null);
+  const plotRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -274,14 +321,29 @@ export function PriceChart({
     volume: showVolume,
   };
 
+  const fpFooterH =
+    footprintData && footprintSettings && footprintFooterEnabled(footprintSettings)
+      ? footprintFooterHeight(footprintSettings)
+      : 0;
+
+  const measurePlot = () => {
+    const plot = plotRef.current;
+    if (!plot) return { w: 0, h: 0 };
+    return {
+      w: plot.clientWidth,
+      h: Math.max(plot.clientHeight, 120),
+    };
+  };
+
   useEffect(() => {
     if (!containerRef.current) return;
 
     const theme = readTheme();
     themeRef.current = theme;
 
+    const initial = measurePlot();
     const initialH = fill
-      ? Math.max(containerRef.current.clientHeight || 480, 240)
+      ? Math.max(initial.h || containerRef.current.clientHeight || 480, 240)
       : height;
 
     const chart = createChart(containerRef.current, {
@@ -415,7 +477,7 @@ export function PriceChart({
     });
 
     const closeLine = chart.addLineSeries({
-      color: hexAlpha(theme.sense, 0.95),
+      color: hexAlpha(pickColor(viz.lineColor, theme.sense), 0.95),
       lineWidth: 2,
       priceLineVisible: false,
       lastValueVisible: viz.style === "line" && viz.lastValue,
@@ -440,15 +502,13 @@ export function PriceChart({
     prevSigRef.current = "";
 
     const ro = new ResizeObserver(() => {
-      if (!containerRef.current || !chartRef.current) return;
-      const w = containerRef.current.clientWidth;
-      const h = fill
-        ? Math.max(containerRef.current.clientHeight, 240)
-        : height!;
+      if (!plotRef.current || !chartRef.current) return;
+      const { w, h } = measurePlot();
+      if (w < 8 || h < 8) return;
       chartRef.current.applyOptions({ width: w, height: h });
     });
     if (wrapRef.current) ro.observe(wrapRef.current);
-    ro.observe(containerRef.current);
+    if (plotRef.current) ro.observe(plotRef.current);
 
     return () => {
       ro.disconnect();
@@ -467,6 +527,13 @@ export function PriceChart({
       themeRef.current = null;
     };
   }, [height, fill, secondsVisible, themeRev]);
+
+  useEffect(() => {
+    if (!chartRef.current || !plotRef.current) return;
+    const { w, h } = measurePlot();
+    if (w < 8 || h < 8) return;
+    chartRef.current.applyOptions({ width: w, height: h });
+  }, [fpFooterH, chartTick]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -513,6 +580,7 @@ export function PriceChart({
     });
     closeLineRef.current?.applyOptions({
       visible: viz.style === "line",
+      color: hexAlpha(pickColor(viz.lineColor, theme.sense), 0.95),
       lastValueVisible: viz.style === "line" && viz.lastValue,
       crosshairMarkerVisible: viz.style === "line",
     });
@@ -530,6 +598,11 @@ export function PriceChart({
     viz.logScale,
     viz.crosshair,
     viz.rsi,
+    viz.upColor,
+    viz.downColor,
+    viz.wickUpColor,
+    viz.wickDownColor,
+    viz.lineColor,
   ]);
 
   useEffect(() => {
@@ -585,8 +658,8 @@ export function PriceChart({
     const prevHist = prev.split("|")[0] || "";
     const canUpdate = Boolean(realtime && prev && prevHist === histKey && unique.length > 0);
 
-    const volUp = hexAlpha(theme.up, 0.28);
-    const volDown = hexAlpha(theme.down, 0.26);
+    const volUp = hexAlpha(pickColor(viz.upColor, theme.up), 0.28);
+    const volDown = hexAlpha(pickColor(viz.downColor, theme.down), 0.26);
 
     if (canUpdate) {
       const lastBar = unique[unique.length - 1];
@@ -676,7 +749,7 @@ export function PriceChart({
     }
 
     prevSigRef.current = `${histKey}|${lastSig}`;
-  }, [bars, realtime, viz.volume, viz.sma20, viz.sma50, viz.ema20, viz.rsi, viz.style]);
+  }, [bars, realtime, viz.volume, viz.sma20, viz.sma50, viz.ema20, viz.rsi, viz.style, viz.upColor, viz.downColor]);
 
   useEffect(() => {
     if (!seriesRef.current) return;
@@ -719,19 +792,52 @@ export function PriceChart({
       className={`price-chart${fill ? " price-chart--fill" : ""}${className ? ` ${className}` : ""}`}
     >
       <div ref={mainRef} className="price-chart__main">
-        <div
-          ref={containerRef}
-          className="price-chart__canvas"
-          style={fill ? undefined : { height }}
-        />
-        <ChartDrawOverlay
-          chart={chartTick ? chartRef.current : null}
-          series={chartTick ? seriesRef.current : null}
-          wrap={mainRef.current}
-          tool={drawTool}
-          drawings={drawings}
-          onChange={onDrawingsChange || (() => undefined)}
-        />
+        <div ref={plotRef} className="price-chart__plot">
+          <div
+            ref={containerRef}
+            className="price-chart__canvas"
+            style={fill ? undefined : { height: fpFooterH > 0 && height ? height - fpFooterH : height }}
+          />
+          <ChartDrawOverlay
+            chart={chartTick ? chartRef.current : null}
+            series={chartTick ? seriesRef.current : null}
+            wrap={plotRef.current}
+            tool={drawTool}
+            drawings={drawings}
+            onChange={onDrawingsChange || (() => undefined)}
+          />
+          {footprintData && footprintSettings ? (
+            <FootprintOverlay
+              chart={chartTick ? chartRef.current : null}
+              series={chartTick ? seriesRef.current : null}
+              wrap={plotRef.current}
+              data={footprintData}
+              settings={footprintSettings}
+              priceDigits={priceDigits}
+              footerH={fpFooterH}
+            />
+          ) : null}
+          {orderBook && domSettings ? (
+            <DomOverlay
+              chart={chartTick ? chartRef.current : null}
+              series={chartTick ? seriesRef.current : null}
+              wrap={plotRef.current}
+              book={orderBook}
+              footprint={footprintData ?? null}
+              settings={domSettings}
+              priceDigits={priceDigits}
+            />
+          ) : null}
+        </div>
+        {fpFooterH > 0 && footprintData && footprintSettings ? (
+          <FootprintFooter
+            chart={chartTick ? chartRef.current : null}
+            wrap={mainRef.current}
+            data={footprintData}
+            settings={footprintSettings}
+            height={fpFooterH}
+          />
+        ) : null}
       </div>
     </div>
   );
