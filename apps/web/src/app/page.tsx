@@ -1,3 +1,7 @@
+"use client";
+
+import { BybitDesk } from "@/components/BybitDesk";
+
 export default function HomePage() {
-  return <div className="home-blank" />;
+  return <BybitDesk />;
 }

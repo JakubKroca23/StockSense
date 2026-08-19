@@ -15,7 +15,6 @@ import {
   navIcons,
 } from "@/components/NavIcons";
 import { applyTheme, ColorMode, getStoredTheme } from "@/lib/theme";
-import { ChartVizProvider } from "@/lib/chartViz";
 import { LINEAR_DESKS, deskHref } from "@/lib/desks";
 
 const links: { href: string; label: string }[] = [
@@ -122,6 +121,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [pathname]);
 
   useEffect(() => {
+    if (!settingsOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [settingsOpen]);
+
+  useEffect(() => {
     if (!menuOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setMenuOpen(false);
@@ -135,7 +143,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [menuOpen]);
 
   function toggleNav() {
-    setSettingsOpen(false);
     if (window.matchMedia(DESKTOP_MQ).matches) {
       setRailCollapsed((v) => {
         const next = !v;
@@ -160,7 +167,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const CurrentIcon = current ? navIcons[current.href] ?? IconDesk : null;
 
   return (
-    <ChartVizProvider>
     <div
       className={`app-shell min-h-screen pb-8 ${menuOpen ? "is-menu-open" : ""} ${
         railCollapsed ? "is-rail-collapsed" : ""
@@ -187,7 +193,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             >
               <StockSenseLogo height={28} />
             </button>
-            {current && CurrentIcon ? (
+            {current && CurrentIcon && current.href !== "/" ? (
               <span className="header-symbol-stack">
                 <span className="header-symbol">
                   <CurrentIcon size={20} />
@@ -199,21 +205,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
 
           <HeaderExtraSlot />
-          <div className="app-header__actions app-no-drag">
-            <button
-              type="button"
-              className={`settings-gear ${settingsOpen ? "settings-gear--active" : ""}`}
-              aria-label="Nastavení"
-              aria-expanded={settingsOpen}
-              title="Nastavení"
-              onClick={() => {
-                setMenuOpen(false);
-                setSettingsOpen((v) => !v);
-              }}
-            >
-              <IconSettings size={18} />
-            </button>
-          </div>
         </div>
       </header>
 
@@ -253,6 +244,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               );
             })}
           </nav>
+          <div className="app-rail__foot">
+            <button
+              type="button"
+              className={`app-rail__link ${settingsOpen ? "is-active" : ""}`}
+              aria-label="Nastavení"
+              aria-expanded={settingsOpen}
+              title="Nastavení"
+              onClick={() => {
+                setMenuOpen(false);
+                setSettingsOpen((v) => !v);
+              }}
+            >
+              <span className="nav-item">
+                <IconSettings size={RAIL_ICON_SIZE} />
+                <span className="nav-item__label">Nastavení</span>
+              </span>
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -265,6 +274,5 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         onThemeChange={setThemeMode}
       />
     </div>
-    </ChartVizProvider>
   );
 }

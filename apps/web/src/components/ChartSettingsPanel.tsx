@@ -6,17 +6,20 @@ type Props = {
   viz: ChartVizSettings;
   onChange: (patch: Partial<ChartVizSettings>) => void;
   onReset: () => void;
+  compact?: boolean;
 };
 
-export function ChartSettingsPanel({ viz, onChange, onReset }: Props) {
+export function ChartSettingsPanel({ viz, onChange, onReset, compact = false }: Props) {
   return (
-    <section className="settings-block">
-      <div className="settings-block__head">
-        <div>
-          <h2>Graf</h2>
-          <p className="settings-block__sub">Vzhled svíček, mřížka, indikátory a měřítko.</p>
+    <section className={`settings-block${compact ? " is-compact" : ""}`}>
+      {compact ? null : (
+        <div className="settings-block__head">
+          <div>
+            <h2>Graf</h2>
+            <p className="settings-block__sub">Vzhled svíček, mřížka, indikátory a měřítko.</p>
+          </div>
         </div>
-      </div>
+      )}
       <div className="settings-chart">
         <section className="fp-drawer__sec">
           <h3>Vzhled</h3>

@@ -178,6 +178,42 @@ export function IconDraw(p: IconProps) {
   );
 }
 
+/** Order book — žebřík */
+export function IconBook(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M4 6h16" />
+      <path d="M4 12h16" />
+      <path d="M4 18h16" />
+      <path d="M12 4v16" />
+    </Svg>
+  );
+}
+
+/** Tape — historie obchodů */
+export function IconTape(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M5 6h14" />
+      <path d="M5 12h10" />
+      <path d="M5 18h12" />
+    </Svg>
+  );
+}
+
+/** Přidat graf — svíčky s plus */
+export function IconAddChart(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M4 19V7" />
+      <path d="M4 19h7" />
+      <path d="M7.5 15.5V10M7.5 10V8M7.5 15.5v2" />
+      <path d="M16 5v6" />
+      <path d="M13 8h6" />
+    </Svg>
+  );
+}
+
 export const navIcons: Record<string, (p: IconProps) => ReactNode> = {
   "/": IconHome,
   "/desk/btc": IconBtc,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
+import { DeskWindowHead } from "@/components/DeskWindowHead";
 
 export type OrderLevel = {
   price: number;
@@ -53,50 +54,42 @@ type LadderRow = {
   ask: number;
 };
 
-function PanelToggle({
-  collapsed,
-  onToggle,
-  children,
-}: {
-  collapsed: boolean;
-  onToggle?: () => void;
-  children: ReactNode;
-}) {
-  if (!onToggle) return <div className="orderbook__head">{children}</div>;
-  return (
-    <button
-      type="button"
-      className="desk-panel__toggle"
-      onClick={onToggle}
-      aria-expanded={!collapsed}
-    >
-      {children}
-    </button>
-  );
-}
-
 export function OrderBookPanel({
   book,
   priceDigits = 2,
   collapsed = false,
-  onToggle,
+  onClose,
+  settings,
+  onDragStart,
   onPriceClick,
 }: {
   book: OrderBookData | null;
   priceDigits?: number;
   collapsed?: boolean;
-  onToggle?: () => void;
+  onClose?: () => void;
+  settings?: ReactNode;
+  onDragStart?: (e: import("react").PointerEvent<HTMLElement>) => void;
   onPriceClick?: (price: number, side: "bid" | "ask") => void;
 }) {
   const ladderRef = useRef<HTMLDivElement>(null);
   const midRef = useRef<HTMLDivElement>(null);
   const userLockRef = useRef(0);
 
-  const title = (
-    <p className="orderbook__title">
-      {onToggle ? <span className="desk-panel__caret">{collapsed ? "▸" : "▾"}</span> : null}
-      Kniha
-    </p>
+  const head = (
+    <DeskWindowHead
+      title="Orderbook"
+      settings={settings}
+      onClose={onClose}
+      onDragStart={onDragStart}
+      extra={
+        book && !collapsed ? (
+          <p className="muted text-xs">
+            tick {book.tick} · spread{" "}
+            {book.spread_pct != null ? `${book.spread_pct.toFixed(3)}%` : "—"}
+          </p>
+        ) : null
+      }
+    />
   );
 
   const ladder = useMemo(() => {
@@ -145,9 +138,7 @@ export function OrderBookPanel({
   if (!book) {
     return (
       <aside className={`orderbook ${collapsed ? "is-collapsed" : ""}`}>
-        <PanelToggle collapsed={collapsed} onToggle={onToggle}>
-          {title}
-        </PanelToggle>
+        {head}
         {!collapsed && <p className="muted text-sm mt-2">Načítám hloubku trhu…</p>}
       </aside>
     );
@@ -158,15 +149,7 @@ export function OrderBookPanel({
 
   return (
     <aside className={`orderbook orderbook--dom ${collapsed ? "is-collapsed" : ""}`}>
-      <PanelToggle collapsed={collapsed} onToggle={onToggle}>
-        {title}
-        {!collapsed && (
-          <p className="muted text-xs">
-            tick {book.tick} · spread{" "}
-            {book.spread_pct != null ? `${book.spread_pct.toFixed(3)}%` : "—"}
-          </p>
-        )}
-      </PanelToggle>
+      {head}
 
       {!collapsed && (
         <>

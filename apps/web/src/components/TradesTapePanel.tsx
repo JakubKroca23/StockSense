@@ -1,5 +1,8 @@
 "use client";
 
+import { DeskWindowHead } from "@/components/DeskWindowHead";
+import type { ReactNode } from "react";
+
 export type TradePrint = {
   id: string;
   ts: string;
@@ -53,44 +56,32 @@ function fmtTime(ts: number) {
 export function TradesTapePanel({
   tape,
   collapsed = false,
-  onToggle,
+  onClose,
+  settings,
+  onDragStart,
 }: {
   tape: TradesTapeData | null;
   collapsed?: boolean;
-  onToggle?: () => void;
+  onClose?: () => void;
+  settings?: ReactNode;
+  onDragStart?: (e: import("react").PointerEvent<HTMLElement>) => void;
 }) {
   const prints = tape?.trades ?? [];
 
-  const title = (
-    <p className="trades-tape__title">
-      {onToggle ? <span className="desk-panel__caret">{collapsed ? "▸" : "▾"}</span> : null}
-      Historie
-    </p>
-  );
-
-  const head = onToggle ? (
-    <button
-      type="button"
-      className="desk-panel__toggle"
-      onClick={onToggle}
-      aria-expanded={!collapsed}
-    >
-      {title}
-      {!collapsed && tape && (
-        <p className="muted text-xs">
-          {tape.exchanges.join(" + ")} · {prints.length}
-        </p>
-      )}
-    </button>
-  ) : (
-    <div className="trades-tape__head">
-      {title}
-      {tape && (
-        <p className="muted text-xs">
-          {tape.exchanges.join(" + ")} · {prints.length}
-        </p>
-      )}
-    </div>
+  const head = (
+    <DeskWindowHead
+      title="Tape"
+      settings={settings}
+      onClose={onClose}
+      onDragStart={onDragStart}
+      extra={
+        tape && !collapsed ? (
+          <p className="muted text-xs">
+            {tape.exchanges.join(" + ")} · {prints.length}
+          </p>
+        ) : null
+      }
+    />
   );
 
   if (!tape) {
