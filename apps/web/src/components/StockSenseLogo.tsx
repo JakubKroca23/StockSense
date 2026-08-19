@@ -8,51 +8,27 @@ const STOCK_LETTERS = [
   { ch: "K", rotate: -6 },
 ] as const;
 
-export type LogoVariant = "stocksense" | "trading-vision";
-
-/** Wordmark — oko + pootočený název + tagline v rámečku */
+/** StockSense wordmark — oko + pootočený STOCK + sense v rámečku */
 export function StockSenseLogo({
   className = "",
   height = 36,
-  title,
-  variant = "stocksense",
+  title = "StockSense",
 }: {
   className?: string;
   height?: number;
   title?: string;
-  variant?: LogoVariant;
 }) {
   const eyeH = Math.round(height * 0.7);
   const eyeW = Math.round(eyeH * (229 / 108));
   const stockSize = Math.round(height * 0.46);
   const gap = Math.round(height * 0.1);
 
-  if (variant === "trading-vision") {
-    return (
-      <span
-        className={`brand-logo__mark inline-flex items-center ${className}`}
-        style={{ height }}
-        role="img"
-        aria-label={title ?? "Trading Vision"}
-      >
-        <Image
-          src="/logo-eye-transparent.png"
-          alt=""
-          width={eyeW}
-          height={eyeH}
-          className="brand-logo__eye"
-          priority
-        />
-      </span>
-    );
-  }
-
   return (
     <span
       className={`brand-logo__mark inline-flex items-center ${className}`}
       style={{ height, gap }}
       role="img"
-      aria-label={title ?? "StockSense"}
+      aria-label={title}
     >
       <Image
         src="/logo-eye-transparent.png"

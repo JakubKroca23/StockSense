@@ -1019,46 +1019,6 @@ a {
   width: 100%;
 }
 
-.app-rail__foot {
-  display: none;
-}
-
-.app-shell.is-trading-vision .app-rail__panel {
-  display: flex;
-  flex-direction: column;
-  align-content: stretch;
-  overflow: hidden;
-}
-
-.app-shell.is-trading-vision .app-rail__nav {
-  flex: 1 1 auto;
-  min-height: 0;
-  align-content: start;
-  overflow: auto;
-}
-
-.app-shell.is-trading-vision .app-rail__foot {
-  display: grid;
-  gap: 0.15rem;
-  width: 100%;
-  flex: 0 0 auto;
-  margin-top: auto;
-  padding-top: 0.35rem;
-  border-top: 1px solid var(--glass-border);
-}
-
-.app-rail__legacy {
-  display: grid;
-  gap: 0.15rem;
-}
-
-.app-rail__legacy-list {
-  display: grid;
-  gap: 0.15rem;
-  max-height: min(50vh, 22rem);
-  overflow: auto;
-}
-
 .app-rail__link {
   display: flex;
   align-items: center;

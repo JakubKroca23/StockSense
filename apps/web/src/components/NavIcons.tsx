@@ -41,17 +41,6 @@ export function IconHome(p: IconProps) {
   );
 }
 
-/** Trading Vision — čárový graf */
-export function IconChart(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <path d="M4.5 19.5V6.8" />
-      <path d="M4.5 19.5H19.5" />
-      <path d="M7.2 15.4 10.8 11.1 14.1 13.8 19.2 7.2" />
-    </Svg>
-  );
-}
-
 /** Analýza / Sense — oko z loga aplikace */
 export function IconAnalysis({ size = NAV_ICON_SIZE, className = "" }: IconProps) {
   const h = Math.round(size * (108 / 229));
@@ -238,7 +227,6 @@ export function IconLiq(p: IconProps) {
 
 export const navIcons: Record<string, (p: IconProps) => ReactNode> = {
   "/": IconHome,
-  "/trading": IconChart,
   "/desk/btc": IconBtc,
   "/btc": IconBtc,
   "/desk/oil": IconOil,
