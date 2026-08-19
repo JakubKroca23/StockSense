@@ -1,18 +1,29 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, cloneElement, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useMemo, useRef, useState, cloneElement, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from "react";
 import { apiFetch, apiWsUrl } from "@/lib/api";
 import { PriceChart, type ChartBar, type ChartStyle, type ChartVizSettings, DEFAULT_DESK_CHART_VIZ } from "@/components/PriceChart";
 import { HeaderExtra, HeaderQuote } from "@/components/HeaderExtra";
-import { IconBook, IconDraw, IconTape, IconAddChart } from "@/components/NavIcons";
+import { IconBook, IconDom, IconDraw, IconFootprint, IconTape, IconAddChart } from "@/components/NavIcons";
 import { OrderBookPanel, type OrderBookData } from "@/components/OrderBookPanel";
 import { TradesTapePanel, type TradesTapeData } from "@/components/TradesTapePanel";
 import { DeskWindowHead } from "@/components/DeskWindowHead";
+import { DeskPick } from "@/components/DeskPick";
 import { ChartSettingsPanel } from "@/components/ChartSettingsPanel";
+import { FootprintPanel } from "@/components/FootprintPanel";
+import { FootprintSettingsPanel } from "@/components/FootprintSettingsPanel";
+import { DomPanel } from "@/components/DomPanel";
+import { DomSettingsPanel } from "@/components/DomSettingsPanel";
 import { bindToolDrag, DeskMosaic, DeskWorkspace, useDeskDrag } from "@/components/DeskMosaic";
 import type { ChartDrawing, DrawTool } from "@/lib/chart";
 import type { LinearDeskInfo } from "@/lib/desks";
+import {
+  DEFAULT_DOM_SETTINGS,
+  DEFAULT_ORDERFLOW_SETTINGS,
+  type DomSettings,
+  type FootprintData,
+  type OrderflowSettings,
+} from "@/lib/orderflow";
 import {
   addChart,
   cloneDesk,
@@ -25,7 +36,6 @@ import {
   removeLeaf,
   removePanel,
   togglePanel,
-  type DeskLeaf,
   type DeskNode,
   type DeskPanelId,
 } from "@/lib/deskLayout";
@@ -66,6 +76,11 @@ const TIMEFRAMES = [
   { id: "1d", label: "D", defaultLookback: "6mo" },
   { id: "1wk", label: "W", defaultLookback: "2y" },
 ] as const;
+
+/** Footprint bars are aggregated from 1m clusters — no sub-minute timeframe upstream. */
+const FP_TIMEFRAMES = TIMEFRAMES.filter((t) => t.id !== "1s");
+
+const FP_DEFAULT_RANGE = { tf: "1m", lb: "1d" };
 
 const LOOKBACKS_BY_TF: Record<string, { id: string; label: string }[]> = {
   "1s": [
@@ -170,94 +185,6 @@ function applyLiveBar(prev: DeskChartResponse, live: ChartBar, extra?: Partial<D
     bars,
     bars_count: bars.length,
   };
-}
-
-function HeaderPick({
-  label,
-  ariaLabel,
-  value,
-  options,
-  onSelect,
-  className,
-}: {
-  label: string;
-  ariaLabel: string;
-  value: string;
-  options: { id: string; label: string }[];
-  onSelect: (id: string) => void;
-  className?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    const onPtr = (e: PointerEvent) => {
-      const t = e.target;
-      if (!(t instanceof Node)) return;
-      if (btnRef.current?.contains(t) || menuRef.current?.contains(t)) return;
-      setOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("pointerdown", onPtr);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("pointerdown", onPtr);
-    };
-  }, [open]);
-
-  useLayoutEffect(() => {
-    if (!open || !btnRef.current) return;
-    const r = btnRef.current.getBoundingClientRect();
-    const left = Math.min(r.left, Math.max(8, window.innerWidth - 148));
-    setPos({ top: r.bottom + 6, left: Math.max(8, left) });
-  }, [open]);
-
-  return (
-    <>
-      <button
-        ref={btnRef}
-        type="button"
-        className={`${className ?? "chart-chip header-desk__tf-btn"}${open ? " is-active" : ""}`}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={ariaLabel}
-        onClick={() => setOpen((v) => !v)}
-      >
-        {label}
-      </button>
-      {open &&
-        createPortal(
-          <div
-            ref={menuRef}
-            className="tf-menu"
-            role="menu"
-            style={{ top: pos.top, left: pos.left }}
-          >
-            {options.map((opt) => (
-              <button
-                key={opt.id}
-                type="button"
-                role="menuitem"
-                className={`tf-menu__item ${value === opt.id ? "is-active" : ""}`}
-                onClick={() => {
-                  onSelect(opt.id);
-                  setOpen(false);
-                }}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>,
-          document.body
-        )}
-    </>
-  );
 }
 
 function lsGet(key: string) {
@@ -403,6 +330,21 @@ export function BybitDesk({ config }: { config?: BybitDeskConfig | null }) {
   const [quoteLive, setQuoteLive] = useState(false);
   const [tradesTape, setTradesTape] = useState<TradesTapeData | null>(null);
   const [orderBook, setOrderBook] = useState<OrderBookData | null>(null);
+  const [fpFetch, setFpFetch] = useState<{ tf: string; lb: string; data: FootprintData } | null>(
+    null
+  );
+  const [fpRange, patchFpRange] = usePersistedJson(
+    deskPrefKey(deskId, "fp-range"),
+    FP_DEFAULT_RANGE
+  );
+  const [fpViz, patchFpViz, resetFpViz] = usePersistedJson<OrderflowSettings>(
+    deskPrefKey(deskId, "orderflow"),
+    DEFAULT_ORDERFLOW_SETTINGS
+  );
+  const [domViz, patchDomViz, resetDomViz] = usePersistedJson<DomSettings>(
+    deskPrefKey(deskId, "dom-viz"),
+    DEFAULT_DOM_SETTINGS
+  );
   const [drawBarOpen, , setDrawBarOpen] = usePersistedOpen(
     deskPrefKey(deskId, "draw-bar"),
     false
@@ -443,6 +385,9 @@ export function BybitDesk({ config }: { config?: BybitDeskConfig | null }) {
 
   const bookOpen = hasPanel(layout, "orderbook");
   const tapeOpen = hasPanel(layout, "tape");
+  const footprintOpen = hasPanel(layout, "footprint");
+  const domOpen = hasPanel(layout, "dom");
+  const needFootprint = footprintOpen || domOpen;
   const quoteLeafId = useMemo(() => collectChartLeaves(layout)[0]?.id ?? "chart", [layout]);
 
   const loadOrderBook = useCallback(async () => {
@@ -478,6 +423,46 @@ export function BybitDesk({ config }: { config?: BybitDeskConfig | null }) {
     const id = window.setInterval(() => void loadTrades(), 1500);
     return () => window.clearInterval(id);
   }, [blank, loadTrades]);
+
+  const loadFootprint = useCallback(async () => {
+    if (!apiBase) return;
+    const { tf, lb } = fpRange;
+    try {
+      const res = await apiFetch<FootprintData>(
+        `${apiBase}/footprint?interval=${encodeURIComponent(tf)}&lookback=${encodeURIComponent(lb)}`
+      );
+      setFpFetch({ tf, lb, data: res });
+    } catch {
+      /* keep last clusters */
+    }
+  }, [apiBase, fpRange]);
+
+  useEffect(() => {
+    if (blank || !needFootprint) return;
+    void loadFootprint();
+    const id = window.setInterval(() => void loadFootprint(), 3000);
+    return () => {
+      window.clearInterval(id);
+    };
+  }, [blank, needFootprint, loadFootprint]);
+
+  /** Stale bars from a previous timeframe must not leak into the panel while a refetch is in flight. */
+  const footprint =
+    fpFetch && fpFetch.tf === fpRange.tf && fpFetch.lb === fpRange.lb ? fpFetch.data : null;
+  const footprintLoading = needFootprint && !footprint;
+
+  const selectFootprintTf = useCallback(
+    (id: string) => {
+      const tf = FP_TIMEFRAMES.find((t) => t.id === id);
+      if (!tf) return;
+      const allowed = LOOKBACKS_BY_TF[id] || LOOKBACKS_BY_TF["1d"];
+      patchFpRange({
+        tf: id,
+        lb: allowed.some((r) => r.id === fpRange.lb) ? fpRange.lb : tf.defaultLookback,
+      });
+    },
+    [fpRange.lb, patchFpRange]
+  );
 
   const up = (quoteData?.change_pct ?? quoteData?.change_pct_window ?? 0) >= 0;
 
@@ -530,8 +515,12 @@ export function BybitDesk({ config }: { config?: BybitDeskConfig | null }) {
             </div>
             <span className="header-desk__div" aria-hidden />
             <DeskToolLaunchers
-              bookOpen={bookOpen}
-              tapeOpen={tapeOpen}
+              open={{
+                orderbook: bookOpen,
+                tape: tapeOpen,
+                footprint: footprintOpen,
+                dom: domOpen,
+              }}
               onToggle={(panel) => setLayout(togglePanel(layout, panel))}
             />
           </div>
@@ -568,6 +557,59 @@ export function BybitDesk({ config }: { config?: BybitDeskConfig | null }) {
                     tape={tradesTape}
                     settings={<p className="desk-win__menu-empty">Žádné další volby.</p>}
                     onClose={() => setLayout(togglePanel(layout, "tape"))}
+                  />
+                </DeskBoundPanel>
+              );
+            }
+            if (leaf.panel === "footprint") {
+              const tick = footprint?.tick ?? config?.tick ?? 0.01;
+              return (
+                <DeskBoundPanel leafId={leaf.id}>
+                  <FootprintPanel
+                    data={footprint}
+                    loading={footprintLoading}
+                    settings={fpViz}
+                    onSettingsChange={patchFpViz}
+                    priceDigits={config?.priceDigits ?? 2}
+                    interval={fpRange.tf}
+                    lookback={fpRange.lb}
+                    intervals={FP_TIMEFRAMES.map((t) => ({ id: t.id, label: t.label }))}
+                    lookbacks={LOOKBACKS_BY_TF[fpRange.tf] || LOOKBACKS_BY_TF["1d"]}
+                    onSelectInterval={selectFootprintTf}
+                    onSelectLookback={(lb) => patchFpRange({ lb })}
+                    settingsPanel={
+                      <FootprintSettingsPanel
+                        settings={fpViz}
+                        tick={tick}
+                        onChange={patchFpViz}
+                        onReset={resetFpViz}
+                      />
+                    }
+                    onClose={() => setLayout(togglePanel(layout, "footprint"))}
+                  />
+                </DeskBoundPanel>
+              );
+            }
+            if (leaf.panel === "dom") {
+              const tick = orderBook?.tick ?? config?.tick ?? 0.01;
+              return (
+                <DeskBoundPanel leafId={leaf.id}>
+                  <DomPanel
+                    book={orderBook}
+                    tape={tradesTape}
+                    footprint={footprint}
+                    settings={domViz}
+                    onSettingsChange={patchDomViz}
+                    priceDigits={config?.priceDigits ?? 2}
+                    settingsPanel={
+                      <DomSettingsPanel
+                        settings={domViz}
+                        tick={tick}
+                        onChange={patchDomViz}
+                        onReset={resetDomViz}
+                      />
+                    }
+                    onClose={() => setLayout(togglePanel(layout, "dom"))}
                   />
                 </DeskBoundPanel>
               );
@@ -621,41 +663,45 @@ function AddChartTool({ onAdd }: { onAdd: () => void }) {
   );
 }
 
+type DeskToolId = Exclude<DeskPanelId, "chart">;
+
+const DESK_TOOLS: {
+  id: DeskToolId;
+  label: string;
+  hint: string;
+  Icon: (p: { size?: number }) => ReactNode;
+}[] = [
+  { id: "orderbook", label: "Orderbook", hint: "Orderbook", Icon: IconBook },
+  { id: "tape", label: "Tape", hint: "Tape", Icon: IconTape },
+  { id: "footprint", label: "Footprint", hint: "Footprint & orderflow", Icon: IconFootprint },
+  { id: "dom", label: "DOM", hint: "DOM — hloubka trhu", Icon: IconDom },
+];
+
 function DeskToolLaunchers({
-  bookOpen,
-  tapeOpen,
+  open,
   onToggle,
 }: {
-  bookOpen: boolean;
-  tapeOpen: boolean;
-  onToggle: (panel: "orderbook" | "tape") => void;
+  open: Record<DeskToolId, boolean>;
+  onToggle: (panel: DeskToolId) => void;
 }) {
   const drag = useDeskDrag();
   const begin = drag?.beginDrag ?? (() => {});
   return (
     <div className="header-desk__sec" role="group" aria-label="Nástroje">
-      <button
-        type="button"
-        className={`chart-chip chart-chip--soft chart-chip--icon ${bookOpen ? "is-active" : ""}`}
-        onPointerDown={bindToolDrag("orderbook", begin, () => onToggle("orderbook"))}
-        aria-pressed={bookOpen}
-        aria-label="Orderbook"
-        title="Orderbook — přetáhni do desku"
-      >
-        <IconBook size={18} />
-        <span className="header-desk__tool-name">Orderbook</span>
-      </button>
-      <button
-        type="button"
-        className={`chart-chip chart-chip--soft chart-chip--icon ${tapeOpen ? "is-active" : ""}`}
-        onPointerDown={bindToolDrag("tape", begin, () => onToggle("tape"))}
-        aria-pressed={tapeOpen}
-        aria-label="Tape"
-        title="Tape — přetáhni do desku"
-      >
-        <IconTape size={18} />
-        <span className="header-desk__tool-name">Tape</span>
-      </button>
+      {DESK_TOOLS.map(({ id, label, hint, Icon }) => (
+        <button
+          key={id}
+          type="button"
+          className={`chart-chip chart-chip--soft chart-chip--icon ${open[id] ? "is-active" : ""}`}
+          onPointerDown={bindToolDrag(id, begin, () => onToggle(id))}
+          aria-pressed={open[id]}
+          aria-label={label}
+          title={`${hint} — přetáhni do desku`}
+        >
+          <Icon size={18} />
+          <span className="header-desk__tool-name">{label}</span>
+        </button>
+      ))}
     </div>
   );
 }
@@ -698,7 +744,8 @@ function DeskChartPane({
   onError: (msg: string | null) => void;
 }) {
   const paneKey = deskPrefKey(deskId, `pane-${leafId}`);
-  const [prefs, setPrefs] = useState<ChartPrefs>(() => readChartPrefs(deskId, leafId));
+  const [prefs, setPrefs] = useState<ChartPrefs>(defaultChartPrefs);
+  const [prefsReady, setPrefsReady] = useState(false);
   const [data, setData] = useState<DeskChartResponse | null>(null);
   const [loading, setLoading] = useState(!blank);
   const [live, setLive] = useState(false);
@@ -707,6 +754,7 @@ function DeskChartPane({
   useEffect(() => {
     if (!deskPrefsReady) return;
     setPrefs(readChartPrefs(deskId, leafId));
+    setPrefsReady(true);
   }, [deskId, leafId, deskPrefsReady]);
 
   const persistPrefs = useCallback(
@@ -751,9 +799,9 @@ function DeskChartPane({
   );
 
   useEffect(() => {
-    if (blank || !deskPrefsReady) return;
+    if (blank || !prefsReady) return;
     void load(prefs.tf, prefs.lb);
-  }, [blank, deskPrefsReady, load, prefs.tf, prefs.lb]);
+  }, [blank, prefsReady, load, prefs.tf, prefs.lb]);
 
   useEffect(() => {
     if (!isQuoteSource) return;
@@ -977,7 +1025,7 @@ function DeskChartLeaf({
     <div className="desk-charts">
       <DeskWindowHead
         title={
-          <HeaderPick
+          <DeskPick
             label={styleLabel}
             ariaLabel="Typ grafu"
             value={chartViz.style}
@@ -988,7 +1036,7 @@ function DeskChartLeaf({
         }
         extra={
           <div className="desk-win__picks">
-            <HeaderPick
+            <DeskPick
               label={tfLabel}
               ariaLabel="Timeframe"
               value={timeframe}
@@ -996,7 +1044,7 @@ function DeskChartLeaf({
               onSelect={onSelectTimeframe}
               className="desk-win__pick"
             />
-            <HeaderPick
+            <DeskPick
               label={lbLabel}
               ariaLabel="Období"
               value={lookback}

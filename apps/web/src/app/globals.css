@@ -534,6 +534,13 @@ body {
   white-space: nowrap;
 }
 
+/* Four tool launchers only fit with labels on wide desks. */
+@media (max-width: 1439px) {
+  .header-desk__tool-name {
+    display: none;
+  }
+}
+
 .desk-tools-menu {
   min-width: 0;
   padding: 0.35rem;
@@ -2084,6 +2091,408 @@ textarea {
   padding-top: 0.45rem;
   border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
   flex-shrink: 0;
+}
+
+/* ---- Footprint & orderflow ------------------------------------------- */
+
+.fp-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--chart-bg);
+}
+
+.fp-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.fp-panel__stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.fp-panel__stats .is-up {
+  color: var(--chart-up);
+}
+
+.fp-panel__stats .is-down {
+  color: var(--chart-down);
+}
+
+.fp-panel__live {
+  margin-left: auto;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.fp-panel__body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.fp-panel__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.fp-panel__empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  pointer-events: none;
+}
+
+.fp-tip {
+  position: absolute;
+  z-index: 12;
+  min-width: 11rem;
+  max-width: 15rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-elevated) 95%, transparent);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  pointer-events: none;
+}
+
+.fp-tip__time {
+  margin: 0 0 0.3rem;
+  font-family: var(--font-nav);
+  font-size: 0.7rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  color: var(--sense);
+}
+
+.fp-tip__grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.1rem 0.5rem;
+  margin: 0;
+}
+
+.fp-tip__grid dt {
+  color: var(--muted);
+}
+
+.fp-tip__grid dd {
+  margin: 0;
+  text-align: right;
+}
+
+.fp-tip .is-up {
+  color: var(--chart-up);
+}
+
+.fp-tip .is-down {
+  color: var(--chart-down);
+}
+
+.fp-tip__cell {
+  margin-top: 0.4rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.fp-tip__cell p {
+  margin: 0.1rem 0 0;
+}
+
+.fp-tip__cell-px {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.fp-tip__flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.25rem !important;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+/* ---- DOM ------------------------------------------------------------- */
+
+.dom {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-elevated);
+}
+
+.dom__meter {
+  display: flex;
+  height: 4px;
+  margin: 0.35rem 0.5rem 0;
+  border-radius: 99px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--line) 50%, transparent);
+  flex-shrink: 0;
+}
+
+.dom__meter-bid {
+  background: color-mix(in srgb, var(--chart-up) 78%, transparent);
+}
+
+.dom__meter-ask {
+  background: color-mix(in srgb, var(--chart-down) 78%, transparent);
+}
+
+.dom__summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.25rem 0.5rem 0.3rem;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.dom__summary .is-up {
+  color: var(--chart-up);
+}
+
+.dom__summary .is-down {
+  color: var(--chart-down);
+}
+
+.dom__mid {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.dom__cols {
+  display: grid;
+  gap: 0.12rem;
+  padding: 0 0.35rem 0.25rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.dom__cols-px {
+  text-align: center;
+}
+
+.dom__grid {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dom__heat {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  pointer-events: none;
+  opacity: 0.9;
+}
+
+.dom__rows {
+  height: 100%;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.72rem;
+}
+
+.dom__row {
+  position: relative;
+  display: grid;
+  gap: 0.12rem;
+  align-items: center;
+  padding: 0 0.35rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 18%, transparent);
+}
+
+.dom__row.is-best-bid {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--chart-up) 55%, transparent);
+}
+
+.dom__row.is-best-ask {
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--chart-down) 55%, transparent);
+}
+
+.dom__row.is-wall-bid {
+  background: color-mix(in srgb, var(--chart-up) 8%, transparent);
+}
+
+.dom__row.is-wall-ask {
+  background: color-mix(in srgb, var(--chart-down) 8%, transparent);
+}
+
+.dom__row.is-pull .dom__px {
+  color: var(--chart-down);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.dom__row.is-stack .dom__px {
+  color: var(--chart-up);
+}
+
+.dom__cell {
+  position: relative;
+  display: block;
+  min-width: 0;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.dom__cell em {
+  position: relative;
+  z-index: 1;
+  font-style: normal;
+}
+
+.dom__cell.is-bid em {
+  color: var(--chart-up);
+}
+
+.dom__cell.is-ask em {
+  color: var(--chart-down);
+}
+
+.dom__cell.is-ask {
+  text-align: left;
+}
+
+.dom__cell.is-buy em {
+  color: color-mix(in srgb, var(--chart-up) 72%, var(--muted));
+}
+
+.dom__cell.is-sell em {
+  color: color-mix(in srgb, var(--chart-down) 72%, var(--muted));
+}
+
+.dom__cell.is-buy {
+  text-align: left;
+}
+
+.dom__bar {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border-radius: 2px;
+  pointer-events: none;
+  opacity: 0.3;
+}
+
+.dom__bar.is-bid,
+.dom__bar.is-sell {
+  right: 0;
+}
+
+.dom__bar.is-ask,
+.dom__bar.is-buy,
+.dom__bar.is-prof {
+  left: 0;
+}
+
+.dom__bar.is-bid {
+  background: var(--chart-up);
+}
+
+.dom__bar.is-ask {
+  background: var(--chart-down);
+}
+
+.dom__bar.is-buy {
+  background: var(--chart-up);
+  opacity: 0.22;
+}
+
+.dom__bar.is-sell {
+  background: var(--chart-down);
+  opacity: 0.22;
+}
+
+.dom__bar.is-prof {
+  background: var(--muted);
+  opacity: 0.35;
+}
+
+.dom__px {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.dom__flag {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 0.25rem;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.dom__flag.is-ice {
+  background: var(--sense);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--sense) 70%, transparent);
+}
+
+.dom__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.3rem 0.5rem;
+  border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  flex-shrink: 0;
+}
+
+.dom__recenter,
+.dom__lock {
+  padding: 0.15rem 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
+.dom__recenter:hover,
+.dom__lock:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--sense) 45%, var(--line));
+}
+
+.dom__lock.is-active {
+  color: var(--sense);
+  border-color: color-mix(in srgb, var(--sense) 45%, var(--line));
 }
 
 
@@ -4494,6 +4903,8 @@ textarea {
 .desk-mod__leaf > *,
 .desk-mod .orderbook,
 .desk-mod .trades-tape,
+.desk-mod .fp-panel,
+.desk-mod .dom,
 .desk-mod .oil-page__panel,
 .desk-mod .desk-charts,
 .desk-mod .desk-charts__pane {
@@ -5094,7 +5505,8 @@ textarea {
 .oil-page__panel .trades-tape,
 .oil-page__panel .liq-panel,
 .desk-mod .orderbook,
-.desk-mod .trades-tape {
+.desk-mod .trades-tape,
+.desk-mod .dom {
   height: 100%;
   border-radius: 0;
   border: none;

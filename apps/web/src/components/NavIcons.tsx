@@ -201,6 +201,29 @@ export function IconTape(p: IconProps) {
   );
 }
 
+/** Footprint — cluster mřížka uvnitř svíčky */
+export function IconFootprint(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect x="4" y="4.5" width="7" height="15" rx="1" />
+      <path d="M4 9.5h7M4 14.5h7M7.5 4.5v15" />
+      <rect x="14" y="7.5" width="6" height="9" rx="1" />
+      <path d="M14 12h6M17 7.5v9" />
+    </Svg>
+  );
+}
+
+/** DOM — hloubka trhu, bid/ask žebřík */
+export function IconDom(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M4 5.5h6M4 9h4M4 15h5M4 18.5h7" />
+      <path d="M20 5.5h-5M20 9h-7M20 15h-4M20 18.5h-6" />
+      <path d="M3.5 12h17" />
+    </Svg>
+  );
+}
+
 /** Přidat graf — svíčky s plus */
 export function IconAddChart(p: IconProps) {
   return (

@@ -1,4 +1,4 @@
-export type DeskPanelId = "chart" | "orderbook" | "tape";
+export type DeskPanelId = "chart" | "orderbook" | "tape" | "footprint" | "dom";
 
 export type DropZone = "center" | "left" | "right" | "top" | "bottom";
 
@@ -20,7 +20,7 @@ export type DeskNode = DeskLeaf | DeskSplit;
 
 export const NEW_CHART_DRAG = "__new-chart__";
 
-const PANELS: DeskPanelId[] = ["chart", "orderbook", "tape"];
+const PANELS: DeskPanelId[] = ["chart", "orderbook", "tape", "footprint", "dom"];
 
 let splitSeq = 0;
 function newSplitId() {
@@ -123,8 +123,10 @@ export function firstLeafOf(node: DeskNode, panel: DeskPanelId): DeskLeaf | null
 }
 
 export function panelKindFromId(id: string): DeskPanelId {
-  if (id === "orderbook" || id.startsWith("orderbook-")) return "orderbook";
-  if (id === "tape" || id.startsWith("tape-")) return "tape";
+  for (const panel of PANELS) {
+    if (panel === "chart") continue;
+    if (id === panel || id.startsWith(`${panel}-`)) return panel;
+  }
   return "chart";
 }
 
@@ -236,6 +238,11 @@ export function addPanel(root: DeskNode, panel: DeskPanelId): DeskNode {
   if (panel === "chart") return addChart(root);
   if (hasPanel(root, panel)) return root;
   const incoming = leafOf(panel);
+  if (panel === "footprint") {
+    // Cluster charts need chart-sized real estate, not the narrow side column.
+    const target = firstLeafOf(root, "chart");
+    if (target) return insertAt(root, target.id, incoming, "bottom");
+  }
   if (root.type === "split" && root.dir === "row") {
     const lastIdx = root.children.length - 1;
     const last = root.children[lastIdx];
@@ -321,4 +328,6 @@ export const PANEL_LABEL: Record<DeskPanelId, string> = {
   chart: "Chart",
   orderbook: "Orderbook",
   tape: "Tape",
+  footprint: "Footprint",
+  dom: "DOM",
 };
