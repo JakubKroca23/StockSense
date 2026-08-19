@@ -6,20 +6,17 @@ type Props = {
   viz: ChartVizSettings;
   onChange: (patch: Partial<ChartVizSettings>) => void;
   onReset: () => void;
-  compact?: boolean;
 };
 
-export function ChartSettingsPanel({ viz, onChange, onReset, compact = false }: Props) {
+export function ChartSettingsPanel({ viz, onChange, onReset }: Props) {
   return (
-    <section className={`settings-block${compact ? " is-compact" : ""}`}>
-      {compact ? null : (
-        <div className="settings-block__head">
-          <div>
-            <h2>Graf</h2>
-            <p className="settings-block__sub">Vzhled svíček, mřížka, indikátory a měřítko.</p>
-          </div>
+    <section className="settings-block">
+      <div className="settings-block__head">
+        <div>
+          <h2>Graf</h2>
+          <p className="settings-block__sub">Vzhled svíček, mřížka, indikátory a měřítko.</p>
         </div>
-      )}
+      </div>
       <div className="settings-chart">
         <section className="fp-drawer__sec">
           <h3>Vzhled</h3>
@@ -150,13 +147,6 @@ export function ChartSettingsPanel({ viz, onChange, onReset, compact = false }: 
             <input type="checkbox" checked={viz.volume} onChange={(e) => onChange({ volume: e.target.checked })} />
             <span>
               <span className="fp-drawer__toggle-lab">Volume histogram</span>
-            </span>
-          </label>
-          <label className="fp-drawer__toggle">
-            <input type="checkbox" checked={viz.footprint} onChange={(e) => onChange({ footprint: e.target.checked })} />
-            <span>
-              <span className="fp-drawer__toggle-lab">Footprint</span>
-              <span className="fp-drawer__hint">Orderflow cluster chart pod grafem.</span>
             </span>
           </label>
         </section>

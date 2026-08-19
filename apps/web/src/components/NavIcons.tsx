@@ -178,65 +178,6 @@ export function IconDraw(p: IconProps) {
   );
 }
 
-/** Order book — žebřík */
-export function IconBook(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <path d="M4 6h16" />
-      <path d="M4 12h16" />
-      <path d="M4 18h16" />
-      <path d="M12 4v16" />
-    </Svg>
-  );
-}
-
-/** Tape — historie obchodů */
-export function IconTape(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <path d="M5 6h14" />
-      <path d="M5 12h10" />
-      <path d="M5 18h12" />
-    </Svg>
-  );
-}
-
-/** Footprint — cluster mřížka uvnitř svíčky */
-export function IconFootprint(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <rect x="4" y="4.5" width="7" height="15" rx="1" />
-      <path d="M4 9.5h7M4 14.5h7M7.5 4.5v15" />
-      <rect x="14" y="7.5" width="6" height="9" rx="1" />
-      <path d="M14 12h6M17 7.5v9" />
-    </Svg>
-  );
-}
-
-/** DOM — hloubka trhu, bid/ask žebřík */
-export function IconDom(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <path d="M4 5.5h6M4 9h4M4 15h5M4 18.5h7" />
-      <path d="M20 5.5h-5M20 9h-7M20 15h-4M20 18.5h-6" />
-      <path d="M3.5 12h17" />
-    </Svg>
-  );
-}
-
-/** Přidat graf — svíčky s plus */
-export function IconAddChart(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <path d="M4 19V7" />
-      <path d="M4 19h7" />
-      <path d="M7.5 15.5V10M7.5 10V8M7.5 15.5v2" />
-      <path d="M16 5v6" />
-      <path d="M13 8h6" />
-    </Svg>
-  );
-}
-
 export const navIcons: Record<string, (p: IconProps) => ReactNode> = {
   "/": IconHome,
   "/desk/btc": IconBtc,

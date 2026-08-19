@@ -35,7 +35,6 @@ export type ChartVizSettings = {
   crosshair: ChartCrosshair;
   barSpacing: number;
   rightOffset: number;
-  footprint: boolean;
 };
 
 export const DEFAULT_CHART_VIZ: ChartVizSettings = {
@@ -53,7 +52,6 @@ export const DEFAULT_CHART_VIZ: ChartVizSettings = {
   crosshair: "normal",
   barSpacing: 9,
   rightOffset: 0,
-  footprint: false,
 };
 
 export const DEFAULT_DESK_CHART_VIZ: ChartVizSettings = {

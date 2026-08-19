@@ -85,14 +85,7 @@ export function SettingsPanel({ open, onClose, theme, onThemeChange }: Props) {
   const nextTheme = theme === "light" ? "dark" : "light";
 
   return (
-    <>
-      <button
-        type="button"
-        className="settings-modal__backdrop"
-        aria-label="Zavřít nastavení"
-        onClick={onClose}
-      />
-      <div className="settings-modal" role="dialog" aria-modal="true" aria-label="Nastavení">
+    <aside className="settings-drawer" aria-label="Nastavení">
       <header className="settings-drawer__head">
         <p className="settings-drawer__title">NASTAVENÍ</p>
         <div className="settings-drawer__actions">
@@ -192,7 +185,6 @@ export function SettingsPanel({ open, onClose, theme, onThemeChange }: Props) {
           )}
         </section>
       </div>
-    </div>
-    </>
+    </aside>
   );
 }
