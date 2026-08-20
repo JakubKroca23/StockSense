@@ -22,7 +22,6 @@ type Props = {
   book: OrderBookData | null;
   footprint: FootprintData | null;
   settings: DomSettings;
-  priceDigits?: number;
   /** Fill the plot with rolling book history (dedicated heatmap chart). */
   fillHeat?: boolean;
   /** Extra space on the right (volume profile column). */
@@ -91,7 +90,6 @@ export function DomOverlay({
   book,
   footprint,
   settings,
-  priceDigits = 2,
   fillHeat = false,
   rightInset = 0,
 }: Props) {
@@ -138,7 +136,7 @@ export function DomOverlay({
         themeRef.current,
         w,
         h,
-        priceDigits,
+        Math.max(1e-9, book.tick * Math.max(1, settings.tickGroup)),
         fillHeat,
         rightInset
       );
@@ -159,9 +157,19 @@ export function DomOverlay({
       chart.unsubscribeCrosshairMove(onRange);
       ro.disconnect();
     };
-  }, [book, chart, fillHeat, priceDigits, rightInset, rows, series, settings, themeRev, wrap]);
+  }, [book, chart, fillHeat, rightInset, rows, series, settings, themeRev, wrap]);
 
   return <canvas ref={canvasRef} className="dom-overlay" style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 14 }} />;
+}
+
+function rowBand(series: ISeriesApi<"Candlestick">, price: number, step: number) {
+  const y = series.priceToCoordinate(price);
+  const yTop = series.priceToCoordinate(price + step / 2);
+  const yBot = series.priceToCoordinate(price - step / 2);
+  if (y == null || yTop == null || yBot == null) return null;
+  const top = Math.min(yTop, yBot);
+  const height = Math.max(1, Math.abs(yBot - yTop) - 1);
+  return { y, top, height };
 }
 
 function drawDomOverlay(
@@ -173,16 +181,23 @@ function drawDomOverlay(
   theme: OrderflowTheme,
   w: number,
   h: number,
-  priceDigits: number,
+  step: number,
   fillHeat: boolean,
   rightInset: number
 ) {
   ctx.clearRect(0, 0, w, h);
   if (!rows.length) return;
+  const showVol = settings.showVolume;
+  const colN = showVol ? 4 : 2;
+  const gap = 3;
+  const colW = Math.max(28, Math.min(52, (w * 0.26) / colN));
+  const totalW = colN * colW + (colN - 1) * gap;
   const axisPad = 62 + Math.max(0, rightInset);
-  const laneW = Math.max(56, Math.min(110, w * 0.13));
-  const askX = w - axisPad - laneW;
-  const bidX = askX - laneW - 8;
+  const ladderLeft = w - axisPad - totalW - 4;
+  const sellX = showVol ? ladderLeft : 0;
+  const bidX = showVol ? sellX + colW + gap : ladderLeft;
+  const askX = bidX + colW + gap;
+  const buyX = askX + colW + gap;
   const maxDepth = rows.reduce((acc, row) => Math.max(acc, row.bid, row.ask), 0) || 1;
   const maxTraded = rows.reduce((acc, row) => Math.max(acc, row.buy, row.sell), 0) || 1;
   const maxSnapDepth =
@@ -193,88 +208,110 @@ function drawDomOverlay(
       return local;
     }, 0) || 1;
 
-  ctx.font = `10px ${theme.font}`;
+  ctx.font = `9px ${theme.font}`;
   ctx.textBaseline = "middle";
 
   if (settings.showHeatmap && snaps.length > 1) {
-        const left = fillHeat ? 4 : Math.max(4, bidX - 8 - Math.max(40, settings.heatWidth));
-    const right = Math.max(left + 12, bidX - 8);
+    const right = Math.max(12, ladderLeft - 6);
+    const left = fillHeat ? 4 : Math.max(4, right - Math.max(40, settings.heatWidth));
     const plotW = Math.max(12, right - left);
-    const colW = Math.max(1, plotW / Math.max(1, snaps.length));
+    const heatColW = Math.max(1, plotW / Math.max(1, snaps.length));
     snaps.forEach((snap, idx) => {
-      const x = fillHeat ? left + idx * colW : left + idx * colW;
+      const x = left + idx * heatColW;
       for (const row of rows) {
-        const y = series.priceToCoordinate(row.price);
-        if (y == null || y < -12 || y > h + 12) continue;
-        const bandH = Math.max(2, Math.min(16, settings.rowHeight * 0.7));
-        const top = y - bandH / 2;
+        const band = rowBand(series, row.price, step);
+        if (!band || band.top > h + 12 || band.top + band.height < -12) continue;
         const bid = snap.bids.get(row.key) ?? 0;
         const ask = snap.asks.get(row.key) ?? 0;
         const size = Math.max(bid, ask);
         if (size <= 0) continue;
         const intensity = Math.min(1, Math.sqrt(size / maxSnapDepth));
         ctx.fillStyle = alpha(bid >= ask ? theme.up : theme.down, 0.05 + intensity * (fillHeat ? 0.55 : 0.32));
-        ctx.fillRect(x, top, colW + 0.5, bandH);
+        ctx.fillRect(x, band.top, heatColW + 0.5, band.height);
       }
     });
   }
 
-  for (const row of rows) {
-    const y = series.priceToCoordinate(row.price);
-    if (y == null || y < -20 || y > h + 20) continue;
-    const bandH = Math.max(2, Math.min(16, settings.rowHeight * 0.7));
-    const top = y - bandH / 2;
-    const bidW = Math.min(laneW, (row.bid / maxDepth) * laneW);
-    const askW = Math.min(laneW, (row.ask / maxDepth) * laneW);
-
-    if (row.bid > 0) {
-      ctx.fillStyle = alpha(theme.up, 0.12);
-      ctx.fillRect(bidX + laneW - bidW, top, bidW, bandH);
-      ctx.strokeStyle = alpha(theme.up, 0.35);
-      ctx.beginPath();
-      ctx.moveTo(bidX, Math.round(y) + 0.5);
-      ctx.lineTo(bidX + laneW, Math.round(y) + 0.5);
-      ctx.stroke();
-    }
-    if (row.ask > 0) {
-      ctx.fillStyle = alpha(theme.down, 0.12);
-      ctx.fillRect(askX, top, askW, bandH);
-      ctx.strokeStyle = alpha(theme.down, 0.35);
-      ctx.beginPath();
-      ctx.moveTo(askX, Math.round(y) + 0.5);
-      ctx.lineTo(askX + laneW, Math.round(y) + 0.5);
-      ctx.stroke();
-    }
-
-    if (settings.showVolume && (row.buy > 0 || row.sell > 0)) {
-      const sellW = Math.min(laneW, (row.sell / maxTraded) * laneW);
-      const buyW = Math.min(laneW, (row.buy / maxTraded) * laneW);
-      ctx.fillStyle = alpha(theme.down, 0.18);
-      ctx.fillRect(bidX + laneW - sellW, top + 1, sellW, Math.max(1, bandH - 2));
-      ctx.fillStyle = alpha(theme.up, 0.18);
-      ctx.fillRect(askX, top + 1, buyW, Math.max(1, bandH - 2));
-    }
-
-    if (settings.showDepthBars && laneW >= 72) {
-      ctx.textAlign = "right";
-      ctx.fillStyle = alpha(theme.text, 0.8);
-      if (row.bid > 0) ctx.fillText(fmtCompact(row.bid), bidX + laneW - 4, y);
-      ctx.textAlign = "left";
-      if (row.ask > 0) ctx.fillText(fmtCompact(row.ask), askX + 4, y);
-    }
+  ctx.fillStyle = alpha(theme.bgSoft, 0.38);
+  ctx.fillRect(ladderLeft - 2, 0, totalW + 4, h);
+  ctx.strokeStyle = alpha(theme.line, 0.45);
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(Math.round(ladderLeft) - 1.5, 0);
+  ctx.lineTo(Math.round(ladderLeft) - 1.5, h);
+  ctx.stroke();
+  const splits = showVol ? [sellX + colW, bidX + colW, askX + colW] : [bidX + colW];
+  ctx.strokeStyle = alpha(theme.line, 0.28);
+  for (const x of splits) {
+    ctx.beginPath();
+    ctx.moveTo(Math.round(x + gap / 2) + 0.5, 0);
+    ctx.lineTo(Math.round(x + gap / 2) + 0.5, h);
+    ctx.stroke();
   }
 
-  const mid = rows.find((row) => row.bid > 0 && row.ask > 0) ?? rows[Math.floor(rows.length / 2)] ?? null;
-  if (mid) {
-    const y = series.priceToCoordinate(mid.price);
-    if (y != null && y >= 0 && y <= h) {
-      ctx.fillStyle = alpha(theme.bgElevated, 0.85);
-      ctx.fillRect(askX - 4, y - 8, laneW * 2 + 12, 16);
-      ctx.strokeStyle = alpha(theme.line, 0.7);
-      ctx.strokeRect(askX - 3.5, y - 7.5, laneW * 2 + 11, 15);
-      ctx.textAlign = "center";
-      ctx.fillStyle = alpha(theme.text, 0.92);
-      ctx.fillText(mid.price.toFixed(priceDigits), askX + laneW - 1, y);
+  ctx.fillStyle = alpha(theme.muted, 0.85);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  if (showVol) ctx.fillText("Sell", sellX + colW / 2, 4);
+  ctx.fillText("Bid", bidX + colW / 2, 4);
+  ctx.fillText("Ask", askX + colW / 2, 4);
+  if (showVol) ctx.fillText("Buy", buyX + colW / 2, 4);
+  ctx.textBaseline = "middle";
+
+  const barAlpha = 0.62;
+  const showNums = settings.showDepthBars && colW >= 36;
+
+  for (const row of rows) {
+    const band = rowBand(series, row.price, step);
+    if (!band || band.top > h + 20 || band.top + band.height < -20) continue;
+    const { y, top, height } = band;
+    const bidW = Math.min(colW, (row.bid / maxDepth) * colW);
+    const askW = Math.min(colW, (row.ask / maxDepth) * colW);
+
+    if (row.bid > 0) {
+      ctx.fillStyle = alpha(theme.up, barAlpha);
+      ctx.fillRect(bidX + colW - bidW, top, bidW, height);
+    }
+    if (row.ask > 0) {
+      ctx.fillStyle = alpha(theme.down, barAlpha);
+      ctx.fillRect(askX, top, askW, height);
+    }
+
+    if (showVol) {
+      const sellW = Math.min(colW, (row.sell / maxTraded) * colW);
+      const buyW = Math.min(colW, (row.buy / maxTraded) * colW);
+      if (row.sell > 0) {
+        ctx.fillStyle = alpha(theme.down, barAlpha);
+        ctx.fillRect(sellX + colW - sellW, top, sellW, height);
+      }
+      if (row.buy > 0) {
+        ctx.fillStyle = alpha(theme.up, barAlpha);
+        ctx.fillRect(buyX, top, buyW, height);
+      }
+    }
+
+    if (showNums && height >= 8) {
+      ctx.font = `9px ${theme.font}`;
+      if (row.bid > 0) {
+        ctx.textAlign = "right";
+        ctx.fillStyle = theme.text;
+        ctx.fillText(fmtCompact(row.bid), bidX + colW - 3, y);
+      }
+      if (row.ask > 0) {
+        ctx.textAlign = "left";
+        ctx.fillStyle = theme.text;
+        ctx.fillText(fmtCompact(row.ask), askX + 3, y);
+      }
+      if (showVol && row.sell > 0) {
+        ctx.textAlign = "right";
+        ctx.fillStyle = theme.text;
+        ctx.fillText(fmtCompact(row.sell), sellX + colW - 3, y);
+      }
+      if (showVol && row.buy > 0) {
+        ctx.textAlign = "left";
+        ctx.fillStyle = theme.text;
+        ctx.fillText(fmtCompact(row.buy), buyX + 3, y);
+      }
     }
   }
 }

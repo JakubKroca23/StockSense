@@ -19,7 +19,6 @@ import {
   clusterProfileMetric,
   clusterShowsText,
   clusterSlots,
-  contrastOnCanvas,
   drawAbsorptionMark,
   drawCurrentPriceRow,
   drawFadeMark,
@@ -768,33 +767,18 @@ function drawFootprint(ctx: CanvasRenderingContext2D, args: DrawArgs) {
       ctx.font = `${cellFont}px ${font}`;
       if (isBidAskCluster(s.cellMode)) {
         ctx.textAlign = "right";
-        ctx.fillStyle = contrastOnCanvas(
-          ctx,
-          slots.sellX + halfSell - 6,
-          yc,
-          cell.sell > 0 ? alpha(theme.fontSell, 0.95) : alpha(theme.muted, 0.4)
-        );
+        ctx.fillStyle = cell.sell > 0 ? theme.fontSell : alpha(theme.muted, 0.4);
         ctx.fillText(cell.sell > 0 ? fmtCompact(cell.sell) : "·", slots.sellX + halfSell - 2, yc);
         ctx.textAlign = "left";
-        ctx.fillStyle = contrastOnCanvas(
-          ctx,
-          slots.buyX + 6,
-          yc,
-          cell.buy > 0 ? alpha(theme.fontBuy, 0.95) : alpha(theme.muted, 0.4)
-        );
+        ctx.fillStyle = cell.buy > 0 ? theme.fontBuy : alpha(theme.muted, 0.4);
         ctx.fillText(cell.buy > 0 ? fmtCompact(cell.buy) : "·", slots.buyX + 2, yc);
       } else if (isDeltaCluster(s.cellMode)) {
         ctx.textAlign = "center";
-        ctx.fillStyle = contrastOnCanvas(
-          ctx,
-          innerX + innerW / 2,
-          yc,
-          cell.delta === 0 ? alpha(theme.muted, 0.6) : cell.delta > 0 ? theme.fontBuy : theme.fontSell
-        );
+        ctx.fillStyle = cell.delta === 0 ? alpha(theme.muted, 0.6) : cell.delta > 0 ? theme.fontBuy : theme.fontSell;
         ctx.fillText(fmtSignedCompact(cell.delta), innerX + innerW / 2, yc);
       } else {
         ctx.textAlign = "center";
-        ctx.fillStyle = contrastOnCanvas(ctx, innerX + innerW / 2, yc, alpha(theme.text, 0.85));
+        ctx.fillStyle = theme.text;
         ctx.fillText(fmtCompact(cell.volume), innerX + innerW / 2, yc);
       }
     }

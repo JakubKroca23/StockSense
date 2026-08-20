@@ -38,7 +38,8 @@ export function DomSettingsPanel({
           <section className="fp-drawer__sec">
             <h3>DOM a heatmapa</h3>
             <p className="fp-drawer__lead">
-              Bid/ask žebřík vpravo. Heatmapa je historie hloubky nalevo od něj.
+              Čtyři histogramy vpravo: bid, ask a provedené obchody (sell / buy). Heatmapa je
+              historie hloubky nalevo od nich.
             </p>
             <label className="fp-drawer__toggle">
               <input
@@ -108,7 +109,7 @@ export function DomSettingsPanel({
                 onChange={(e) => onChange({ showDepthBars: e.target.checked })}
               />
               <span>
-                <span className="fp-drawer__toggle-lab">Hloubka bid/ask</span>
+                <span className="fp-drawer__toggle-lab">Čísla v profilech</span>
               </span>
             </label>
             <label className="fp-drawer__toggle">

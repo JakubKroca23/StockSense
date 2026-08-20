@@ -8,7 +8,6 @@ import {
   clusterProfileMetric,
   clusterShowsText,
   clusterSlots,
-  contrastOnCanvas,
   drawAbsorptionMark,
   drawCurrentPriceRow,
   drawFadeMark,
@@ -456,14 +455,12 @@ function drawBidAskLabel(
   ctx.textBaseline = "middle";
   if (sellW >= 12) {
     ctx.textAlign = "right";
-    const ink = cell.sell > 0 ? alpha(theme.fontSell, 0.95) : alpha(theme.muted, 0.35);
-    ctx.fillStyle = contrastOnCanvas(ctx, sellX + sellW - 6, y, ink);
+    ctx.fillStyle = cell.sell > 0 ? theme.fontSell : alpha(theme.muted, 0.35);
     ctx.fillText(cell.sell > 0 ? fmtCompact(cell.sell) : "·", sellX + sellW - 2, y);
   }
   if (buyW >= 12) {
     ctx.textAlign = "left";
-    const ink = cell.buy > 0 ? alpha(theme.fontBuy, 0.95) : alpha(theme.muted, 0.35);
-    ctx.fillStyle = contrastOnCanvas(ctx, buyX + 6, y, ink);
+    ctx.fillStyle = cell.buy > 0 ? theme.fontBuy : alpha(theme.muted, 0.35);
     ctx.fillText(cell.buy > 0 ? fmtCompact(cell.buy) : "·", buyX + 2, y);
   }
 }
@@ -487,29 +484,19 @@ function drawCellLabel(
   if (narrow || isDeltaCluster(settings.cellMode)) {
     if (isBidAskCluster(settings.cellMode) && narrow) {
       ctx.textAlign = "center";
-      ctx.fillStyle = contrastOnCanvas(
-        ctx,
-        cellX + cellW / 2,
-        y,
-        cell.delta === 0 ? alpha(theme.muted, 0.55) : cell.delta > 0 ? theme.fontBuy : theme.fontSell
-      );
+      ctx.fillStyle = cell.delta === 0 ? alpha(theme.muted, 0.55) : cell.delta > 0 ? theme.fontBuy : theme.fontSell;
       ctx.fillText(fmtSignedCompact(cell.delta), cellX + cellW / 2, y);
       return;
     }
     if (settings.cellMode === "volume" || (isBidAskCluster(settings.cellMode) && narrow)) {
       ctx.textAlign = "center";
-      ctx.fillStyle = contrastOnCanvas(ctx, cellX + cellW / 2, y, alpha(theme.text, 0.85));
+      ctx.fillStyle = theme.text;
       ctx.fillText(fmtCompact(cell.volume), cellX + cellW / 2, y);
       return;
     }
     if (isDeltaCluster(settings.cellMode)) {
       ctx.textAlign = "center";
-      ctx.fillStyle = contrastOnCanvas(
-        ctx,
-        cellX + cellW / 2,
-        y,
-        cell.delta === 0 ? alpha(theme.muted, 0.55) : cell.delta > 0 ? theme.fontBuy : theme.fontSell
-      );
+      ctx.fillStyle = cell.delta === 0 ? alpha(theme.muted, 0.55) : cell.delta > 0 ? theme.fontBuy : theme.fontSell;
       ctx.fillText(fmtSignedCompact(cell.delta), cellX + cellW / 2, y);
       return;
     }
@@ -518,25 +505,15 @@ function drawCellLabel(
   if (isBidAskCluster(settings.cellMode)) {
     const half = cellW / 2;
     ctx.textAlign = "right";
-    ctx.fillStyle = contrastOnCanvas(
-      ctx,
-      cellX + half - 6,
-      y,
-      cell.sell > 0 ? alpha(theme.fontSell, 0.95) : alpha(theme.muted, 0.35)
-    );
+    ctx.fillStyle = cell.sell > 0 ? theme.fontSell : alpha(theme.muted, 0.35);
     ctx.fillText(cell.sell > 0 ? fmtCompact(cell.sell) : "·", cellX + half - 2, y);
     ctx.textAlign = "left";
-    ctx.fillStyle = contrastOnCanvas(
-      ctx,
-      cellX + half + 6,
-      y,
-      cell.buy > 0 ? alpha(theme.fontBuy, 0.95) : alpha(theme.muted, 0.35)
-    );
+    ctx.fillStyle = cell.buy > 0 ? theme.fontBuy : alpha(theme.muted, 0.35);
     ctx.fillText(cell.buy > 0 ? fmtCompact(cell.buy) : "·", cellX + half + 2, y);
     return;
   }
 
   ctx.textAlign = "center";
-  ctx.fillStyle = contrastOnCanvas(ctx, cellX + cellW / 2, y, alpha(theme.text, 0.85));
+  ctx.fillStyle = theme.text;
   ctx.fillText(fmtCompact(cell.volume), cellX + cellW / 2, y);
 }

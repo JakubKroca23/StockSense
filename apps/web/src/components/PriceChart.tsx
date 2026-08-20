@@ -1040,7 +1040,6 @@ export const PriceChart = memo(function PriceChart({
               book={orderBook}
               footprint={footprintData ?? null}
               settings={{ ...domSettings, showHeatmap: true }}
-              priceDigits={priceDigits}
               fillHeat
             />
           ) : null}
@@ -1064,7 +1063,6 @@ export const PriceChart = memo(function PriceChart({
               book={orderBook}
               footprint={footprintData ?? null}
               settings={domSettings}
-              priceDigits={priceDigits}
               rightInset={
                 viz.volumeProfile && profileUsesRightColumn(volumeProfileSettings?.profileRange)
                   ? Math.max(48, Math.min(volumeProfileSettings?.profileWidth ?? 90, 180))
