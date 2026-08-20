@@ -19,6 +19,7 @@ import {
   alpha,
   fmtCompact,
   medianDepth,
+  sessionVolumeAtPrice,
   readOrderflowTheme,
   type DomSettings,
   type FootprintData,
@@ -66,25 +67,6 @@ function fmtPrice(n: number | null | undefined, digits = 2) {
   });
 }
 
-/** Traded volume per price for the session columns — the server footprint is the backbone. */
-function sessionVap(footprint: FootprintData | null, step: number, cutoff: number) {
-  const map = new Map<number, { buy: number; sell: number }>();
-  for (const bar of footprint?.bars ?? []) {
-    if (Date.parse(bar.ts) < cutoff) continue;
-    for (const level of bar.levels) {
-      const key = Math.round(level.price / step);
-      const cur = map.get(key);
-      if (cur) {
-        cur.buy += level.buy;
-        cur.sell += level.sell;
-      } else {
-        map.set(key, { buy: level.buy, sell: level.sell });
-      }
-    }
-  }
-  return map;
-}
-
 function buildDomModel(args: {
   book: OrderBookData;
   footprint: FootprintData | null;
@@ -99,7 +81,7 @@ function buildDomModel(args: {
   linkedBottom?: number | null;
 }): DomModel {
   const { book, footprint, tracker, settings, step, digits, offsetRows, rowCount, now } = args;
-  const vap = sessionVap(footprint, step, now - settings.sessionMinutes * 60_000);
+  const vap = sessionVolumeAtPrice(footprint?.bars, step, now);
   const stats = tracker.stats(now, Math.min(8000, settings.heatSeconds * 1000));
 
   const bids = new Map<number, number>();

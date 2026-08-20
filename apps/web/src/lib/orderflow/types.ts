@@ -51,6 +51,8 @@ export type FootprintProfileSide = "off" | "left" | "right" | "both";
 export type ProfileRange = "visible" | "all" | "day" | "hour" | "custom";
 
 /** Histogram overlay — independent from footprint / TPO. */
+export type VolumeProfileAlign = "left" | "right";
+
 export type VolumeProfileSettings = {
   tickGroup: number;
   profileWidth: number;
@@ -61,6 +63,8 @@ export type VolumeProfileSettings = {
   valueAreaPct: number;
   profileRange: ProfileRange;
   profileSessionMinutes: number;
+  /** Histogram sits on the left or right edge of the session (day / hour / custom). */
+  profileAlign: VolumeProfileAlign;
   upColor?: string;
   downColor?: string;
   pocColor?: string;
@@ -214,6 +218,7 @@ export const DEFAULT_VOLUME_PROFILE_SETTINGS: VolumeProfileSettings = {
   valueAreaPct: 70,
   profileRange: "visible",
   profileSessionMinutes: 60,
+  profileAlign: "right",
 };
 
 export function normalizeVolumeProfileSettings(
@@ -256,7 +261,7 @@ export type DomSettings = {
   showVolume: boolean;
   showCumulative: boolean;
   showSessionProfile: boolean;
-  /** Minutes of traded volume used for the volume-at-price columns. */
+  /** Unused — buy/sell columns always use the current UTC day. Kept for saved prefs. */
   sessionMinutes: number;
   showWalls: boolean;
   /** Depth multiple over the ladder median that counts as a wall. */

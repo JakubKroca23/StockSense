@@ -8,6 +8,7 @@ import {
   alpha,
   fmtCompact,
   readOrderflowTheme,
+  sessionVolumeAtPrice,
   type DepthSnapshot,
   type DomSettings,
   type FootprintData,
@@ -68,16 +69,14 @@ function buildOverlayRows(book: OrderBookData, footprint: FootprintData | null, 
     put(level.price, { ask: (levels.get(Math.round(level.price / step))?.ask ?? 0) + level.amount });
   }
   if (settings.showVolume) {
-    for (const bar of footprint?.bars ?? []) {
-      for (const level of bar.levels) {
-        const key = Math.round(level.price / step);
-        const prev = levels.get(key) ?? { key, price: key * step, bid: 0, ask: 0, buy: 0, sell: 0 };
-        levels.set(key, {
-          ...prev,
-          buy: prev.buy + level.buy,
-          sell: prev.sell + level.sell,
-        });
-      }
+    const vap = sessionVolumeAtPrice(footprint?.bars, step);
+    for (const [key, traded] of vap) {
+      const prev = levels.get(key) ?? { key, price: key * step, bid: 0, ask: 0, buy: 0, sell: 0 };
+      levels.set(key, {
+        ...prev,
+        buy: prev.buy + traded.buy,
+        sell: prev.sell + traded.sell,
+      });
     }
   }
   return [...levels.values()].sort((a, b) => b.price - a.price);

@@ -67,6 +67,8 @@ function ProfileRangeFields({
   onChange: (patch: Partial<VolumeProfileSettings>) => void;
 }) {
   const range = settings.profileRange ?? "visible";
+  const periodic = range === "day" || range === "hour" || range === "custom";
+  const align = settings.profileAlign ?? "right";
   return (
     <>
       <div className="fp-drawer__item">
@@ -74,7 +76,8 @@ function ProfileRangeFields({
           <span>Interval</span>
         </div>
         <p className="fp-drawer__hint">
-          Viditelné a celé období = jeden histogram vpravo. Den, hodina a vlastní = profil u každé seance (UTC).
+          Viditelné a celé období = jeden histogram vpravo. Den, hodina a vlastní = profil
+          zarovnaný na celou UTC seanci.
         </p>
         <div className="fp-drawer__seg">
           {PROFILE_RANGES.map(({ id, label }) => (
@@ -89,6 +92,33 @@ function ProfileRangeFields({
           ))}
         </div>
       </div>
+      {periodic ? (
+        <div className="fp-drawer__item">
+          <div className="fp-drawer__item-top">
+            <span>Zarovnání</span>
+          </div>
+          <p className="fp-drawer__hint">
+            Histogram sedí na začátku nebo na konci seance. Den = UTC půlnoc až další půlnoc.
+          </p>
+          <div className="fp-drawer__seg">
+            {(
+              [
+                ["left", "Vlevo"],
+                ["right", "Vpravo"],
+              ] as const
+            ).map(([id, lab]) => (
+              <button
+                key={id}
+                type="button"
+                className={`fp-drawer__chip ${align === id ? "is-active" : ""}`}
+                onClick={() => onChange({ profileAlign: id })}
+              >
+                {lab}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
       {range === "custom" ? (
         <div className="fp-drawer__item">
           <div className="fp-drawer__item-top">

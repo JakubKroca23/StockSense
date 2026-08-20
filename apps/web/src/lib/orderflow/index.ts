@@ -10,6 +10,7 @@ export type {
   FootprintProfileSide,
   OrderflowSettings,
   ProfileRange,
+  VolumeProfileAlign,
   VolumeProfileSettings,
 } from "./types";
 
@@ -62,7 +63,9 @@ export {
   formatSessionLabel,
   isPeriodicProfile,
   profileUsesRightColumn,
+  sessionEndMs,
   sessionStartMs,
+  sessionVolumeAtPrice,
   splitProfileSessions,
 } from "./profileRange";
 

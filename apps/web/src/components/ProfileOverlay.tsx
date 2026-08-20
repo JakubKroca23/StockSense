@@ -172,7 +172,35 @@ export function ProfileOverlay({
   );
 }
 
-function pickColor(custom: string | undefined, fallback: string) {
+function timeMsToX(
+  ts: { timeToCoordinate: (time: Time) => number | null },
+  timeMs: number,
+  bars: { timeMs: number }[]
+): number | null {
+  const direct = ts.timeToCoordinate(Math.floor(timeMs / 1000) as Time);
+  if (direct != null) return direct;
+  if (!bars.length) return null;
+  if (bars.length === 1) return ts.timeToCoordinate(Math.floor(bars[0].timeMs / 1000) as Time);
+  let lo = 0;
+  let hi = bars.length - 1;
+  if (timeMs <= bars[0].timeMs) {
+    hi = 1;
+  } else if (timeMs >= bars[hi].timeMs) {
+    lo = hi - 1;
+  } else {
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (bars[mid].timeMs <= timeMs) lo = mid;
+      else hi = mid;
+    }
+  }
+  const x0 = ts.timeToCoordinate(Math.floor(bars[lo].timeMs / 1000) as Time);
+  const x1 = ts.timeToCoordinate(Math.floor(bars[hi].timeMs / 1000) as Time);
+  if (x0 == null || x1 == null) return x0 ?? x1;
+  const dt = bars[hi].timeMs - bars[lo].timeMs;
+  if (!(dt > 0)) return x0;
+  return x0 + ((x1 - x0) / dt) * (timeMs - bars[lo].timeMs);
+}
   const v = custom?.trim();
   return v ? v : fallback;
 }
@@ -224,7 +252,6 @@ function drawProfile(
       theme,
       paint,
       h,
-      plotRight,
       priceDigits,
       rangeMode
     );
@@ -407,7 +434,6 @@ function drawSessionProfiles(
   theme: OrderflowTheme,
   paint: VpPaint,
   h: number,
-  plotRight: number,
   priceDigits: number,
   rangeMode: ProfileRange
 ) {
@@ -425,14 +451,12 @@ function drawSessionProfiles(
   for (const session of sessions) {
     if (session.to < visFrom - 2 || session.from > visTo + 2) continue;
     if (drawn >= 80) break;
-    const startBar = volumeSeries.bars[session.from];
-    const endBar = volumeSeries.bars[session.to];
-    const xStart = ts.timeToCoordinate(Math.floor(startBar.timeMs / 1000) as Time);
-    const xEnd = ts.timeToCoordinate(Math.floor(endBar.timeMs / 1000) as Time);
-    if (xStart == null && xEnd == null) continue;
-    const left = Math.max(-40, xStart ?? (xEnd as number) - 24);
-    const right = Math.min(plotRight, xEnd ?? (xStart as number) + 24);
-    const span = right - left;
+    const left = timeMsToX(ts, session.startMs, volumeSeries.bars);
+    const right = timeMsToX(ts, session.endMs, volumeSeries.bars);
+    if (left == null && right == null) continue;
+    const sessionLeft = left ?? (right as number) - 24;
+    const sessionRight = right ?? (left as number) + 24;
+    const span = sessionRight - sessionLeft;
     if (span < 10) continue;
     const profile = aggregateProfile(
       volumeSeries.bars,
@@ -444,14 +468,17 @@ function drawSessionProfiles(
     );
     if (!profile.rows.length || profile.maxVolume <= 0) continue;
     drawn += 1;
-    const colW = Math.max(12, Math.min(settings.profileWidth, span * 0.82));
-    const x0 = right - colW;
-    ctx.fillStyle = alpha(theme.bgSoft, 0.28);
+    const alignRight = (settings.profileAlign ?? "right") === "right";
+    const colW = Math.max(12, Math.min(settings.profileWidth, span - 2));
+    const x0 = alignRight ? sessionRight - colW : sessionLeft;
+    ctx.fillStyle = alpha(theme.bgSoft, 0.22);
     ctx.fillRect(x0, 0, colW, h);
-    ctx.strokeStyle = alpha(theme.line, 0.45);
+    ctx.strokeStyle = alpha(theme.line, 0.4);
     ctx.beginPath();
-    ctx.moveTo(Math.round(left) + 0.5, 0);
-    ctx.lineTo(Math.round(left) + 0.5, h);
+    ctx.moveTo(Math.round(sessionLeft) + 0.5, 0);
+    ctx.lineTo(Math.round(sessionLeft) + 0.5, h);
+    ctx.moveTo(Math.round(sessionRight) + 0.5, 0);
+    ctx.lineTo(Math.round(sessionRight) + 0.5, h);
     ctx.stroke();
 
     if (settings.showValueArea && profile.vah != null && profile.val != null) {
@@ -469,10 +496,11 @@ function drawSessionProfiles(
       if (y == null || y < -12 || y > h + 12) continue;
       const total = (row.volume / profile.maxVolume) * maxW;
       const sellW = row.volume > 0 ? (row.sell / row.volume) * total : 0;
+      const origin = alignRight ? x0 + colW - 3 - total : x0 + 3;
       ctx.fillStyle = alpha(paint.down, 0.42);
-      ctx.fillRect(x0 + 3, y - bandH / 2, sellW, bandH);
+      ctx.fillRect(origin, y - bandH / 2, sellW, bandH);
       ctx.fillStyle = alpha(paint.up, 0.5);
-      ctx.fillRect(x0 + 3 + sellW, y - bandH / 2, Math.max(0, total - sellW), bandH);
+      ctx.fillRect(origin + sellW, y - bandH / 2, Math.max(0, total - sellW), bandH);
     }
 
     if (settings.showPoc && profile.poc != null) {
@@ -486,9 +514,13 @@ function drawSessionProfiles(
         if (colW >= 40) {
           ctx.fillStyle = alpha(theme.text, 0.75);
           ctx.font = `10px ${theme.font}`;
-          ctx.textAlign = "left";
+          ctx.textAlign = alignRight ? "right" : "left";
           ctx.textBaseline = "bottom";
-          ctx.fillText(profile.poc.toFixed(priceDigits), x0 + 4, y - 2);
+          ctx.fillText(
+            profile.poc.toFixed(priceDigits),
+            alignRight ? x0 + colW - 4 : x0 + 4,
+            y - 2
+          );
         }
       }
     }

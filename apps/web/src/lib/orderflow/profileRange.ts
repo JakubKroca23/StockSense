@@ -11,7 +11,9 @@ export const PROFILE_RANGES: { id: ProfileRange; label: string }[] = [
 export const PROFILE_SESSION_MINUTES = [5, 15, 30, 60, 120, 240, 480, 720, 1440] as const;
 
 export type ProfileSessionSlice = {
+  /** Calendar/bucket start (UTC midnight for a day profile). */
   startMs: number;
+  /** Exclusive calendar/bucket end — not the last bar. */
   endMs: number;
   from: number;
   to: number;
@@ -44,6 +46,51 @@ export function sessionStartMs(ms: number, range: ProfileRange, customMinutes: n
   return Math.floor(t / bucket) * bucket;
 }
 
+export function sessionEndMs(startMs: number, range: ProfileRange, customMinutes: number): number {
+  if (range === "day") return startMs + 86_400_000;
+  if (range === "hour") return startMs + 3_600_000;
+  return startMs + clampProfileSessionMinutes(customMinutes) * 60_000;
+}
+
+/** UTC midnight of the current calendar day — the DOM session window. */
+export function currentSessionStartMs(now = Date.now()): number {
+  return sessionStartMs(now, "day", 1440);
+}
+
+function barTimeMs(ts: string): number {
+  const s = ts.trim();
+  const hasTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(s);
+  const t = new Date(hasTz ? s : `${s}Z`).getTime();
+  return Number.isFinite(t) ? t : NaN;
+}
+
+/** Buy/sell volume at price for the current UTC day, from footprint bars. */
+export function sessionVolumeAtPrice(
+  bars: { ts: string; levels: { price: number; buy: number; sell: number }[] }[] | undefined,
+  step: number,
+  now = Date.now()
+): Map<number, { buy: number; sell: number }> {
+  const cutoff = currentSessionStartMs(now);
+  const map = new Map<number, { buy: number; sell: number }>();
+  const bucket = Math.max(1e-9, step);
+  for (const bar of bars ?? []) {
+    const t = barTimeMs(bar.ts);
+    if (!Number.isFinite(t) || t < cutoff) continue;
+    for (const level of bar.levels) {
+      if (!Number.isFinite(level.price)) continue;
+      const key = Math.round(level.price / bucket);
+      const cur = map.get(key);
+      if (cur) {
+        cur.buy += level.buy;
+        cur.sell += level.sell;
+      } else {
+        map.set(key, { buy: level.buy, sell: level.sell });
+      }
+    }
+  }
+  return map;
+}
+
 export function splitProfileSessions(
   bars: { timeMs: number }[],
   range: ProfileRange,
@@ -57,10 +104,9 @@ export function splitProfileSessions(
     const t = i < bars.length ? bars[i].timeMs : null;
     const nextStart = t != null ? sessionStartMs(t, range, customMinutes) : null;
     if (nextStart === start) continue;
-    const last = bars[i - 1];
     out.push({
       startMs: start,
-      endMs: last.timeMs,
+      endMs: sessionEndMs(start, range, customMinutes),
       from,
       to: i - 1,
     });

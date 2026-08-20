@@ -120,6 +120,7 @@ export function DomSettingsPanel({
               />
               <span>
                 <span className="fp-drawer__toggle-lab">Zobchodovaný objem</span>
+                <span className="fp-drawer__hint">Nákupy a prodeje za aktuální den (UTC session).</span>
               </span>
             </label>
           </section>
@@ -232,7 +233,9 @@ export function DomSettingsPanel({
             />
             <span>
               <span className="fp-drawer__toggle-lab">Zobchodovaný objem</span>
-              <span className="fp-drawer__hint">Buy / sell volume at price z footprint dat.</span>
+              <span className="fp-drawer__hint">
+                Buy / sell volume at price za aktuální den (UTC session).
+              </span>
             </span>
           </label>
           <label className="fp-drawer__toggle">
@@ -243,6 +246,7 @@ export function DomSettingsPanel({
             />
             <span>
               <span className="fp-drawer__toggle-lab">Session profil</span>
+              <span className="fp-drawer__hint">Histogram zobchodovaného objemu za aktuální den.</span>
             </span>
           </label>
           <label className="fp-drawer__toggle">
@@ -266,20 +270,6 @@ export function DomSettingsPanel({
               <span className="fp-drawer__hint">Místo velikosti hladiny součet od mid.</span>
             </span>
           </label>
-          <div className="fp-drawer__item">
-            <div className="fp-drawer__item-top">
-              <span>Okno objemů</span>
-              <span className="fp-drawer__item-val">{settings.sessionMinutes} min</span>
-            </div>
-            <input
-              type="range"
-              min={5}
-              max={480}
-              step={5}
-              value={settings.sessionMinutes}
-              onChange={(e) => onChange({ sessionMinutes: Number(e.target.value) })}
-            />
-          </div>
         </section>
 
         <section className="fp-drawer__sec">
