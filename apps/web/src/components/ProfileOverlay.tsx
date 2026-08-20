@@ -201,6 +201,8 @@ function timeMsToX(
   if (!(dt > 0)) return x0;
   return x0 + ((x1 - x0) / dt) * (timeMs - bars[lo].timeMs);
 }
+
+function pickColor(custom: string | undefined, fallback: string) {
   const v = custom?.trim();
   return v ? v : fallback;
 }
